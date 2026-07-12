@@ -6,7 +6,7 @@ __pycache__/
 data/*.csv
 
 # Results
-results/
+results/*
 
 # VS Code
 .vscode/
