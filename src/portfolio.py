@@ -25,13 +25,9 @@ class Portfolio:
 
     initial_cash: float
     tickers: List[str]
-
     cash: float = field(init=False)
-
     holdings: Dict[str, float] = field(init=False)
-
     history: list = field(default_factory=list)
-
     trades: list = field(default_factory=list)
 
 
@@ -41,10 +37,7 @@ class Portfolio:
         self.cash = self.initial_cash
 
         # ETF 보유 수량
-        self.holdings = {
-            ticker: 0.0
-            for ticker in self.tickers
-        }
+        self.holdings = { ticker: 0.0 for ticker in self.tickers }
 
 
     # ==================================================
@@ -62,15 +55,9 @@ class Portfolio:
         value = self.cash
 
         for ticker, shares in self.holdings.items():
-
-            value += (
-                shares
-                *
-                prices[ticker]
-            )
+            value += shares * prices[ticker]
 
         return value
-
 
 
     # ==================================================
@@ -88,28 +75,15 @@ class Portfolio:
         total = self.total_value(prices)
 
         if total == 0:
-
-            return {
-                ticker: 0
-                for ticker in self.tickers
-            }
-
+            return { ticker: 0 for ticker in self.tickers }
 
         weights = {}
 
         for ticker in self.tickers:
-
-            value = (
-                self.holdings[ticker]
-                *
-                prices[ticker]
-            )
-
+            value = self.holdings[ticker] * prices[ticker]
             weights[ticker] = value / total
 
-
         return weights
-
 
 
     # ==================================================
@@ -124,75 +98,30 @@ class Portfolio:
     ):
         """
         목표 비중으로 리밸런싱
-
         현재 버전은 소수점 ETF 매매 허용
         """
 
         total_before = self.total_value(prices)
 
-
         new_holdings = {}
 
         total_invested = 0
 
-
         for ticker in self.tickers:
-
-            target_weight = (
-                target_weights.get(
-                    ticker,
-                    0
-                )
-            )
-
-
-            target_amount = (
-                total_before
-                *
-                target_weight
-            )
-
+            target_weight = target_weights.get(ticker, 0)
+            target_amount = total_before * target_weight
 
             price = prices[ticker]
-
-
-            shares = (
-                target_amount
-                /
-                price
-            )
-
-
+            shares = target_amount / price
             new_holdings[ticker] = shares
-
-
-            total_invested += (
-                shares
-                *
-                price
-            )
+            total_invested += shares * price
 
 
         # 거래비용 반영
 
-        trading_cost = (
-            total_before
-            *
-            (COMMISSION + SLIPPAGE)
-        )
-
-
+        trading_cost = total_before * (COMMISSION + SLIPPAGE)
         self.holdings = new_holdings
-
-
-        self.cash = (
-            total_before
-            -
-            total_invested
-            -
-            trading_cost
-        )
-
+        self.cash = total_before - total_invested - trading_cost
 
         self.trades.append(
             {
@@ -202,7 +131,6 @@ class Portfolio:
                 "Value": total_before,
             }
         )
-
 
 
     # ==================================================
@@ -219,29 +147,16 @@ class Portfolio:
         """
 
         row = {
-
             "Date": date,
-
-            "Portfolio":
-                self.total_value(prices),
-
-            "Cash":
-                self.cash,
-
+            "Portfolio": self.total_value(prices),
+            "Cash": self.cash,
         }
 
-
         for ticker in self.tickers:
-
-            row[ticker] = (
-                self.holdings[ticker]
-                *
-                prices[ticker]
-            )
-
+            row[ticker] = self.holdings[ticker] * prices[ticker]
+            row[f"{ticker}_holdings"] = self.holdings[ticker]
 
         self.history.append(row)
-
 
 
     # ==================================================
@@ -249,11 +164,8 @@ class Portfolio:
     # ==================================================
 
     def get_history(self):
-
         return self.history
 
 
-
     def get_trades(self):
-
         return self.trades

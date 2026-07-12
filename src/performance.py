@@ -19,32 +19,19 @@ from config import (
 )
 
 
-
 class Performance:
 
-
-    def __init__(
+    def __init__( 
         self,
         history: pd.DataFrame
     ):
-
         self.history = history.copy()
 
-
         if "Portfolio" not in self.history.columns:
+            raise ValueError("Portfolio column이 없습니다.")
 
-            raise ValueError(
-                "Portfolio column이 없습니다."
-            )
-
-
-        self.returns = (
-            self.history["Portfolio"]
-            .pct_change()
-            .dropna()
-        )
-
-
+        self.returns = self.history["Portfolio"].pct_change().dropna()
+        
 
     # ==================================================
     # CAGR
@@ -56,38 +43,15 @@ class Performance:
         연평균 성장률
         """
 
-        start_value = (
-            self.history["Portfolio"]
-            .iloc[0]
-        )
+        start_value = self.history["Portfolio"].iloc[0]
+        end_value = self.history["Portfolio"].iloc[-1]
 
-
-        end_value = (
-            self.history["Portfolio"]
-            .iloc[-1]
-        )
-
-
-        years = (
-            self.history.index[-1]
-            -
-            self.history.index[0]
-        ).days / 365.25
-
+        years = (self.history.index[-1] - self.history.index[0]).days / 365.25
 
         if years == 0:
-
             return 0
 
-
-        return (
-            (end_value / start_value)
-            **
-            (1 / years)
-            -
-            1
-        )
-
+        return ((end_value / start_value) ** (1 / years) - 1)
 
 
     # ==================================================
@@ -100,21 +64,10 @@ class Performance:
         최대 낙폭
         """
 
-        portfolio = (
-            self.history["Portfolio"]
-        )
+        portfolio = self.history["Portfolio"]
 
-
-        peak = (
-            portfolio
-            .cummax()
-        )
-
-
-        drawdown = (
-            portfolio - peak
-        ) / peak
-
+        peak = portfolio.cummax()
+        drawdown = (portfolio - peak) / peak
 
         return drawdown.min()
 
@@ -129,13 +82,7 @@ class Performance:
         """
         연환산 변동성
         """
-
-        return (
-            self.returns.std()
-            *
-            np.sqrt(TRADING_DAYS)
-        )
-
+        return self.returns.std() * np.sqrt(TRADING_DAYS)
 
 
     # ==================================================
@@ -148,31 +95,13 @@ class Performance:
         연환산 샤프지수
         """
 
-        excess_return = (
-            self.returns.mean()
-            *
-            TRADING_DAYS
-            -
-            RISK_FREE_RATE
-        )
-
-
-        annual_volatility = (
-            self.volatility()
-        )
-
+        excess_return = self.returns.mean() * TRADING_DAYS - RISK_FREE_RATE
+        annual_volatility = self.volatility()
 
         if annual_volatility == 0:
-
             return 0
-
-
-        return (
-            excess_return
-            /
-            annual_volatility
-        )
-
+    
+        return excess_return / annual_volatility
 
 
     # ==================================================
@@ -184,25 +113,11 @@ class Performance:
         """
         성과 요약
         """
-
         return {
-
-            "CAGR":
-                self.cagr(),
-
-            "MDD":
-                self.mdd(),
-
-            "Volatility":
-                self.volatility(),
-
-            "Sharpe":
-                self.sharpe_ratio(),
-
-            "Start":
-                self.history["Portfolio"].iloc[0],
-
-            "End":
-                self.history["Portfolio"].iloc[-1],
-
+            "CAGR": self.cagr(),
+            "MDD": self.mdd(),
+            "Volatility": self.volatility(),
+            "Sharpe": self.sharpe_ratio(),
+            "Start": self.history["Portfolio"].iloc[0],
+            "End": self.history["Portfolio"].iloc[-1],
         }

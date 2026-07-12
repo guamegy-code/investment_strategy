@@ -10,113 +10,115 @@ strategy.py
 """
 
 
-from config import (
-    NASDAQ_WEIGHT,
-    BOND_WEIGHT,
-    GOLD_WEIGHT,
-)
-
-
-
 class Strategy:
-
 
     def __init__(self):
         pass
 
 
+    def target_allocation(self, signal):
 
-    def target_allocation(
-        self,
-        signal
-    ):
         """
         QQQ 상태를 판단하여
         목표 비중 반환
         """
-
         rsi = signal["RSI14"]
-
         close = signal["Close"]
-
         ma200 = signal["MA200"]
-
 
         # -----------------------------
         # 상승 추세
         # -----------------------------
-
-        if (
-            close > ma200
-            and rsi < 75
-        ):
-
+        if (close > ma200 and rsi < 75):
             return {
-
-                "QQQ":
-                    NASDAQ_WEIGHT,
-
-                "BND":
-                    BOND_WEIGHT,
-
-                "GLD":
-                    GOLD_WEIGHT,
-
+                "QQQ": 0.6,
+                "BND": 0.3,
+                "GLD": 0.1,
             }
-
 
         # -----------------------------
         # 과열 구간
         # -----------------------------
-
         elif rsi >= 75:
-
             return {
-
                 "QQQ": 0.3,
-
                 "BND": 0.5,
-
                 "GLD": 0.2,
-
             }
-
 
         # -----------------------------
         # 하락 방어
         # -----------------------------
-
-        elif (
-            close < ma200
-            or rsi <= 20
-        ):
-
+        elif (close < ma200 or rsi <= 20):
             return {
-
                 "QQQ": 0.2,
-
                 "BND": 0.6,
-
                 "GLD": 0.2,
-
             }
-
 
         # -----------------------------
         # 기본
         # -----------------------------
-
         else:
-
             return {
+                "QQQ": 0.6,
+                "BND": 0.3,
+                "GLD": 0.1,
+            }
+        
 
-                "QQQ":
-                    NASDAQ_WEIGHT,
+class Strategy2:
 
-                "BND":
-                    BOND_WEIGHT,
+    def __init__(self):
+        pass
 
-                "GLD":
-                    GOLD_WEIGHT,
 
+    def target_allocation(self, signal):
+
+        """
+        QQQ 상태를 판단하여
+        목표 비중 반환
+        """
+        rsi = signal["RSI14"]
+        close = signal["Close"]
+        ma55 = signal["MA55"]
+
+        # -----------------------------
+        # 상승 추세
+        # -----------------------------
+        if (close > ma55 and rsi < 75):
+            return {
+                "QQQ": 0.6,
+                "BND": 0.3,
+                "GLD": 0.1,
+            }
+
+        # -----------------------------
+        # 과열 구간
+        # -----------------------------
+        elif rsi >= 75:
+            return {
+                "QQQ": 0.6,
+                "BND": 0.3,
+                "GLD": 0.1,
+            }
+
+        # -----------------------------
+        # 하락 방어
+        # -----------------------------
+        elif (close < ma55 or rsi <= 20):
+            return {
+                "QQQ": 0.6,
+                "BND": 0.3,
+                "GLD": 0.1,
+            }
+
+        # -----------------------------
+        # 기본
+        # -----------------------------
+        else:
+            return {
+                "QQQ": 0.6,
+                "BND": 0.3,
+                "GLD": 0.1,
             }

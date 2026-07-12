@@ -37,7 +37,6 @@ def calculate_rsi(close: pd.Series, period: int = RSI_PERIOD) -> pd.Series:
     avg_loss = loss.ewm(alpha=1 / period, adjust=False).mean()
 
     rs = avg_gain / avg_loss
-
     rsi = 100 - (100 / (1 + rs))
 
     return rsi
@@ -78,7 +77,6 @@ def calculate_volatility(
     """
 
     returns = close.pct_change()
-
     volatility = returns.rolling(period).std()
 
     return volatility
@@ -96,11 +94,8 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     # -------------------------
 
     df["MA20"] = calculate_sma(df["Close"], MA_SHORT)
-
     df["MA55"] = calculate_sma(df["Close"], MA_MID)
-
     df["MA120"] = calculate_sma(df["Close"], MA_LONG)
-
     df["MA200"] = calculate_sma(df["Close"], MA_VERY_LONG)
 
     # -------------------------
@@ -113,11 +108,7 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     # ATR
     # -------------------------
 
-    df["ATR14"] = calculate_atr(
-        df["High"],
-        df["Low"],
-        df["Close"],
-    )
+    df["ATR14"] = calculate_atr(df["High"], df["Low"], df["Close"],)
 
     # -------------------------
     # 변동성

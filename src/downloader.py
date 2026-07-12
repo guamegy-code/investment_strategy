@@ -70,13 +70,11 @@ def main():
         try:
 
             df = download_one(ticker)
-
             save_csv(df, ticker)
 
         except Exception as e:
 
             print(f"{ticker} 실패")
-
             print(e)
 
     print("=" * 60)
