@@ -1,13 +1,7 @@
 """
 performance.py
 
-백테스트 성과 분석 모듈 (v2.2)
-
-계산:
-- CAGR
-- MDD
-- Sharpe Ratio
-- Volatility
+백테스트 성과 분석
 """
 
 import numpy as np
@@ -21,22 +15,16 @@ from config import (
 
 class Performance:
 
-    def __init__( 
+    def __init__(
         self,
         history: pd.DataFrame
     ):
         self.history = history.copy()
-
-        if "Portfolio" not in self.history.columns:
-            raise ValueError("Portfolio column이 없습니다.")
-
         self.returns = self.history["Portfolio"].pct_change().dropna()
-        
-
+    
     # ==================================================
     # CAGR
     # ==================================================
-
     def cagr(self):
 
         """
@@ -52,7 +40,6 @@ class Performance:
             return 0
 
         return ((end_value / start_value) ** (1 / years) - 1)
-
 
     # ==================================================
     # MDD
@@ -71,30 +58,24 @@ class Performance:
 
         return drawdown.min()
 
-
-
     # ==================================================
     # 변동성
     # ==================================================
 
     def volatility(self):
-
         """
         연환산 변동성
         """
         return self.returns.std() * np.sqrt(TRADING_DAYS)
-
 
     # ==================================================
     # Sharpe Ratio
     # ==================================================
 
     def sharpe_ratio(self):
-
         """
         연환산 샤프지수
         """
-
         excess_return = self.returns.mean() * TRADING_DAYS - RISK_FREE_RATE
         annual_volatility = self.volatility()
 
@@ -103,16 +84,12 @@ class Performance:
     
         return excess_return / annual_volatility
 
-
     # ==================================================
-    # 전체 결과
+    # 결과 요약
     # ==================================================
 
     def summary(self):
 
-        """
-        성과 요약
-        """
         return {
             "CAGR": self.cagr(),
             "MDD": self.mdd(),

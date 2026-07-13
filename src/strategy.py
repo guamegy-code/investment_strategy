@@ -1,124 +1,186 @@
 """
 strategy.py
 
-투자 전략 모듈 (v2.2)
-
-전략:
-- QQQ RSI
-- 이동평균(MA)
-- 목표 비중 반환
+전략 기본 클래스
 """
 
+from abc import ABC, abstractmethod
 
-class Strategy:
 
-    def __init__(self):
+class BaseStrategy(ABC):
+
+    @abstractmethod
+    def evaluate(self, date, market, portfolio):
+        """
+        Returns
+        -------
+        {
+            "rebalance": bool,
+            "target": dict,
+            "reason": str | None
+        }
+        """
         pass
 
 
-    def target_allocation(self, signal):
+class Strategy1(BaseStrategy):
 
-        """
-        QQQ 상태를 판단하여
-        목표 비중 반환
-        """
-        rsi = signal["RSI14"]
-        close = signal["Close"]
-        ma200 = signal["MA200"]
+    def __init__(self):
+        self.current_target = {
+            "QQQ": 0.6,
+            "BND": 0.3,
+            "GLD": 0.1,
+        }
+        self.last_rebalance_month = None
+
+    def evaluate(self, date, market, portfolio):
+        qqq = market["QQQ"]
+
+        close = qqq["Close"]
+        ma200 = qqq["MA200"]
+        rsi = qqq["RSI14"]
+
+        target = {
+            "QQQ": 0.6,
+            "BND": 0.3,
+            "GLD": 0.1,
+        }
+
+        reason = None
 
         # -----------------------------
-        # 상승 추세
+        # 1. RSI 과열
         # -----------------------------
-        if (close > ma200 and rsi < 75):
-            return {
+        if rsi >= 75:
+            target = {
                 "QQQ": 0.6,
                 "BND": 0.3,
                 "GLD": 0.1,
             }
-
-        # -----------------------------
-        # 과열 구간
-        # -----------------------------
-        elif rsi >= 75:
-            return {
-                "QQQ": 0.3,
-                "BND": 0.5,
-                "GLD": 0.2,
-            }
-
-        # -----------------------------
-        # 하락 방어
-        # -----------------------------
-        elif (close < ma200 or rsi <= 20):
-            return {
-                "QQQ": 0.2,
-                "BND": 0.6,
-                "GLD": 0.2,
-            }
-
-        # -----------------------------
-        # 기본
-        # -----------------------------
-        else:
-            return {
-                "QQQ": 0.6,
-                "BND": 0.3,
-                "GLD": 0.1,
-            }
+            reason = "RSI_OVERBOUGHT"
         
+        # -----------------------------
+        # 2. MA200 하향 이탈
+        # -----------------------------
+        elif close < ma200:
+            target = {
+                "QQQ": 0.6,
+                "BND": 0.3,
+                "GLD": 0.1,
+            }
+            reason = "MA200_BREAKDOWN"
 
-class Strategy2:
+        # -----------------------------
+        # 목표 비중 변경 여부
+        # -----------------------------
+        if target != self.current_target:
+            self.current_target = target
+            self.last_rebalance_month = date.to_period("M")
+            return {
+                "rebalance": True,
+                "target": target,
+                "reason": reason,
+            }
+
+        # -----------------------------
+        # 월말 리밸런싱
+        # -----------------------------
+        current_month = date.to_period("M")
+        if current_month != self.last_rebalance_month:
+            self.last_rebalance_month = current_month
+            return {
+                "rebalance": True,
+                "target": self.current_target,
+                "reason": "MONTHLY",
+            }
+
+        # -----------------------------
+        # 아무것도 안 함
+        # -----------------------------
+        return {
+            "rebalance": False,
+            "target": self.current_target,
+            "reason": None,
+        }
+    
+
+
+class Strategy2(BaseStrategy):
 
     def __init__(self):
-        pass
+        self.current_target = {
+            "QQQ": 0.7,
+            "BND": 0.3,
+            "GLD": 0        
+        }
+        self.last_rebalance_month = None
 
+    def evaluate(self, date, market, portfolio):
+        qqq = market["QQQ"]
 
-    def target_allocation(self, signal):
+        close = qqq["Close"]
+        ma55 = qqq["MA55"]
+        rsi = qqq["RSI14"]
 
-        """
-        QQQ 상태를 판단하여
-        목표 비중 반환
-        """
-        rsi = signal["RSI14"]
-        close = signal["Close"]
-        ma55 = signal["MA55"]
+        target = {
+            "QQQ": 0.7,
+            "BND": 0.3,
+            "GLD": 0        
+        }
+
+        reason = None
 
         # -----------------------------
-        # 상승 추세
+        # 1. RSI 과열
         # -----------------------------
-        if (close > ma55 and rsi < 75):
-            return {
+        if rsi >= 75:
+            target = {
                 "QQQ": 0.6,
+                "BND": 0.4,
+                "GLD": 0        
+            }
+            reason = "RSI_OVERBOUGHT"
+        
+        # -----------------------------
+        # 2. MA55 하향 이탈
+        # -----------------------------
+        elif close < ma55:
+            target = {
+                "QQQ": 0.7,
                 "BND": 0.3,
-                "GLD": 0.1,
+                "GLD": 0
+            }
+            reason = "MA55_BREAKDOWN"
+
+        # -----------------------------
+        # 목표 비중 변경 여부
+        # -----------------------------
+        if target != self.current_target:
+            self.current_target = target
+            self.last_rebalance_month = date.to_period("M")
+            return {
+                "rebalance": True,
+                "target": target,
+                "reason": reason,
             }
 
         # -----------------------------
-        # 과열 구간
+        # 월말 리밸런싱
         # -----------------------------
-        elif rsi >= 75:
+        current_month = date.to_period("M")
+        if current_month != self.last_rebalance_month:
+            self.last_rebalance_month = current_month
             return {
-                "QQQ": 0.6,
-                "BND": 0.3,
-                "GLD": 0.1,
+                "rebalance": True,
+                "target": self.current_target,
+                "reason": "MONTHLY",
             }
 
         # -----------------------------
-        # 하락 방어
+        # 아무것도 안 함
         # -----------------------------
-        elif (close < ma55 or rsi <= 20):
-            return {
-                "QQQ": 0.6,
-                "BND": 0.3,
-                "GLD": 0.1,
-            }
-
-        # -----------------------------
-        # 기본
-        # -----------------------------
-        else:
-            return {
-                "QQQ": 0.6,
-                "BND": 0.3,
-                "GLD": 0.1,
-            }
+        return {
+            "rebalance": False,
+            "target": self.current_target,
+            "reason": None,
+        }
