@@ -5,7 +5,7 @@ name: Python application
 
 on:
   schedule:
-    - cron: "*/5 * * * *"
+    - cron: "0 * * * *"
 
 jobs:
   build:
@@ -13,4 +13,4 @@ jobs:
     steps:
     - name: Test with pytest
       run:
-        python notifier.py
+        python src/notifier.py
