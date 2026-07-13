@@ -13,4 +13,4 @@ jobs:
     steps:
     - name: Test with pytest
       run:
-        python src/notifier.py
+        python ../../src/notifier.py
