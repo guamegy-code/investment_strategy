@@ -13,4 +13,4 @@ jobs:
     steps:
     - name: Test with pytest
       run:
-        python ${{ github.workspace }}/src/notifier.py
+        python ${{ github.workspace }}/../src/notifier.py
