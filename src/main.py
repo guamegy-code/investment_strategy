@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 
 from config import RESULT_DIR
 from runner import Runner
-from strategy import Strategy1, Strategy2
+from strategy import Strategy1, Strategy2, TrendStrategy
 
 
 # ==================================================
@@ -55,6 +55,8 @@ def main():
     runner = Runner()
     runner.add_strategy(Strategy1())
     runner.add_strategy(Strategy2())
+    runner.add_strategy(TrendStrategy())
+
     results = runner.run()
 
     print()

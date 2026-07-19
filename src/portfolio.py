@@ -1,168 +1,148 @@
 """
 portfolio.py
-
-포트폴리오 관리 모듈 (v2.2)
-
-역할:
-- 보유 ETF 수량 관리
-- 현금 관리
-- 평가금액 계산
-- 목표 비중 리밸런싱
-- 백테스트 기록 저장
 """
 
-from dataclasses import dataclass, field
-from typing import Dict, List
-
-from config import (
-    COMMISSION,
-    SLIPPAGE,
-)
+from copy import deepcopy
 
 
-@dataclass
 class Portfolio:
 
-    initial_cash: float
-    tickers: List[str]
-    cash: float = field(init=False)
-    holdings: Dict[str, float] = field(init=False)
-    history: list = field(default_factory=list)
-    trades: list = field(default_factory=list)
+    def __init__(self, cash):
+        self.cash = cash
+        self.positions = {}
+        self.history = []
+        self.trades = []
 
-
-    def __post_init__(self):
-
-        # 초기 현금
-        self.cash = self.initial_cash
-
-        # ETF 보유 수량
-        self.holdings = { ticker: 0.0 for ticker in self.tickers }
-
+        # -----------------------------
+        # 분할 리밸런싱
+        # -----------------------------
+        self.pending_target = None
+        self.remaining_days = 0
+        self.total_days = 0
 
     # ==================================================
-    # 현재 총 자산
+    # 현재 평가금액
     # ==================================================
-
-    def total_value(
-        self,
-        prices: Dict[str, float]
-    ) -> float:
-        """
-        현재 포트폴리오 평가금액
-        """
-
+    def value(self, prices):
         value = self.cash
-
-        for ticker, shares in self.holdings.items():
+        for ticker, shares in self.positions.items():
             value += shares * prices[ticker]
-
         return value
-
 
     # ==================================================
     # 현재 비중
     # ==================================================
-
-    def current_weights(
-        self,
-        prices: Dict[str, float]
-    ) -> Dict[str, float]:
-        """
-        현재 ETF별 비중 계산
-        """
-
-        total = self.total_value(prices)
-
-        if total == 0:
-            return { ticker: 0 for ticker in self.tickers }
-
+    def weights(self, prices):
+        total = self.value(prices)
         weights = {}
-
-        for ticker in self.tickers:
-            value = self.holdings[ticker] * prices[ticker]
-            weights[ticker] = value / total
-
+        for ticker in prices:
+            amount = self.positions.get(ticker, 0) * prices[ticker]
+            weights[ticker] = amount / total
         return weights
+    
 
+    def is_same_target(self, target, tol=1e-6):
+        if self.pending_target is None:
+            return False
+        for ticker in target:
+            if abs(self.pending_target[ticker] - target[ticker]) > tol:
+                return False
+        return True
 
     # ==================================================
-    # 리밸런싱
+    # 분할 리밸런싱 시작
     # ==================================================
+    def start_rebalance(self, target, days=5):
+        self.pending_target = deepcopy(target)
+        self.remaining_days = days
+        self.total_days = days
 
-    def rebalance(
-        self,
-        prices: Dict[str, float],
-        target_weights: Dict[str, float],
-        date=None
-    ):
-        """
-        목표 비중으로 리밸런싱
-        현재 버전은 소수점 ETF 매매 허용
-        """
+    # ==================================================
+    # 분할 리밸런싱 실행
+    # ==================================================
+    def update(self, prices):
+        if self.pending_target is None:
+            return
+        current = self.weights(prices)
+        total = self.value(prices)
 
-        total_before = self.total_value(prices)
+        target = {}
+        for ticker in self.pending_target:
+            now = current.get(ticker, 0)
+            goal = self.pending_target[ticker]
+            diff = goal - now
+            target[ticker] = now + diff / self.remaining_days
 
-        new_holdings = {}
+        self.rebalance(prices,target)
+        self.remaining_days -= 1
+        if self.remaining_days == 0:
+            self.pending_target = None
+            self.total_days = 0
 
-        total_invested = 0
+    # ==================================================
+    # 목표 비중 리밸런싱
+    # ==================================================
+    def rebalance(self, prices, target):
+        total = self.value(prices)
 
-        for ticker in self.tickers:
-            target_weight = target_weights.get(ticker, 0)
-            target_amount = total_before * target_weight
-
+        # -----------------------------
+        # 매도 먼저
+        # -----------------------------
+        for ticker, weight in target.items():
             price = prices[ticker]
-            shares = target_amount / price
-            new_holdings[ticker] = shares
-            total_invested += shares * price
+            target_value = total * weight
+            current_value = self.positions.get(ticker, 0) * price
+            diff = target_value - current_value
 
+            if diff < 0:
+                shares = abs(diff) / price
+                self.trade(ticker, -shares, price)
 
-        # 거래비용 반영
+        # -----------------------------
+        # 매수
+        # -----------------------------
+        for ticker, weight in target.items():
+            price = prices[ticker]
+            target_value = total * weight
+            current_value = self.positions.get(ticker, 0) * price
+            diff = target_value - current_value
 
-        trading_cost = total_before * (COMMISSION + SLIPPAGE)
-        self.holdings = new_holdings
-        self.cash = total_before - total_invested - trading_cost
+            if diff > 0:
+                shares = diff / price
+                self.trade(ticker, shares, price)
 
-        self.trades.append(
-            {
-                "Date": date,
-                "Type": "Rebalance",
-                "Cost": trading_cost,
-                "Value": total_before,
-            }
-        )
+    # ==================================================
+    # 매매
+    # ==================================================
+    def trade(self, ticker, shares, price):
+        if abs(shares) < 1e-8:
+            return
+        cost = shares * price
+        self.cash -= cost
+        self.positions[ticker] = self.positions.get(ticker, 0) + shares
+        self.trades.append({
+            "Ticker": ticker,
+            "Shares": shares,
+            "Price": price,
+            "Cash": self.cash,
+        })
 
 
     # ==================================================
     # 일별 기록
     # ==================================================
-
-    def record(
-        self,
-        date,
-        prices: Dict[str, float]
-    ):
-        """
-        날짜별 포트폴리오 저장
-        """
-
-        row = {
+    def record(self, date, prices):
+        self.history.append({
             "Date": date,
-            "Portfolio": self.total_value(prices),
+            "Portfolio": self.value(prices),
             "Cash": self.cash,
-        }
-
-        for ticker in self.tickers:
-            row[ticker] = self.holdings[ticker] * prices[ticker]
-            row[f"{ticker}_holdings"] = self.holdings[ticker]
-
-        self.history.append(row)
-
+            "Weights": self.weights(prices).copy(),
+            "Positions": self.positions.copy(),
+        })
 
     # ==================================================
     # 결과 반환
     # ==================================================
-
     def get_history(self):
         return self.history
 

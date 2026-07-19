@@ -1,119 +1,138 @@
 """
-indicators.py
+indicator.py
 
 기술적 지표 계산
 """
 
-import pandas as pd
 import numpy as np
-
-from config import (
-    MA_SHORT,
-    MA_MID,
-    MA_LONG,
-    MA_VERY_LONG,
-    RSI_PERIOD,
-)
+import pandas as pd
 
 
-def calculate_sma(series: pd.Series, period: int) -> pd.Series:
-    """
-    단순이동평균(SMA)
-    """
-    return series.rolling(window=period).mean()
+class Indicator:
 
+    # ==================================================
+    # Moving Average
+    # ==================================================
+    @staticmethod
+    def add_ma(df):
+        for period in [20, 55, 120, 200]:
+            df[f"MA{period}"] = df["Close"].rolling(period).mean()
+        return df
 
-def calculate_rsi(close: pd.Series, period: int = RSI_PERIOD) -> pd.Series:
-    """
-    RSI(Wilder 방식)
-    """
+    # ==================================================
+    # EMA
+    # ==================================================
+    @staticmethod
+    def add_ema(df):
+        for period in [20, 55, 120, 200]:
+            df[f"EMA{period}"] = df["Close"].ewm(span=period, adjust=False).mean()
+        return df
 
-    delta = close.diff()
-
-    gain = delta.clip(lower=0)
-    loss = -delta.clip(upper=0)
-
-    avg_gain = gain.ewm(alpha=1 / period, adjust=False).mean()
-    avg_loss = loss.ewm(alpha=1 / period, adjust=False).mean()
-
-    rs = avg_gain / avg_loss
-    rsi = 100 - (100 / (1 + rs))
-
-    return rsi
-
-
-def calculate_atr(
-    high: pd.Series,
-    low: pd.Series,
-    close: pd.Series,
-    period: int = 14,
-) -> pd.Series:
-    """
-    ATR(Average True Range)
-    """
-
-    prev_close = close.shift(1)
-
-    tr = pd.concat(
-        [
-            high - low,
-            (high - prev_close).abs(),
-            (low - prev_close).abs(),
-        ],
-        axis=1,
-    ).max(axis=1)
-
-    atr = tr.rolling(period).mean()
-
-    return atr
-
-
-def calculate_volatility(
-    close: pd.Series,
-    period: int = 20,
-) -> pd.Series:
-    """
-    일간 변동성
-    """
-
-    returns = close.pct_change()
-    volatility = returns.rolling(period).std()
-
-    return volatility
-
-
-def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    모든 보조지표 계산
-    """
-
-    df = df.copy()
-
-    # -------------------------
-    # 이동평균
-    # -------------------------
-
-    df["MA20"] = calculate_sma(df["Close"], MA_SHORT)
-    df["MA55"] = calculate_sma(df["Close"], MA_MID)
-    df["MA120"] = calculate_sma(df["Close"], MA_LONG)
-    df["MA200"] = calculate_sma(df["Close"], MA_VERY_LONG)
-
-    # -------------------------
+    # ==================================================
     # RSI
-    # -------------------------
+    # ==================================================
+    @staticmethod
+    def add_rsi(df, period=14):
+        delta = df["Close"].diff()
+        gain = delta.clip(lower=0)
+        loss = -delta.clip(upper=0)
+        avg_gain = gain.rolling(period).mean()
+        avg_loss = loss.rolling(period).mean()
 
-    df["RSI14"] = calculate_rsi(df["Close"])
+        rs = avg_gain / avg_loss
+        df["RSI14"] = 100 - (100 / (1 + rs))
+        return df
 
-    # -------------------------
+    # ==================================================
+    # MACD
+    # ==================================================
+    @staticmethod
+    def add_macd(df):
+        ema12 = df["Close"].ewm(span=12, adjust=False).mean()
+        ema26 = df["Close"].ewm(span=26, adjust=False).mean()
+        df["MACD"] = ema12 - ema26
+        df["MACD_SIGNAL"] = df["MACD"].ewm(span=9, adjust=False).mean()
+        df["MACD_HIST"] = df["MACD"] - df["MACD_SIGNAL"]
+        return df
+    
+    # ==================================================
+    # Stochastic Oscillator
+    # ==================================================
+
+    @staticmethod
+    def add_stochastic(df, period=14, smooth=3):
+        lowest_low = df["Low"].rolling(period).min()
+        highest_high = df["High"].rolling(period).max()
+        df["STOCH_K"] = (df["Close"] - lowest_low) / (highest_high - lowest_low) * 100
+        df["STOCH_D"] = df["STOCH_K"].rolling(smooth).mean()
+        return df
+
+    # ==================================================
+    # Rate of Change (ROC)
+    # ==================================================
+    @staticmethod
+    def add_roc(df, period=252):
+        df[f"ROC{period}"] = df["Close"].pct_change(period) * 100
+        return df
+
+    # ==================================================
     # ATR
-    # -------------------------
+    # ==================================================
+    @staticmethod
+    def add_atr(df, period=14):
+        high_low = df["High"] - df["Low"]
+        high_close = (df["High"] - df["Close"].shift()).abs()
+        low_close = (df["Low"] - df["Close"].shift()).abs()
+        tr = pd.concat([ high_low, high_close, low_close ], axis=1).max(axis=1)
+        df["TR"] = tr
+        df["ATR"] = tr.rolling(period).mean()
+        df["ATR60"] = df["ATR"].rolling(60).mean()
+        return df
 
-    df["ATR14"] = calculate_atr(df["High"], df["Low"], df["Close"],)
+    # ==================================================
+    # Bollinger Band
+    # ==================================================
+    @staticmethod
+    def add_bollinger(df, period=20, std=2):
+        ma = df["Close"].rolling(period).mean()
+        sigma = df["Close"].rolling(period).std()
+        df["BB_MIDDLE"] = ma
+        df["BB_UPPER"] = ma + sigma * std
+        df["BB_LOWER"] = ma - sigma * std
+        return df
+    
+    # ==================================================
+    # Rolling Volatility
+    # ==================================================
+    @staticmethod
+    def add_volatility(df, period=60):
+        returns = df["Close"].pct_change()
+        df[f"VOL{period}"] = returns.rolling(period).std() * np.sqrt(252)
+        return df
 
-    # -------------------------
-    # 변동성
-    # -------------------------
+    # ==================================================
+    # Rolling Maximum Drawdown
+    # ==================================================
+    @staticmethod
+    def add_mdd(df, period=252):
+        rolling_max = df["Close"].rolling(period).max()
+        drawdown = (df["Close"] - rolling_max) / rolling_max
+        df[f"MDD{period}"] = drawdown.rolling(period).min()
+        return df
 
-    df["Volatility20"] = calculate_volatility(df["Close"])
-
-    return df
+    # ==================================================
+    # Add All Indicators
+    # ==================================================
+    @classmethod
+    def add_indicators(cls, df):
+        df = cls.add_ma(df)
+        df = cls.add_ema(df)
+        df = cls.add_rsi(df)
+        df = cls.add_macd(df)
+        df = cls.add_stochastic(df)
+        df = cls.add_roc(df)
+        df = cls.add_atr(df)
+        df = cls.add_bollinger(df)
+        df = cls.add_volatility(df)
+        df = cls.add_mdd(df)
+        return df    

@@ -15,7 +15,7 @@ from config import (
     END_DATE,
 )
 
-from indicators import add_indicators
+from indicators import Indicator
 
 
 def download_one(ticker: str) -> pd.DataFrame:
@@ -45,18 +45,11 @@ def download_one(ticker: str) -> pd.DataFrame:
     df.index.name = "Date"
 
     # 보조지표 추가
-    df = add_indicators(df)
-
-    return df
-
-
-def save_csv(df: pd.DataFrame, ticker: str):
-
+    df = Indicator.add_indicators(df)    
     filename = DATA_DIR / f"{ticker}.csv"
-
     df.to_csv(filename)
-
     print(f"저장 완료 : {filename}")
+    return df
 
 
 def main():
@@ -66,14 +59,10 @@ def main():
     print("=" * 60)
 
     for ticker in TICKERS:
-
         try:
-
             df = download_one(ticker)
-            save_csv(df, ticker)
 
         except Exception as e:
-
             print(f"{ticker} 실패")
             print(e)
 
@@ -84,3 +73,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
