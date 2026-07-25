@@ -261,9 +261,14 @@ def index_to_start(series):
     return series if valid.empty else series / valid.iloc[0]
 
 
-def series_from_start(series, start_date, normalize=False):
+def series_from_start(series, start_date, normalize=False, base_series=None):
     if start_date is not None:
         series = series.loc[series.index >= start_date]
+        if base_series is not None:
+            base_series = base_series.loc[base_series.index >= start_date]
+    if base_series is not None:
+        valid_base = base_series.dropna()
+        return series if valid_base.empty else series / valid_base.iloc[0]
     return index_to_start(series) if normalize else series
 
 
@@ -352,7 +357,8 @@ def draw_indicator_lines(panel_axes, market_data, chart_start, strategy_count, s
             for column in columns:
                 if column not in data or data[column].dropna().empty:
                     continue
-                values = series_from_start(data[column], chart_start, indicator in INDEXED_INDICATORS)
+                base_series = data["Close"] if indicator in INDEXED_INDICATORS else None
+                values = series_from_start(data[column], chart_start, base_series=base_series)
                 row = ROW_FOR_COLUMN[(indicator, column)]
                 (line,) = axis.plot(
                     values.index, values, color=color,
@@ -361,7 +367,7 @@ def draw_indicator_lines(panel_axes, market_data, chart_start, strategy_count, s
                     visible=selection.matrix[row][ticker],
                 )
                 indicator_lines[(row, ticker, column)] = line
-                indicator_series[(row, ticker, column)] = (data[column], indicator in INDEXED_INDICATORS)
+                indicator_series[(row, ticker, column)] = (data[column], base_series)
                 panel_lines[PANEL_BY_INDICATOR[indicator]].append(line)
     return panel_lines, indicator_lines, indicator_series
 
@@ -439,8 +445,8 @@ def draw_chart(results, price_data=None, show_chart=SHOW_CHART):
                 points = values.reindex(dates).dropna()
                 marker.set_offsets(np.column_stack((marker.axes.convert_xunits(points.index), points.values)))
         for (row, ticker, _), line in indicator_lines.items():
-            series, normalize = indicator_series[(row, ticker, _)]
-            values = series_from_start(series, active_start_date, normalize)
+            series, base_series = indicator_series[(row, ticker, _)]
+            values = series_from_start(series, active_start_date, base_series=base_series)
             line.set_data(values.index, values)
             line.set_visible(
                 row in selection.visible_rows
