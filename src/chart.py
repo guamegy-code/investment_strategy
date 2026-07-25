@@ -1,16 +1,18 @@
 """Interactive investment-strategy chart and controls."""
 
-from __future__ import annotations
-
 import json
+from dataclasses import dataclass
 
 import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
 from matplotlib.patches import Rectangle
-from matplotlib.widgets import CheckButtons
+from matplotlib.widgets import CheckButtons, TextBox
+import numpy as np
 import pandas as pd
 
 from config import DATA_DIR, FIGURE_SIZE, RESULT_DIR, SAVE_FIGURE, SHOW_CHART, TICKERS
 APPLE_COLORS = ["#007AFF", "#FF9500", "#34C759", "#AF52DE", "#FF2D55", "#5AC8FA"]
+LINE_STYLES = ["-", "--", ":", "-."]
 SELECTION_FILE = RESULT_DIR / "chart_selection.json"
 CONTROL_FONT_SIZE = 11
 CONTROL_TITLE_X = 0.0
@@ -26,9 +28,22 @@ CONTROL_ROW_SPACING_INCHES = 0.3
 CONTROL_BOX_PADDING_INCHES = 0.33
 MATRIX_TICKER_HEADER_HEIGHT_INCHES = 0.3
 BUTTON_GAP_INCHES = 0.2
+DATE_INPUT_BOTTOM_INCHES = 0.2
+DATE_INPUT_HEIGHT_INCHES = 0.32
+DATE_INPUT_WIDTH_INCHES = CONTROL_WIDTH_INCHES / 3
+DATE_INPUT_LABEL_PAD = 0.08
 SELECTOR_GROUP_GAP_INCHES = MATRIX_SECTION_GAP_INCHES
 MATRIX_LINE_SAMPLE_WIDTH_INCHES = 0.42
 MATRIX_LINE_TO_CHECKBOX_GAP_INCHES = 0.3
+MATRIX_LABEL_X = 0.03
+MATRIX_FIRST_COLUMN_X = 0.37
+MATRIX_COLUMNS_WIDTH = 0.58
+CHART_LEFT = 0.05
+CHART_BOTTOM = 0.07
+CHART_TOP = 0.93
+CHART_TO_CONTROL_GAP = 0.04
+PANEL_GAP = 0.025
+PANEL_HEIGHT_WEIGHTS = {"price": 2.2, "oscillator": 1.4, "risk": 1.4}
 
 INDICATORS = {
     "Price": ["Close"],
@@ -51,6 +66,14 @@ PANEL_BY_INDICATOR = {
     **{name: "risk" for name in ("ROC", "TR", "ATR", "Volatility", "MDD")},
 }
 DETAIL_ROWS = {"MA", "EMA", "Bollinger", "MACD", "Stochastic", "ATR"}
+
+
+@dataclass
+class ChartSelection:
+    strategies: dict
+    matrix: dict
+    visible_rows: list
+    visible_tickers: list
 
 
 def configure_fonts():
@@ -79,6 +102,7 @@ def build_matrix_rows():
 
 
 MATRIX_ROWS, ROW_FOR_COLUMN = build_matrix_rows()
+INDICATOR_STYLE_INDEX = {indicator: index for index, indicator in enumerate(INDICATORS)}
 PANEL_ORDER = ("price", "oscillator", "risk")
 PANEL_TITLES = {"tickers": "종목", "price": "가격", "oscillator": "오실레이터", "risk": "리스크"}
 SELECTOR_COLUMNS = 4
@@ -103,19 +127,87 @@ def load_selection():
     return data if isinstance(data, dict) else {}
 
 
-def save_selection(strategies, matrix, visible_rows, visible_tickers):
+def save_selection(selection):
     with SELECTION_FILE.open("w", encoding="utf-8") as file:
         json.dump(
             {
-                "strategies": strategies,
-                "matrix": matrix,
-                "visible_rows": visible_rows,
-                "visible_tickers": visible_tickers,
+                "strategies": selection.strategies,
+                "matrix": selection.matrix,
+                "visible_rows": selection.visible_rows,
+                "visible_tickers": selection.visible_tickers,
             },
             file,
             ensure_ascii=False,
             indent=2,
         )
+
+
+def strategy_color(index):
+    return APPLE_COLORS[index % len(APPLE_COLORS)]
+
+
+def ticker_color(index, strategy_count):
+    return APPLE_COLORS[(index + strategy_count) % len(APPLE_COLORS)]
+
+
+def indicator_line_style(row):
+    indicator, _ = MATRIX_ROWS[row]
+    return LINE_STYLES[INDICATOR_STYLE_INDEX[indicator] % len(LINE_STYLES)]
+
+
+def selected_indicators_for_panel(panel, selection):
+    return {
+        MATRIX_ROWS[row][0]
+        for row in selection.visible_rows
+        if PANEL_BY_INDICATOR[MATRIX_ROWS[row][0]] == panel
+        and any(selection.matrix[row].get(ticker, False) for ticker in selection.visible_tickers)
+    }
+
+
+def displayed_indicator_line_style(row, selection):
+    indicator, _ = MATRIX_ROWS[row]
+    panel = PANEL_BY_INDICATOR[indicator]
+    selected_indicators = selected_indicators_for_panel(panel, selection)
+    if panel in {"oscillator", "risk"} and len(selected_indicators) == 1:
+        return "-"
+    return indicator_line_style(row)
+
+
+def build_selection(results, market_data, saved):
+    saved_strategies = saved.get("strategies", {}) if isinstance(saved.get("strategies"), dict) else {}
+    saved_matrix = saved.get("matrix", {}) if isinstance(saved.get("matrix"), dict) else {}
+    saved_tickers = saved.get("tickers", {}) if isinstance(saved.get("tickers"), dict) else {}
+    saved_indicators = saved.get("indicators", {}) if isinstance(saved.get("indicators"), dict) else {}
+    matrix_rows = list(MATRIX_ROWS)
+    has_visible_rows = isinstance(saved.get("visible_rows"), list)
+    has_visible_tickers = isinstance(saved.get("visible_tickers"), list)
+
+    strategies = {
+        result["strategy"].__class__.__name__: bool(saved_strategies.get(result["strategy"].__class__.__name__, True))
+        for result in results
+    }
+    matrix = {
+        row: {
+            ticker: bool(
+                saved_matrix.get(row, {}).get(
+                    ticker,
+                    saved_matrix.get(indicator, {}).get(
+                        ticker,
+                        bool(saved_tickers.get(ticker, True)) and bool(saved_indicators.get(indicator, indicator == "Price")),
+                    ),
+                )
+            )
+            for ticker in market_data
+        }
+        for row, (indicator, _) in MATRIX_ROWS.items()
+    }
+    visible_rows = [row for row in matrix_rows if row in saved["visible_rows"]] if has_visible_rows else matrix_rows
+    visible_tickers = (
+        [ticker for ticker in market_data if ticker in saved["visible_tickers"]]
+        if has_visible_tickers
+        else [ticker for ticker in market_data if saved_tickers.get(ticker, True)]
+    )
+    return ChartSelection(strategies, matrix, visible_rows, visible_tickers)
 
 
 def style_axes(fig, axes):
@@ -124,6 +216,9 @@ def style_axes(fig, axes):
         axis.set_facecolor("#FFFFFF")
         axis.set_axisbelow(True)
         axis.grid(axis="y", color="#E5E5EA", linewidth=0.8)
+        axis.grid(axis="x", color="#E5E5EA", linewidth=0.8)
+        axis.xaxis.set_major_locator(mdates.YearLocator())
+        axis.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
         axis.tick_params(colors="#6E6E73", labelsize=9, length=0, pad=7)
         axis.spines["top"].set_visible(False)
         axis.spines["right"].set_visible(False)
@@ -163,7 +258,13 @@ def load_market_data():
 
 def index_to_start(series):
     valid = series.dropna()
-    return series / valid.iloc[0]
+    return series if valid.empty else series / valid.iloc[0]
+
+
+def series_from_start(series, start_date, normalize=False):
+    if start_date is not None:
+        series = series.loc[series.index >= start_date]
+    return index_to_start(series) if normalize else series
 
 
 def rebalance_directions(history, trades, rebalances):
@@ -195,48 +296,83 @@ def rebalance_directions(history, trades, rebalances):
     return directions
 
 
+def draw_strategy_lines(price_axis, results, strategy_visibility):
+    strategy_lines = {}
+    strategy_markers = {}
+    strategy_series = {}
+    marker_dates = {}
+    for index, result in enumerate(results):
+        name = result["strategy"].__class__.__name__
+        history = result["history"]
+        strategy_series[name] = history["Portfolio"]
+        values = index_to_start(strategy_series[name])
+        (line,) = price_axis.plot(
+            values.index,
+            values,
+            color=strategy_color(index),
+            linewidth=1.2,
+            solid_capstyle="round",
+            visible=strategy_visibility[name],
+        )
+        strategy_lines[name] = line
+
+        markers = []
+        dates_by_marker = []
+        for direction, marker in (("up", "^"), ("down", "v")):
+            dates = [
+                date
+                for date, value in rebalance_directions(
+                    history, result["trades"], result.get("rebalances", [])
+                ).items()
+                if value == direction
+            ]
+            points = values.reindex(dates).dropna()
+            if not points.empty:
+                markers.append(price_axis.scatter(
+                    points.index, points.values, marker=marker, s=46,
+                    color=line.get_color(), edgecolors="white", linewidths=0.7,
+                    zorder=3, visible=strategy_visibility[name],
+                ))
+                dates_by_marker.append(dates)
+        strategy_markers[name] = markers
+        marker_dates[name] = dates_by_marker
+    return strategy_lines, strategy_markers, strategy_series, marker_dates
+
+
+def draw_indicator_lines(panel_axes, market_data, chart_start, strategy_count, selection):
+    panel_lines = {"price": [], "oscillator": [], "risk": []}
+    indicator_lines = {}
+    indicator_series = {}
+    for ticker_index, (ticker, data) in enumerate(market_data.items()):
+        if chart_start is not None:
+            data = data.loc[data.index >= chart_start]
+        color = ticker_color(ticker_index, strategy_count)
+        for indicator, columns in INDICATORS.items():
+            axis = panel_axes[PANEL_BY_INDICATOR[indicator]]
+            for column in columns:
+                if column not in data or data[column].dropna().empty:
+                    continue
+                values = series_from_start(data[column], chart_start, indicator in INDEXED_INDICATORS)
+                row = ROW_FOR_COLUMN[(indicator, column)]
+                (line,) = axis.plot(
+                    values.index, values, color=color,
+                    linestyle=displayed_indicator_line_style(row, selection),
+                    linewidth=0.8, alpha=0.8, solid_capstyle="round",
+                    visible=selection.matrix[row][ticker],
+                )
+                indicator_lines[(row, ticker, column)] = line
+                indicator_series[(row, ticker, column)] = (data[column], indicator in INDEXED_INDICATORS)
+                panel_lines[PANEL_BY_INDICATOR[indicator]].append(line)
+    return panel_lines, indicator_lines, indicator_series
+
+
 
 def draw_chart(results, price_data=None, show_chart=SHOW_CHART):
     """Draw strategy performance and a ticker-by-indicator selection matrix."""
     market_data = price_data if price_data is not None else load_market_data()
-    saved = load_selection()
-    saved_strategies = saved.get("strategies", {}) if isinstance(saved.get("strategies"), dict) else {}
-    saved_matrix = saved.get("matrix", {}) if isinstance(saved.get("matrix"), dict) else {}
-    saved_tickers = saved.get("tickers", {}) if isinstance(saved.get("tickers"), dict) else {}
-    saved_indicators = saved.get("indicators", {}) if isinstance(saved.get("indicators"), dict) else {}
-    saved_visible_rows = saved.get("visible_rows", [])
-    saved_visible_rows = saved_visible_rows if isinstance(saved_visible_rows, list) else []
-    saved_visible_tickers = saved.get("visible_tickers", [])
-    saved_visible_tickers = saved_visible_tickers if isinstance(saved_visible_tickers, list) else []
-
-    strategy_state = {
-        result["strategy"].__class__.__name__: bool(saved_strategies.get(result["strategy"].__class__.__name__, True))
-        for result in results
-    }
-    matrix = {
-        row: {
-            ticker: bool(
-                saved_matrix.get(row, {}).get(
-                    ticker,
-                    saved_matrix.get(indicator, {}).get(
-                        ticker,
-                        bool(saved_tickers.get(ticker, True)) and bool(saved_indicators.get(indicator, indicator == "Price")),
-                    ),
-                )
-            )
-            for ticker in market_data
-        }
-        for row, (indicator, _) in MATRIX_ROWS.items()
-    }
-
-    strategy_names = list(strategy_state)
+    selection = build_selection(results, market_data, load_selection())
+    strategy_names = list(selection.strategies)
     matrix_rows = list(MATRIX_ROWS)
-    visible_rows = [row for row in matrix_rows if row in saved_visible_rows]
-    if not saved_visible_rows:
-        visible_rows = matrix_rows.copy()
-    visible_tickers = [ticker for ticker in market_data if ticker in saved_visible_tickers]
-    if not saved_visible_tickers:
-        visible_tickers = [ticker for ticker in market_data if saved_tickers.get(ticker, True)]
     figure_height = 9
     control_left = 1 - (CONTROL_RIGHT_MARGIN_INCHES + CONTROL_WIDTH_INCHES) / FIGURE_SIZE[0]
     fig, axes = plt.subplots(
@@ -252,61 +388,18 @@ def draw_chart(results, price_data=None, show_chart=SHOW_CHART):
         fig.canvas.manager.set_window_title("투자 전략")
     style_axes(fig, axes)
 
-    chart_start = min((result["history"].index[0] for result in results), default=None)
-    strategy_lines = {}
-    strategy_markers = {}
-    panel_lines = {"price": [], "oscillator": [], "risk": []}
-    indicator_lines = {}
-
-    for index, result in enumerate(results):
-        name = result["strategy"].__class__.__name__
-        history = result["history"]
-        values = index_to_start(history["Portfolio"])
-        (line,) = price_axis.plot(
-            values.index,
-            values,
-            color=APPLE_COLORS[index % len(APPLE_COLORS)],
-            linewidth=1.2,
-            solid_capstyle="round",
-            visible=strategy_state[name],
-        )
-        strategy_lines[name] = line
-        panel_lines["price"].append(line)
-
-        markers = []
-        for direction, marker in (("up", "^"), ("down", "v")):
-            dates = [date for date, value in rebalance_directions(history, result["trades"], result.get("rebalances", [] )).items() if value == direction]
-            points = values.reindex(dates).dropna()
-            if not points.empty:
-                markers.append(price_axis.scatter(
-                    points.index, points.values, marker=marker, s=46,
-                    color=line.get_color(), edgecolors="white", linewidths=0.7,
-                    zorder=3, visible=strategy_state[name],
-                ))
-        strategy_markers[name] = markers
-
-    line_styles = ["-", "--", ":", "-."]
-    for ticker_index, (ticker, data) in enumerate(market_data.items()):
-        if chart_start is not None:
-            data = data.loc[data.index >= chart_start]
-        color = APPLE_COLORS[(ticker_index + len(results)) % len(APPLE_COLORS)]
-        for style_index, (indicator, columns) in enumerate(INDICATORS.items()):
-            axis = panel_axes[PANEL_BY_INDICATOR[indicator]]
-            for column in columns:
-                if column not in data or data[column].dropna().empty:
-                    continue
-                values = data[column]
-                if indicator in INDEXED_INDICATORS:
-                    values = index_to_start(values)
-                row = ROW_FOR_COLUMN[(indicator, column)]
-                (line,) = axis.plot(
-                    values.index, values, color=color,
-                    linestyle=line_styles[style_index % len(line_styles)],
-                    linewidth=0.8, alpha=0.8, solid_capstyle="round",
-                    visible=matrix[row][ticker],
-                )
-                indicator_lines[(row, ticker, column)] = line
-                panel_lines[PANEL_BY_INDICATOR[indicator]].append(line)
+    default_start_date = min(
+        (result["history"].index[0] for result in results if not result["history"].empty),
+        default=None,
+    )
+    active_start_date = default_start_date
+    strategy_lines, strategy_markers, strategy_series, marker_dates = draw_strategy_lines(
+        price_axis, results, selection.strategies
+    )
+    panel_lines, indicator_lines, indicator_series = draw_indicator_lines(
+        panel_axes, market_data, active_start_date, len(results), selection
+    )
+    panel_lines["price"].extend(strategy_lines.values())
 
     def rescale():
         for panel, axis in panel_axes.items():
@@ -316,40 +409,79 @@ def draw_chart(results, price_data=None, show_chart=SHOW_CHART):
 
     def update_panels():
         visible = [panel for panel, lines in panel_lines.items() if any(line.get_visible() for line in lines)]
-        left, right, bottom, top = 0.05, control_left - 0.04, 0.07, 0.93
+        left, right, bottom, top = CHART_LEFT, control_left - CHART_TO_CONTROL_GAP, CHART_BOTTOM, CHART_TOP
         if not visible:
             for axis in axes:
                 axis.set_visible(False)
             return
-        weights = {"price": 2.2, "oscillator": 1.4, "risk": 1.4}
-        gap = 0.025
-        available = top - bottom - gap * (len(visible) - 1)
+        available = top - bottom - PANEL_GAP * (len(visible) - 1)
         current_top = top
         for panel, axis in panel_axes.items():
             if panel not in visible:
                 axis.set_visible(False)
                 continue
-            height = available * weights[panel] / sum(weights[item] for item in visible)
+            height = available * PANEL_HEIGHT_WEIGHTS[panel] / sum(PANEL_HEIGHT_WEIGHTS[item] for item in visible)
             axis.set_visible(True)
             axis.set_position([left, current_top - height, right - left, height])
-            current_top -= height + gap
-        last_axis = panel_axes[visible[-1]]
+            current_top -= height + PANEL_GAP
         for axis in axes:
-            axis.tick_params(labelbottom=axis is last_axis)
+            axis.tick_params(labelbottom=axis in (panel_axes[panel] for panel in visible))
 
     def persist():
-        save_selection(
-            {name: line.get_visible() for name, line in strategy_lines.items()},
-            matrix,
-            visible_rows,
-            visible_tickers,
-        )
+        selection.strategies = {name: line.get_visible() for name, line in strategy_lines.items()}
+        save_selection(selection)
 
     def refresh_lines():
+        for name, line in strategy_lines.items():
+            values = series_from_start(strategy_series[name], active_start_date, normalize=True)
+            line.set_data(values.index, values)
+            for marker, dates in zip(strategy_markers[name], marker_dates[name]):
+                points = values.reindex(dates).dropna()
+                marker.set_offsets(np.column_stack((marker.axes.convert_xunits(points.index), points.values)))
         for (row, ticker, _), line in indicator_lines.items():
-            line.set_visible(row in visible_rows and ticker in visible_tickers and matrix[row][ticker])
+            series, normalize = indicator_series[(row, ticker, _)]
+            values = series_from_start(series, active_start_date, normalize)
+            line.set_data(values.index, values)
+            line.set_visible(
+                row in selection.visible_rows
+                and ticker in selection.visible_tickers
+                and selection.matrix[row][ticker]
+            )
+            line.set_linestyle(displayed_indicator_line_style(row, selection))
         update_panels()
         rescale()
+
+    def on_start_date_submit(value):
+        nonlocal active_start_date
+        value = value.strip()
+        if not value:
+            active_start_date = default_start_date
+        else:
+            parsed_date = pd.to_datetime(value, errors="coerce")
+            if pd.isna(parsed_date):
+                return
+            active_start_date = pd.Timestamp(parsed_date)
+        refresh_lines()
+        if active_start_date is not None:
+            price_axis.set_xlim(left=active_start_date)
+        fig.canvas.draw_idle()
+
+    def reset_start_date_on_home(axis):
+        nonlocal active_start_date
+        if active_start_date is None or default_start_date is None:
+            return
+        if active_start_date == default_start_date:
+            return
+        view_start, _ = axis.get_xlim()
+        if view_start > mdates.date2num(default_start_date):
+            return
+        active_start_date = default_start_date
+        date_input.eventson = False
+        date_input.set_val(initial_date_text)
+        date_input.eventson = True
+        refresh_lines()
+        price_axis.relim()
+        price_axis.autoscale_view(scalex=True, scaley=False)
 
     def add_checkbox(axis, x, y):
         figure_width, figure_height = fig.get_size_inches()
@@ -363,10 +495,10 @@ def draw_chart(results, price_data=None, show_chart=SHOW_CHART):
                          fontsize=CONTROL_FONT_SIZE, color="#1D1D1F")
         return box, mark
 
-    def control_position(bottom, height):
+    def control_position(bottom, height, width=CONTROL_WIDTH_INCHES):
         figure_width, figure_height = fig.get_size_inches()
-        left = (figure_width - CONTROL_RIGHT_MARGIN_INCHES - CONTROL_WIDTH_INCHES) / figure_width
-        return [left, bottom / figure_height, CONTROL_WIDTH_INCHES / figure_width, height / figure_height]
+        left = (figure_width - CONTROL_RIGHT_MARGIN_INCHES - width) / figure_width
+        return [left, bottom / figure_height, width / figure_width, height / figure_height]
 
     def strategy_panel_height():
         return 2 * CONTROL_BOX_PADDING_INCHES + max(len(strategy_names) - 1, 0) * CONTROL_ROW_SPACING_INCHES
@@ -439,37 +571,51 @@ def draw_chart(results, price_data=None, show_chart=SHOW_CHART):
                 return
 
     # Ticker-by-indicator matrix controls
-    matrix_axis = fig.add_axes(control_position(matrix_panel_bottom(len(visible_rows)), matrix_panel_height(len(visible_rows))))
-    column_start = 0.37
+    matrix_axis = fig.add_axes(control_position(
+        matrix_panel_bottom(len(selection.visible_rows)), matrix_panel_height(len(selection.visible_rows))
+    ))
     matrix_controls = []
-    change_button_axis = fig.add_axes(control_position(button_bottom(len(visible_rows)), BUTTON_HEIGHT_INCHES))
+    matrix_style_samples = []
+    change_button_axis = fig.add_axes(control_position(
+        button_bottom(len(selection.visible_rows)), BUTTON_HEIGHT_INCHES
+    ))
     style_control_axis(change_button_axis, "")
     change_button_axis.text(0.5, 0.5, "항목 변경", transform=change_button_axis.transAxes,
                             ha="center", va="center", fontsize=CONTROL_FONT_SIZE, color="#1D1D1F")
+    date_input_axis = fig.add_axes(control_position(
+        DATE_INPUT_BOTTOM_INCHES, DATE_INPUT_HEIGHT_INCHES, DATE_INPUT_WIDTH_INCHES
+    ))
+    initial_date_text = default_start_date.strftime("%Y-%m-%d") if default_start_date is not None else ""
+    date_input = TextBox(
+        date_input_axis,
+        "Start date",
+        initial=initial_date_text,
+        label_pad=DATE_INPUT_LABEL_PAD,
+    )
+    # Matplotlib's TextBox registers a resize callback wrapped as a mouse event
+    # handler, which raises AttributeError on ResizeEvent in the installed version.
+    date_input_resize_cid = date_input._cids.pop()
+    fig.canvas.mpl_disconnect(date_input_resize_cid)
     selector_axis = None
     selector_apply_axis = None
     selector_widgets = []
-
-    def indicator_line_style(row):
-        indicator, _ = MATRIX_ROWS[row]
-        style_index = list(INDICATORS).index(indicator)
-        return line_styles[style_index % len(line_styles)]
 
     def draw_matrix():
         matrix_axis.clear()
         style_control_axis(matrix_axis, "지표 × 종목")
         matrix_controls.clear()
-        if not visible_rows:
+        matrix_style_samples.clear()
+        if not selection.visible_rows:
             matrix_axis.text(0.5, 0.5, "표시할 지표 항목이 없습니다.", transform=matrix_axis.transAxes,
                              ha="center", va="center", fontsize=CONTROL_FONT_SIZE, color="#6E6E73")
             return
-        matrix_tickers = [ticker for ticker in market_data if ticker in visible_tickers]
+        matrix_tickers = [ticker for ticker in market_data if ticker in selection.visible_tickers]
         if not matrix_tickers:
             matrix_axis.text(0.5, 0.5, "표시할 종목이 없습니다.", transform=matrix_axis.transAxes,
                              ha="center", va="center", fontsize=CONTROL_FONT_SIZE, color="#6E6E73")
             return
-        column_step = 0.58 / len(matrix_tickers)
-        height = matrix_panel_height(len(visible_rows))
+        column_step = MATRIX_COLUMNS_WIDTH / len(matrix_tickers)
+        height = matrix_panel_height(len(selection.visible_rows))
         ticker_title_y = 1 - (
             CONTROL_BOX_PADDING_INCHES
             + MATRIX_TICKER_HEADER_HEIGHT_INCHES
@@ -482,41 +628,44 @@ def draw_chart(results, price_data=None, show_chart=SHOW_CHART):
         checkbox_width = CHECKBOX_INCHES / matrix_width_inches
         line_width = MATRIX_LINE_SAMPLE_WIDTH_INCHES / matrix_width_inches
         line_gap = MATRIX_LINE_TO_CHECKBOX_GAP_INCHES / matrix_width_inches
-        line_end = column_start - checkbox_width / 2 - line_gap
+        line_end = MATRIX_FIRST_COLUMN_X - checkbox_width / 2 - line_gap
         line_start = line_end - line_width
         for index, ticker in enumerate(matrix_tickers):
-            x = column_start + index * column_step
+            x = MATRIX_FIRST_COLUMN_X + index * column_step
             matrix_axis.text(x, ticker_title_y, ticker, transform=matrix_axis.transAxes, ha="center", va="center",
-                             fontsize=CONTROL_FONT_SIZE, color=APPLE_COLORS[(index + len(results)) % len(APPLE_COLORS)])
-        for row_index, row in enumerate(visible_rows):
+                             fontsize=CONTROL_FONT_SIZE, color=ticker_color(index, len(results)))
+        for row_index, row in enumerate(selection.visible_rows):
             y = row_start - row_index * row_step
-            matrix_axis.text(0.03, y, row, transform=matrix_axis.transAxes, va="center",
+            matrix_axis.text(MATRIX_LABEL_X, y, row, transform=matrix_axis.transAxes, va="center",
                              fontsize=CONTROL_FONT_SIZE, color="#333333")
-            matrix_axis.plot(
+            (sample_line,) = matrix_axis.plot(
                 [line_start, line_end],
                 [y, y],
                 transform=matrix_axis.transAxes,
                 color="#333333",
-                linestyle=indicator_line_style(row),
+                linestyle=displayed_indicator_line_style(row, selection),
                 linewidth=1.4,
                 solid_capstyle="round",
             )
+            matrix_style_samples.append((row, sample_line))
             for ticker_index, ticker in enumerate(matrix_tickers):
-                x = column_start + ticker_index * column_step
+                x = MATRIX_FIRST_COLUMN_X + ticker_index * column_step
                 box, mark = add_checkbox(matrix_axis, x, y)
                 matrix_controls.append((row, ticker, box, mark))
         refresh_matrix_controls()
 
     def refresh_matrix_controls():
         for row, ticker, _, mark in matrix_controls:
-            mark.set_visible(matrix[row][ticker])
+            mark.set_visible(selection.matrix[row][ticker])
+        for row, sample_line in matrix_style_samples:
+            sample_line.set_linestyle(displayed_indicator_line_style(row, selection))
 
     def on_matrix_click(event):
         if event.inaxes is not matrix_axis:
             return
         for row, ticker, box, _ in matrix_controls:
             if box.contains(event)[0]:
-                matrix[row][ticker] = not matrix[row][ticker]
+                selection.matrix[row][ticker] = not selection.matrix[row][ticker]
                 refresh_matrix_controls()
                 refresh_lines()
                 persist()
@@ -525,15 +674,19 @@ def draw_chart(results, price_data=None, show_chart=SHOW_CHART):
 
     def toggle_selector_selection(group, item):
         if group == "tickers":
-            if item in visible_tickers:
-                visible_tickers.remove(item)
+            if item in selection.visible_tickers:
+                selection.visible_tickers.remove(item)
             else:
-                visible_tickers[:] = [ticker for ticker in market_data if ticker in {*visible_tickers, item}]
+                selection.visible_tickers[:] = [
+                    ticker for ticker in market_data if ticker in {*selection.visible_tickers, item}
+                ]
             return
-        if item in visible_rows:
-            visible_rows.remove(item)
+        if item in selection.visible_rows:
+            selection.visible_rows.remove(item)
         else:
-            visible_rows[:] = [row for row in matrix_rows if row in {*visible_rows, item}]
+            selection.visible_rows[:] = [
+                row for row in matrix_rows if row in {*selection.visible_rows, item}
+            ]
 
     def draw_selector_groups():
         nonlocal selector_widgets
@@ -573,7 +726,11 @@ def draw_chart(results, price_data=None, show_chart=SHOW_CHART):
                     checkbox_axis.tick_params(left=False, bottom=False, labelleft=False, labelbottom=False)
                     for spine in checkbox_axis.spines.values():
                         spine.set_visible(False)
-                    selected = row in visible_tickers if panel == "tickers" else row in visible_rows
+                    selected = (
+                        row in selection.visible_tickers
+                        if panel == "tickers"
+                        else row in selection.visible_rows
+                    )
                     widget = CheckButtons(checkbox_axis, [row], [selected])
                     for label in widget.labels:
                         label.set_fontsize(CONTROL_FONT_SIZE)
@@ -587,6 +744,7 @@ def draw_chart(results, price_data=None, show_chart=SHOW_CHART):
         strategy_axis.set_visible(False)
         matrix_axis.set_visible(False)
         change_button_axis.set_visible(False)
+        date_input_axis.set_visible(False)
         selector_axis = fig.add_axes(control_position(selector_panel_bottom(), selector_panel_height()))
         draw_selector_groups()
         selector_apply_axis = fig.add_axes(control_position(BUTTON_GAP_INCHES, BUTTON_HEIGHT_INCHES))
@@ -606,6 +764,7 @@ def draw_chart(results, price_data=None, show_chart=SHOW_CHART):
         strategy_axis.set_visible(True)
         matrix_axis.set_visible(True)
         change_button_axis.set_visible(True)
+        date_input_axis.set_visible(True)
         update_control_layout()
         refresh_lines()
         draw_matrix()
@@ -626,8 +785,15 @@ def draw_chart(results, price_data=None, show_chart=SHOW_CHART):
             figure_height - STRATEGY_SECTION_TOP_INCHES - strategy_panel_height(),
             strategy_panel_height(),
         ))
-        matrix_axis.set_position(control_position(matrix_panel_bottom(len(visible_rows)), matrix_panel_height(len(visible_rows))))
-        change_button_axis.set_position(control_position(button_bottom(len(visible_rows)), BUTTON_HEIGHT_INCHES))
+        matrix_axis.set_position(control_position(
+            matrix_panel_bottom(len(selection.visible_rows)), matrix_panel_height(len(selection.visible_rows))
+        ))
+        change_button_axis.set_position(control_position(
+            button_bottom(len(selection.visible_rows)), BUTTON_HEIGHT_INCHES
+        ))
+        date_input_axis.set_position(control_position(
+            DATE_INPUT_BOTTOM_INCHES, DATE_INPUT_HEIGHT_INCHES, DATE_INPUT_WIDTH_INCHES
+        ))
         if selector_axis is not None:
             selector_axis.set_position(control_position(selector_panel_bottom(), selector_panel_height()))
             selector_apply_axis.set_position(control_position(BUTTON_GAP_INCHES, BUTTON_HEIGHT_INCHES))
@@ -638,6 +804,8 @@ def draw_chart(results, price_data=None, show_chart=SHOW_CHART):
     refresh_strategy_controls()
     draw_matrix()
     refresh_lines()
+    date_input.on_submit(on_start_date_submit)
+    price_axis.callbacks.connect("xlim_changed", reset_start_date_on_home)
     fig.canvas.mpl_connect("button_press_event", on_strategy_click)
     fig.canvas.mpl_connect("button_press_event", on_matrix_click)
     fig.canvas.mpl_connect("button_press_event", on_control_click)
