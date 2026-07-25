@@ -7,11 +7,13 @@ from copy import deepcopy
 
 class Portfolio:
 
-    def __init__(self, cash):
-        self.cash = cash
+    def __init__(self):
+        # All backtests use an indexed starting value of 1.0.
+        self.cash = 1.0
         self.positions = {}
         self.history = []
         self.trades = []
+        self.rebalances = []
 
         # -----------------------------
         # 분할 리밸런싱
@@ -52,15 +54,19 @@ class Portfolio:
     # ==================================================
     # 분할 리밸런싱 시작
     # ==================================================
-    def start_rebalance(self, target, days=5):
+    def start_rebalance(self, target, days=5, date=None):
         self.pending_target = deepcopy(target)
         self.remaining_days = days
         self.total_days = days
+        self.rebalances.append({
+            "Date": date,
+            "Target": deepcopy(target),
+        })
 
     # ==================================================
     # 분할 리밸런싱 실행
     # ==================================================
-    def update(self, prices):
+    def update(self, prices, date=None):
         if self.pending_target is None:
             return
         current = self.weights(prices)
@@ -73,7 +79,7 @@ class Portfolio:
             diff = goal - now
             target[ticker] = now + diff / self.remaining_days
 
-        self.rebalance(prices,target)
+        self.rebalance(prices, target, date=date)
         self.remaining_days -= 1
         if self.remaining_days == 0:
             self.pending_target = None
@@ -82,7 +88,7 @@ class Portfolio:
     # ==================================================
     # 목표 비중 리밸런싱
     # ==================================================
-    def rebalance(self, prices, target):
+    def rebalance(self, prices, target, date=None):
         total = self.value(prices)
 
         # -----------------------------
@@ -96,7 +102,7 @@ class Portfolio:
 
             if diff < 0:
                 shares = abs(diff) / price
-                self.trade(ticker, -shares, price)
+                self.trade(ticker, -shares, price, date=date)
 
         # -----------------------------
         # 매수
@@ -109,18 +115,19 @@ class Portfolio:
 
             if diff > 0:
                 shares = diff / price
-                self.trade(ticker, shares, price)
+                self.trade(ticker, shares, price, date=date)
 
     # ==================================================
     # 매매
     # ==================================================
-    def trade(self, ticker, shares, price):
+    def trade(self, ticker, shares, price, date=None):
         if abs(shares) < 1e-8:
             return
         cost = shares * price
         self.cash -= cost
         self.positions[ticker] = self.positions.get(ticker, 0) + shares
         self.trades.append({
+            "Date": date,
             "Ticker": ticker,
             "Shares": shares,
             "Price": price,
@@ -149,3 +156,7 @@ class Portfolio:
 
     def get_trades(self):
         return self.trades
+
+
+    def get_rebalances(self):
+        return self.rebalances

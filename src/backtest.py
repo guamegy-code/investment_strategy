@@ -8,7 +8,6 @@ import pandas as pd
 
 from config import (
     DATA_DIR,
-    INITIAL_CASH,
     TICKERS,
 )
 
@@ -22,7 +21,7 @@ class Backtest:
         self.strategy = strategy
         self.tickers = TICKERS
         self.data = self.load_data()
-        self.portfolio = Portfolio(INITIAL_CASH)
+        self.portfolio = Portfolio()
 
 
     # ==================================================
@@ -116,16 +115,20 @@ class Backtest:
             # 최초 투자
             # ------------------------------------------
             if first_trade:
-                self.portfolio.start_rebalance(signal["target"], days=signal["days"])
+                self.portfolio.start_rebalance(
+                    signal["target"], days=signal["days"], date=date
+                )
                 first_trade = False
 
             # ------------------------------------------
             # 전략에 따른 리밸런싱
             # ------------------------------------------
             elif signal["rebalance"]:
-                self.portfolio.start_rebalance(signal["target"], signal["days"])
+                self.portfolio.start_rebalance(
+                    signal["target"], signal["days"], date=date
+                )
 
-            self.portfolio.update(prices)
+            self.portfolio.update(prices, date=date)
 
             # ------------------------------------------
             # 일별 기록
@@ -159,4 +162,5 @@ class Backtest:
     def run_all(self):
         history = self.run()
         trades = self.get_trades()
-        return history, trades
+        rebalances = self.portfolio.get_rebalances()
+        return history, trades, rebalances

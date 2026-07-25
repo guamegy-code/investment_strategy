@@ -30,7 +30,7 @@ class Runner:
 
         for strategy in self.strategies:
             backtest = Backtest(strategy)
-            history, trades = backtest.run_all()
+            history, trades, rebalances = backtest.run_all()
             performance = Performance(history)
             summary = performance.summary()
             summary["Strategy"] = strategy.__class__.__name__
@@ -39,6 +39,7 @@ class Runner:
                 "strategy": strategy,
                 "history": history,
                 "trades": trades,
+                "rebalances": rebalances,
                 "summary": summary,
             })
 
