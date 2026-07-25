@@ -29,8 +29,9 @@ CONTROL_BOX_PADDING_INCHES = 0.33
 MATRIX_TICKER_HEADER_HEIGHT_INCHES = 0.3
 BUTTON_GAP_INCHES = 0.2
 DATE_INPUT_BOTTOM_INCHES = 0.2
-DATE_INPUT_HEIGHT_INCHES = 0.32
-DATE_INPUT_WIDTH_INCHES = CONTROL_WIDTH_INCHES / 3
+DATE_INPUT_VERTICAL_PADDING_INCHES = 0.1
+DATE_INPUT_HEIGHT_INCHES = CONTROL_FONT_SIZE / 72 + DATE_INPUT_VERTICAL_PADDING_INCHES
+DATE_INPUT_WIDTH_INCHES = 1.1
 DATE_INPUT_LABEL_PAD = 0.08
 SELECTOR_GROUP_GAP_INCHES = MATRIX_SECTION_GAP_INCHES
 MATRIX_LINE_SAMPLE_WIDTH_INCHES = 0.42
@@ -334,8 +335,8 @@ def draw_strategy_lines(price_axis, results, strategy_visibility):
             points = values.reindex(dates).dropna()
             if not points.empty:
                 markers.append(price_axis.scatter(
-                    points.index, points.values, marker=marker, s=46,
-                    color=line.get_color(), edgecolors="white", linewidths=0.7,
+                    points.index, points.values, marker=marker, s=60,
+                    color="#1D1D1F", edgecolors="white", linewidths=0.7,
                     zorder=3, visible=strategy_visibility[name],
                 ))
                 dates_by_marker.append(dates)
@@ -406,6 +407,13 @@ def draw_chart(results, price_data=None, show_chart=SHOW_CHART):
         panel_axes, market_data, active_start_date, len(results), selection
     )
     panel_lines["price"].extend(strategy_lines.values())
+    chart_series = [*strategy_series.values(), *(series for series, _ in indicator_series.values())]
+    chart_end_date = max(
+        (series.index.max() for series in chart_series if not series.empty),
+        default=None,
+    )
+    is_clamping_x_limits = False
+    zoom_drag_start = None
 
     def rescale():
         for panel, axis in panel_axes.items():
@@ -419,15 +427,18 @@ def draw_chart(results, price_data=None, show_chart=SHOW_CHART):
         if not visible:
             for axis in axes:
                 axis.set_visible(False)
+                axis.set_navigate(False)
             return
         available = top - bottom - PANEL_GAP * (len(visible) - 1)
         current_top = top
         for panel, axis in panel_axes.items():
             if panel not in visible:
                 axis.set_visible(False)
+                axis.set_navigate(False)
                 continue
             height = available * PANEL_HEIGHT_WEIGHTS[panel] / sum(PANEL_HEIGHT_WEIGHTS[item] for item in visible)
             axis.set_visible(True)
+            axis.set_navigate(True)
             axis.set_position([left, current_top - height, right - left, height])
             current_top -= height + PANEL_GAP
         for axis in axes:
@@ -467,27 +478,87 @@ def draw_chart(results, price_data=None, show_chart=SHOW_CHART):
             if pd.isna(parsed_date):
                 return
             active_start_date = pd.Timestamp(parsed_date)
-        refresh_lines()
-        if active_start_date is not None:
-            price_axis.set_xlim(left=active_start_date)
+        reset_chart_view()
         fig.canvas.draw_idle()
 
-    def reset_start_date_on_home(axis):
-        nonlocal active_start_date
-        if active_start_date is None or default_start_date is None:
-            return
-        if active_start_date == default_start_date:
-            return
-        view_start, _ = axis.get_xlim()
-        if view_start > mdates.date2num(default_start_date):
-            return
-        active_start_date = default_start_date
-        date_input.eventson = False
-        date_input.set_val(initial_date_text)
-        date_input.eventson = True
+    def reset_chart_view():
+        """Discard navigation zoom/pan state and fit every panel to the active date range."""
         refresh_lines()
-        price_axis.relim()
-        price_axis.autoscale_view(scalex=True, scaley=False)
+        for axis in axes:
+            if axis.get_visible():
+                axis.relim(visible_only=True)
+                axis.autoscale(enable=True, axis="y")
+        price_axis.relim(visible_only=True)
+        price_axis.autoscale(enable=True, axis="x")
+        if active_start_date is not None:
+            price_axis.set_xlim(left=active_start_date)
+        clamp_x_limits(price_axis)
+
+    def clamp_x_limits(axis):
+        nonlocal is_clamping_x_limits
+        if is_clamping_x_limits or active_start_date is None or chart_end_date is None:
+            return
+        lower_limit = mdates.date2num(active_start_date)
+        upper_limit = mdates.date2num(chart_end_date)
+        left, right = axis.get_xlim()
+        if left >= lower_limit and right <= upper_limit:
+            return
+
+        span = min(right - left, upper_limit - lower_limit)
+        new_left = max(lower_limit, min(left, upper_limit - span))
+        new_right = new_left + span
+        is_clamping_x_limits = True
+        try:
+            axis.set_xlim(new_left, new_right)
+        finally:
+            is_clamping_x_limits = False
+
+    def reset_y_limits():
+        for axis in axes:
+            if axis.get_visible():
+                axis.relim(visible_only=True)
+                axis.autoscale(enable=True, axis="y")
+
+    def prevent_y_zoom_when_x_is_limited(event):
+        if event.button != "down" or active_start_date is None or chart_end_date is None:
+            return
+        clamp_x_limits(price_axis)
+        left, right = price_axis.get_xlim()
+        lower_limit = mdates.date2num(active_start_date)
+        upper_limit = mdates.date2num(chart_end_date)
+        if abs(left - lower_limit) < 1e-9 and abs(right - upper_limit) < 1e-9:
+            reset_y_limits()
+            fig.canvas.draw_idle()
+
+    def toolbar_zoom_is_active():
+        toolbar = getattr(fig.canvas.manager, "toolbar", None)
+        return toolbar is not None and "zoom" in str(getattr(toolbar, "mode", "")).lower()
+
+    def on_zoom_press(event):
+        nonlocal zoom_drag_start
+        if event.button == 1 and event.inaxes in axes and toolbar_zoom_is_active():
+            zoom_drag_start = (event.inaxes, event.x, event.y, event.inaxes.transData.frozen().inverted())
+
+    def on_zoom_release(event):
+        nonlocal zoom_drag_start
+        if zoom_drag_start is None:
+            return
+        axis, start_x, start_y, data_transform = zoom_drag_start
+        zoom_drag_start = None
+        if event.button != 1 or not toolbar_zoom_is_active():
+            return
+        if abs(event.x - start_x) < 5 or abs(event.y - start_y) < 5:
+            return
+        x0, x1 = sorted((start_x, event.x))
+        y0, y1 = sorted((start_y, event.y))
+        bbox = axis.bbox
+        x0, x1 = max(x0, bbox.x0), min(x1, bbox.x1)
+        y0, y1 = max(y0, bbox.y0), min(y1, bbox.y1)
+        data_start = data_transform.transform((x0, y0))
+        data_end = data_transform.transform((x1, y1))
+        axis.set_xlim(sorted((data_start[0], data_end[0])))
+        axis.set_ylim(sorted((data_start[1], data_end[1])))
+        fig.canvas.draw_idle()
 
     def add_checkbox(axis, x, y):
         figure_width, figure_height = fig.get_size_inches()
@@ -598,6 +669,8 @@ def draw_chart(results, price_data=None, show_chart=SHOW_CHART):
         initial=initial_date_text,
         label_pad=DATE_INPUT_LABEL_PAD,
     )
+    date_input.label.set_fontsize(CONTROL_FONT_SIZE)
+    date_input.text_disp.set_fontsize(CONTROL_FONT_SIZE)
     # Matplotlib's TextBox registers a resize callback wrapped as a mouse event
     # handler, which raises AttributeError on ResizeEvent in the installed version.
     date_input_resize_cid = date_input._cids.pop()
@@ -811,7 +884,9 @@ def draw_chart(results, price_data=None, show_chart=SHOW_CHART):
     draw_matrix()
     refresh_lines()
     date_input.on_submit(on_start_date_submit)
-    price_axis.callbacks.connect("xlim_changed", reset_start_date_on_home)
+    fig.canvas.mpl_connect("scroll_event", prevent_y_zoom_when_x_is_limited)
+    fig.canvas.mpl_connect("button_press_event", on_zoom_press)
+    fig.canvas.mpl_connect("button_release_event", on_zoom_release)
     fig.canvas.mpl_connect("button_press_event", on_strategy_click)
     fig.canvas.mpl_connect("button_press_event", on_matrix_click)
     fig.canvas.mpl_connect("button_press_event", on_control_click)
