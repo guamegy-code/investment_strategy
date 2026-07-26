@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from matplotlib.patches import Rectangle
+from matplotlib.ticker import NullFormatter, NullLocator
 from matplotlib.widgets import CheckButtons, TextBox
 import numpy as np
 import pandas as pd
@@ -13,6 +14,7 @@ import pandas as pd
 from config import DATA_DIR, FIGURE_SIZE, RESULT_DIR, SAVE_FIGURE, SHOW_CHART, TICKERS
 APPLE_COLORS = ["#007AFF", "#FF9500", "#34C759", "#AF52DE", "#FF2D55", "#5AC8FA"]
 LINE_STYLES = ["-", "--", ":", "-."]
+ROW_LINE_STYLES = {"MACD": "-", "MACD_SIGNAL": "--"}
 SELECTION_FILE = RESULT_DIR / "chart_selection.json"
 CONTROL_FONT_SIZE = 11
 CONTROL_TITLE_X = 0.0
@@ -46,6 +48,8 @@ CHART_TOP = 0.93
 CHART_TO_CONTROL_GAP = 0.04
 PANEL_GAP = 0.025
 PANEL_HEIGHT_WEIGHTS = {"price": 2.2, "oscillator": 1.4, "risk": 1.4}
+MONTH_GRID_MAX_YEARS = 3
+MONTH_GRID_MIN_WIDTH_INCHES = 5.0
 
 INDICATORS = {
     "Price": ["Close"],
@@ -153,6 +157,8 @@ def ticker_color(index, strategy_count):
 
 
 def indicator_line_style(row):
+    if row in ROW_LINE_STYLES:
+        return ROW_LINE_STYLES[row]
     indicator, _ = MATRIX_ROWS[row]
     return LINE_STYLES[INDICATOR_STYLE_INDEX[indicator] % len(LINE_STYLES)]
 
@@ -167,6 +173,8 @@ def selected_indicators_for_panel(panel, selection):
 
 
 def displayed_indicator_line_style(row, selection):
+    if row in ROW_LINE_STYLES:
+        return ROW_LINE_STYLES[row]
     indicator, _ = MATRIX_ROWS[row]
     panel = PANEL_BY_INDICATOR[indicator]
     selected_indicators = selected_indicators_for_panel(panel, selection)
@@ -445,6 +453,25 @@ def draw_chart(results, price_data=None, show_chart=SHOW_CHART):
         for axis in axes:
             axis.tick_params(labelbottom=axis in (panel_axes[panel] for panel in visible))
 
+    def update_month_grid(_=None):
+        left, right = price_axis.get_xlim()
+        displayed_days = abs(right - left)
+        figure_width, _ = fig.get_size_inches()
+        chart_width = price_axis.get_position().width * figure_width
+        show_month_grid = (
+            displayed_days <= 365.25 * MONTH_GRID_MAX_YEARS
+            and chart_width >= MONTH_GRID_MIN_WIDTH_INCHES
+        )
+        for axis in axes:
+            if show_month_grid:
+                # January is already covered by the major yearly gridline.
+                axis.xaxis.set_minor_locator(mdates.MonthLocator(bymonth=range(2, 13)))
+                axis.xaxis.set_minor_formatter(NullFormatter())
+                axis.grid(True, which="minor", axis="x", color="#E5E5EA", linewidth=0.6)
+            else:
+                axis.xaxis.set_minor_locator(NullLocator())
+                axis.grid(False, which="minor", axis="x")
+
     def persist():
         selection.strategies = {name: line.get_visible() for name, line in strategy_lines.items()}
         save_selection(selection)
@@ -533,7 +560,10 @@ def draw_chart(results, price_data=None, show_chart=SHOW_CHART):
 
     def toolbar_zoom_is_active():
         toolbar = getattr(fig.canvas.manager, "toolbar", None)
-        return toolbar is not None and "zoom" in str(getattr(toolbar, "mode", "")).lower()
+        mode = str(getattr(toolbar, "mode", "")).lower() if toolbar is not None else ""
+        # Matplotlib labels Pan mode as "pan/zoom".  It must not trigger the
+        # custom rectangle-zoom handler, or a pan drag is applied twice.
+        return "zoom" in mode and "pan" not in mode
 
     def on_zoom_press(event):
         nonlocal zoom_drag_start
@@ -946,12 +976,15 @@ def draw_chart(results, price_data=None, show_chart=SHOW_CHART):
             # sizes stay fixed while the number of displayed rows changes.
             draw_matrix()
         update_panels()
+        update_month_grid()
         fig.canvas.draw_idle()
 
     refresh_strategy_controls()
     draw_matrix()
     refresh_lines()
+    update_month_grid()
     date_input.on_submit(on_start_date_submit)
+    price_axis.callbacks.connect("xlim_changed", update_month_grid)
     fig.canvas.mpl_connect("scroll_event", prevent_y_zoom_when_x_is_limited)
     fig.canvas.mpl_connect("button_press_event", on_zoom_press)
     fig.canvas.mpl_connect("button_release_event", on_zoom_release)
