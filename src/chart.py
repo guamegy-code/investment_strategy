@@ -37,8 +37,9 @@ SELECTOR_GROUP_GAP_INCHES = MATRIX_SECTION_GAP_INCHES
 MATRIX_LINE_SAMPLE_WIDTH_INCHES = 0.42
 MATRIX_LINE_TO_CHECKBOX_GAP_INCHES = 0.3
 MATRIX_LABEL_X = 0.03
-MATRIX_FIRST_COLUMN_X = 0.37
-MATRIX_COLUMNS_WIDTH = 0.58
+# Reserve enough room for long indicator titles before the line sample.
+MATRIX_FIRST_COLUMN_X = 0.48
+MATRIX_COLUMNS_WIDTH = 0.47
 CHART_LEFT = 0.05
 CHART_BOTTOM = 0.07
 CHART_TOP = 0.93
@@ -581,10 +582,32 @@ def draw_chart(results, price_data=None, show_chart=SHOW_CHART):
         return 2 * CONTROL_BOX_PADDING_INCHES + max(len(strategy_names) - 1, 0) * CONTROL_ROW_SPACING_INCHES
 
     def matrix_panel_height(rows):
-        return (
+        natural_height = (
             2 * CONTROL_BOX_PADDING_INCHES
             + MATRIX_TICKER_HEADER_HEIGHT_INCHES
             + max(rows - 1, 0) * CONTROL_ROW_SPACING_INCHES
+        )
+        _, figure_height = fig.get_size_inches()
+        date_input_top = DATE_INPUT_BOTTOM_INCHES + DATE_INPUT_HEIGHT_INCHES
+        controls_bottom = date_input_top + BUTTON_GAP_INCHES
+        available_height = (
+            figure_height
+            - matrix_section_top()
+            - controls_bottom
+            - BUTTON_GAP_INCHES
+            - BUTTON_HEIGHT_INCHES
+        )
+        return min(natural_height, max(available_height, 0))
+
+    def minimum_figure_height():
+        return (
+            matrix_section_top()
+            + 2 * CONTROL_BOX_PADDING_INCHES
+            + MATRIX_TICKER_HEADER_HEIGHT_INCHES
+            + 2 * BUTTON_GAP_INCHES
+            + BUTTON_HEIGHT_INCHES
+            + DATE_INPUT_BOTTOM_INCHES
+            + DATE_INPUT_HEIGHT_INCHES
         )
 
     def matrix_panel_bottom(rows):
@@ -595,10 +618,7 @@ def draw_chart(results, price_data=None, show_chart=SHOW_CHART):
         return STRATEGY_SECTION_TOP_INCHES + strategy_panel_height() + MATRIX_SECTION_GAP_INCHES
 
     def button_bottom(rows):
-        # Keep the editor trigger above the matrix.  With every indicator row
-        # visible, placing it below the matrix moves it outside the figure.
-        _, figure_height = fig.get_size_inches()
-        return figure_height - matrix_section_top() - BUTTON_HEIGHT_INCHES
+        return matrix_panel_bottom(rows) - BUTTON_GAP_INCHES - BUTTON_HEIGHT_INCHES
 
     def selector_panel_bottom():
         return BUTTON_HEIGHT_INCHES + BUTTON_GAP_INCHES
@@ -681,8 +701,15 @@ def draw_chart(results, price_data=None, show_chart=SHOW_CHART):
     selector_axis = None
     selector_apply_axis = None
     selector_widgets = []
+    matrix_scroll_offset = 0
+
+    def matrix_row_capacity():
+        row_space = matrix_panel_height(len(selection.visible_rows))
+        row_space -= 2 * CONTROL_BOX_PADDING_INCHES + MATRIX_TICKER_HEADER_HEIGHT_INCHES
+        return max(1, int(row_space / CONTROL_ROW_SPACING_INCHES) + 1)
 
     def draw_matrix():
+        nonlocal matrix_scroll_offset
         matrix_axis.clear()
         style_control_axis(matrix_axis, "지표 × 종목")
         matrix_controls.clear()
@@ -696,6 +723,12 @@ def draw_chart(results, price_data=None, show_chart=SHOW_CHART):
             matrix_axis.text(0.5, 0.5, "표시할 종목이 없습니다.", transform=matrix_axis.transAxes,
                              ha="center", va="center", fontsize=CONTROL_FONT_SIZE, color="#6E6E73")
             return
+        row_capacity = matrix_row_capacity()
+        max_scroll_offset = max(len(selection.visible_rows) - row_capacity, 0)
+        matrix_scroll_offset = min(matrix_scroll_offset, max_scroll_offset)
+        displayed_rows = selection.visible_rows[
+            matrix_scroll_offset:matrix_scroll_offset + row_capacity
+        ]
         column_step = MATRIX_COLUMNS_WIDTH / len(matrix_tickers)
         height = matrix_panel_height(len(selection.visible_rows))
         ticker_title_y = 1 - (
@@ -716,7 +749,7 @@ def draw_chart(results, price_data=None, show_chart=SHOW_CHART):
             x = MATRIX_FIRST_COLUMN_X + index * column_step
             matrix_axis.text(x, ticker_title_y, ticker, transform=matrix_axis.transAxes, ha="center", va="center",
                              fontsize=CONTROL_FONT_SIZE, color=ticker_color(index, len(results)))
-        for row_index, row in enumerate(selection.visible_rows):
+        for row_index, row in enumerate(displayed_rows):
             y = row_start - row_index * row_step
             matrix_axis.text(MATRIX_LABEL_X, y, row, transform=matrix_axis.transAxes, va="center",
                              fontsize=CONTROL_FONT_SIZE, color="#333333")
@@ -734,6 +767,17 @@ def draw_chart(results, price_data=None, show_chart=SHOW_CHART):
                 x = MATRIX_FIRST_COLUMN_X + ticker_index * column_step
                 box, mark = add_checkbox(matrix_axis, x, y)
                 matrix_controls.append((row, ticker, box, mark))
+        if max_scroll_offset:
+            matrix_axis.text(
+                0.98,
+                0.02,
+                "휠로 항목 스크롤",
+                transform=matrix_axis.transAxes,
+                ha="right",
+                va="bottom",
+                fontsize=CONTROL_FONT_SIZE - 2,
+                color="#6E6E73",
+            )
         refresh_matrix_controls()
 
     def refresh_matrix_controls():
@@ -753,6 +797,19 @@ def draw_chart(results, price_data=None, show_chart=SHOW_CHART):
                 persist()
                 fig.canvas.draw_idle()
                 return
+
+    def on_matrix_scroll(event):
+        nonlocal matrix_scroll_offset
+        if event.inaxes is not matrix_axis or len(selection.visible_rows) <= matrix_row_capacity():
+            return
+        direction = -1 if event.button == "up" else 1
+        max_scroll_offset = len(selection.visible_rows) - matrix_row_capacity()
+        new_offset = min(max(matrix_scroll_offset + direction, 0), max_scroll_offset)
+        if new_offset == matrix_scroll_offset:
+            return
+        matrix_scroll_offset = new_offset
+        draw_matrix()
+        fig.canvas.draw_idle()
 
     def toggle_selector_selection(group, item):
         if group == "tickers":
@@ -862,6 +919,10 @@ def draw_chart(results, price_data=None, show_chart=SHOW_CHART):
     def update_control_layout(_=None):
         nonlocal control_left
         figure_width, figure_height = fig.get_size_inches()
+        minimum_height = minimum_figure_height()
+        if figure_height < minimum_height:
+            fig.set_size_inches(figure_width, minimum_height, forward=True)
+            figure_height = minimum_height
         control_left = (figure_width - CONTROL_RIGHT_MARGIN_INCHES - CONTROL_WIDTH_INCHES) / figure_width
         strategy_axis.set_position(control_position(
             figure_height - STRATEGY_SECTION_TOP_INCHES - strategy_panel_height(),
@@ -880,6 +941,10 @@ def draw_chart(results, price_data=None, show_chart=SHOW_CHART):
             selector_axis.set_position(control_position(selector_panel_bottom(), selector_panel_height()))
             selector_apply_axis.set_position(control_position(BUTTON_GAP_INCHES, BUTTON_HEIGHT_INCHES))
             draw_selector_groups()
+        else:
+            # Rebuild with the new physical panel height so row and checkbox
+            # sizes stay fixed while the number of displayed rows changes.
+            draw_matrix()
         update_panels()
         fig.canvas.draw_idle()
 
@@ -892,6 +957,7 @@ def draw_chart(results, price_data=None, show_chart=SHOW_CHART):
     fig.canvas.mpl_connect("button_release_event", on_zoom_release)
     fig.canvas.mpl_connect("button_press_event", on_strategy_click)
     fig.canvas.mpl_connect("button_press_event", on_matrix_click)
+    fig.canvas.mpl_connect("scroll_event", on_matrix_scroll)
     fig.canvas.mpl_connect("button_press_event", on_control_click)
     fig.canvas.mpl_connect("resize_event", update_control_layout)
 
