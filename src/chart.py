@@ -595,7 +595,10 @@ def draw_chart(results, price_data=None, show_chart=SHOW_CHART):
         return STRATEGY_SECTION_TOP_INCHES + strategy_panel_height() + MATRIX_SECTION_GAP_INCHES
 
     def button_bottom(rows):
-        return matrix_panel_bottom(rows) - BUTTON_GAP_INCHES - BUTTON_HEIGHT_INCHES
+        # Keep the editor trigger above the matrix.  With every indicator row
+        # visible, placing it below the matrix moves it outside the figure.
+        _, figure_height = fig.get_size_inches()
+        return figure_height - matrix_section_top() - BUTTON_HEIGHT_INCHES
 
     def selector_panel_bottom():
         return BUTTON_HEIGHT_INCHES + BUTTON_GAP_INCHES
