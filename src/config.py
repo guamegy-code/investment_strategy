@@ -26,6 +26,7 @@ TICKERS = [
     "QQQ",      # Nasdaq 100 (QQQ, 133690.KS, 379810.KS, etc.)
     "BND",      # 미국 종합채권
     "GLD",       # 금 ETF
+    "QLD",
     "TQQQ"
  ]
 

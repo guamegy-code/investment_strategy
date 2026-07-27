@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
+from matplotlib.collections import LineCollection, PolyCollection
 from matplotlib.patches import Rectangle
 from matplotlib.ticker import NullFormatter, NullLocator
 from matplotlib.widgets import CheckButtons, TextBox
@@ -50,12 +51,21 @@ PANEL_GAP = 0.025
 PANEL_HEIGHT_WEIGHTS = {"price": 2.2, "oscillator": 1.4, "risk": 1.4}
 MONTH_GRID_MAX_YEARS = 3
 MONTH_GRID_MIN_WIDTH_INCHES = 5.0
+TIMEFRAME_STYLES = {
+    "daily": {"rule": None, "width": 0.7},
+    "weekly": {"rule": "W-FRI", "width": 4.0},
+    "monthly": {"rule": "ME", "width": 10.0},
+}
+TIMEFRAME_MAX_DAYS = {"daily": 365.25, "weekly": 3 * 365.25, "monthly": 10 * 365.25}
+CANDLE_UP_COLOR = "#FF3B30"
+CANDLE_DOWN_COLOR = "#007AFF"
 
 INDICATORS = {
     "Price": ["Close"],
     "MA": ["MA20", "MA55", "MA120", "MA200"],
     "EMA": ["EMA20", "EMA55", "EMA120", "EMA200"],
     "RSI": ["RSI14"],
+    "Disparity": ["DISPARITY60"],
     "MACD": ["MACD", "MACD_SIGNAL", "MACD_HIST"],
     "Stochastic": ["STOCH_K", "STOCH_D"],
     "ROC": ["ROC252"],
@@ -68,7 +78,7 @@ INDICATORS = {
 INDEXED_INDICATORS = {"Price", "MA", "EMA", "Bollinger"}
 PANEL_BY_INDICATOR = {
     **{name: "price" for name in ("Price", "MA", "EMA", "Bollinger")},
-    **{name: "oscillator" for name in ("RSI", "MACD", "Stochastic")},
+    **{name: "oscillator" for name in ("RSI", "Disparity", "MACD", "Stochastic")},
     **{name: "risk" for name in ("ROC", "TR", "ATR", "Volatility", "MDD")},
 }
 DETAIL_ROWS = {"MA", "EMA", "Bollinger", "MACD", "Stochastic", "ATR"}
@@ -262,6 +272,8 @@ def load_market_data():
             continue
         data = pd.read_csv(path, index_col="Date", parse_dates=True)
         if "Close" in data:
+            if "DISPARITY60" not in data:
+                data["DISPARITY60"] = data["Close"] / data["Close"].rolling(60).mean() * 100
             market_data[ticker] = data
     return market_data
 
@@ -382,6 +394,59 @@ def draw_indicator_lines(panel_axes, market_data, chart_start, strategy_count, s
     return panel_lines, indicator_lines, indicator_series
 
 
+def draw_timeframe_candles(price_axis, market_data, chart_start):
+    """Create daily, weekly, and monthly candles for zoom-dependent display."""
+    candle_lines = []
+    candle_series = []
+    candle_lines_by_ticker = {}
+    for ticker, data in market_data.items():
+        candle_lines_by_ticker[ticker] = {timeframe: [] for timeframe in TIMEFRAME_STYLES}
+        ohlc = data[["Open", "High", "Low", "Close"]].dropna()
+        if chart_start is not None:
+            ohlc = ohlc.loc[ohlc.index >= chart_start]
+        if ohlc.empty:
+            continue
+        # Use the same baseline as the Price line: the first close at chart start.
+        ohlc = ohlc / ohlc["Close"].iloc[0]
+        for timeframe, style in TIMEFRAME_STYLES.items():
+            if style["rule"] is None:
+                candles = ohlc
+            else:
+                candles = ohlc.resample(style["rule"]).agg(
+                    Open=("Open", "first"), High=("High", "max"),
+                    Low=("Low", "min"), Close=("Close", "last"),
+                ).dropna()
+            if candles.empty:
+                continue
+            wick_segments = []
+            body_vertices = []
+            colors = []
+            for date, row in candles.iterrows():
+                color = CANDLE_UP_COLOR if row.Close >= row.Open else CANDLE_DOWN_COLOR
+                date_number = mdates.date2num(date)
+                body_bottom = min(row.Open, row.Close)
+                body_height = max(abs(row.Close - row.Open), 1e-10)
+                half_width = style["width"] / 2
+                wick_segments.append([(date_number, row.Low), (date_number, row.High)])
+                body_vertices.append([
+                    (date_number - half_width, body_bottom),
+                    (date_number - half_width, body_bottom + body_height),
+                    (date_number + half_width, body_bottom + body_height),
+                    (date_number + half_width, body_bottom),
+                ])
+                colors.append(color)
+            wicks = LineCollection(wick_segments, colors=colors, linewidths=0.8,
+                                   alpha=0.75, zorder=2, visible=False)
+            bodies = PolyCollection(body_vertices, facecolors=colors, edgecolors=colors,
+                                    alpha=0.45, zorder=2, visible=False)
+            price_axis.add_collection(wicks)
+            price_axis.add_collection(bodies)
+            candle_lines.extend([wicks, bodies])
+            candle_lines_by_ticker[ticker][timeframe].extend([wicks, bodies])
+            candle_series.append(candles["Close"])
+    return candle_lines, candle_series, candle_lines_by_ticker
+
+
 
 def draw_chart(results, price_data=None, show_chart=SHOW_CHART):
     """Draw strategy performance and a ticker-by-indicator selection matrix."""
@@ -415,8 +480,12 @@ def draw_chart(results, price_data=None, show_chart=SHOW_CHART):
     panel_lines, indicator_lines, indicator_series = draw_indicator_lines(
         panel_axes, market_data, active_start_date, len(results), selection
     )
+    timeframe_lines, timeframe_series, timeframe_lines_by_ticker = draw_timeframe_candles(
+        price_axis, market_data, active_start_date
+    )
     panel_lines["price"].extend(strategy_lines.values())
-    chart_series = [*strategy_series.values(), *(series for series, _ in indicator_series.values())]
+    panel_lines["price"].extend(timeframe_lines)
+    chart_series = [*strategy_series.values(), *(series for series, _ in indicator_series.values()), *timeframe_series]
     chart_end_date = max(
         (series.index.max() for series in chart_series if not series.empty),
         default=None,
@@ -496,6 +565,39 @@ def draw_chart(results, price_data=None, show_chart=SHOW_CHART):
         update_panels()
         rescale()
 
+    def refresh_timeframe_visibility(_=None):
+        displayed_days = abs(price_axis.get_xlim()[1] - price_axis.get_xlim()[0])
+        if displayed_days <= TIMEFRAME_MAX_DAYS["daily"]:
+            active_timeframe = "daily"
+        elif displayed_days <= TIMEFRAME_MAX_DAYS["weekly"]:
+            active_timeframe = "weekly"
+        elif displayed_days <= TIMEFRAME_MAX_DAYS["monthly"]:
+            active_timeframe = "monthly"
+        else:
+            active_timeframe = None
+        for ticker, timeframe_lines in timeframe_lines_by_ticker.items():
+            ticker_visible = (
+                ticker in selection.visible_tickers
+                and selection.matrix["Price"].get(ticker, False)
+            )
+            for timeframe, lines in timeframe_lines.items():
+                visible = ticker_visible and timeframe == active_timeframe
+                for line in lines:
+                    line.set_visible(visible)
+        rescale()
+
+    def rebuild_timeframe_candles():
+        nonlocal timeframe_lines, timeframe_series, timeframe_lines_by_ticker
+        for artist in timeframe_lines:
+            artist.remove()
+        panel_lines["price"] = [
+            artist for artist in panel_lines["price"] if artist not in timeframe_lines
+        ]
+        timeframe_lines, timeframe_series, timeframe_lines_by_ticker = draw_timeframe_candles(
+            price_axis, market_data, active_start_date
+        )
+        panel_lines["price"].extend(timeframe_lines)
+
     def on_start_date_submit(value):
         nonlocal active_start_date
         value = value.strip()
@@ -506,7 +608,9 @@ def draw_chart(results, price_data=None, show_chart=SHOW_CHART):
             if pd.isna(parsed_date):
                 return
             active_start_date = pd.Timestamp(parsed_date)
+        rebuild_timeframe_candles()
         reset_chart_view()
+        refresh_timeframe_visibility()
         fig.canvas.draw_idle()
 
     def reset_chart_view():
@@ -824,6 +928,7 @@ def draw_chart(results, price_data=None, show_chart=SHOW_CHART):
                 selection.matrix[row][ticker] = not selection.matrix[row][ticker]
                 refresh_matrix_controls()
                 refresh_lines()
+                refresh_timeframe_visibility()
                 persist()
                 fig.canvas.draw_idle()
                 return
@@ -849,6 +954,7 @@ def draw_chart(results, price_data=None, show_chart=SHOW_CHART):
                 selection.visible_tickers[:] = [
                     ticker for ticker in market_data if ticker in {*selection.visible_tickers, item}
                 ]
+            refresh_timeframe_visibility()
             return
         if item in selection.visible_rows:
             selection.visible_rows.remove(item)
@@ -983,8 +1089,10 @@ def draw_chart(results, price_data=None, show_chart=SHOW_CHART):
     draw_matrix()
     refresh_lines()
     update_month_grid()
+    refresh_timeframe_visibility()
     date_input.on_submit(on_start_date_submit)
     price_axis.callbacks.connect("xlim_changed", update_month_grid)
+    price_axis.callbacks.connect("xlim_changed", refresh_timeframe_visibility)
     fig.canvas.mpl_connect("scroll_event", prevent_y_zoom_when_x_is_limited)
     fig.canvas.mpl_connect("button_press_event", on_zoom_press)
     fig.canvas.mpl_connect("button_release_event", on_zoom_release)
