@@ -44,6 +44,15 @@ class Indicator:
         return df
 
     # ==================================================
+    # Price Disparity
+    # ==================================================
+    @staticmethod
+    def add_disparity(df, period=60):
+        moving_average = df["Close"].rolling(period).mean()
+        df[f"DISPARITY{period}"] = df["Close"] / moving_average * 100
+        return df
+
+    # ==================================================
     # MACD
     # ==================================================
     @staticmethod
@@ -128,6 +137,7 @@ class Indicator:
         df = cls.add_ma(df)
         df = cls.add_ema(df)
         df = cls.add_rsi(df)
+        df = cls.add_disparity(df)
         df = cls.add_macd(df)
         df = cls.add_stochastic(df)
         df = cls.add_roc(df)
@@ -135,4 +145,4 @@ class Indicator:
         df = cls.add_bollinger(df)
         df = cls.add_volatility(df)
         df = cls.add_mdd(df)
-        return df    
+        return df

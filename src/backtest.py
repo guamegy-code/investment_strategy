@@ -80,6 +80,7 @@ class Backtest:
                 "EMA120": row.get(f"{ticker}_EMA120"),
                 "EMA200": row.get(f"{ticker}_EMA200"),
                 "RSI14": row.get(f"{ticker}_RSI14"),
+                "DISPARITY60": row.get(f"{ticker}_DISPARITY60"),
                 "MACD": row.get(f"{ticker}_MACD"),
                 "MACD_SIGNAL": row.get(f"{ticker}_MACD_SIGNAL"),
                 "MACD_HIST": row.get(f"{ticker}_MACD_HIST"),
