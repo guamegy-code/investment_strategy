@@ -295,31 +295,57 @@ def series_from_start(series, start_date, normalize=False, base_series=None):
 
 
 def rebalance_directions(history, trades, rebalances):
-    """Return an up/down marker for each rebalance start date."""
+    """Return an up/down marker for each rebalance's first execution date.
+
+    Rebalance signals are recorded at day t's close and the engine executes
+    them from day t+1's open. Matching trades to the signal date therefore
+    hides valid markers; each event is paired with its first later trade date.
+    """
     if trades is None or trades.empty or "Date" not in trades:
         return {}
     trades = trades.dropna(subset=["Date"]).copy()
     trades["Date"] = pd.to_datetime(trades["Date"])
-    dates = (
-        pd.to_datetime([event["Date"] for event in rebalances if event.get("Date") is not None])
-        if rebalances
-        else trades["Date"].drop_duplicates()
-    )
     directions = {}
-    for date in dates:
-        if date not in history.index:
+    if rebalances:
+        signal_dates = sorted(
+            pd.Timestamp(event["Date"])
+            for event in rebalances
+            if event.get("Date") is not None
+        )
+        execution_dates = []
+        trade_dates = trades["Date"].drop_duplicates().sort_values()
+        for index, signal_date in enumerate(signal_dates):
+            next_signal = (
+                signal_dates[index + 1]
+                if index + 1 < len(signal_dates)
+                else None
+            )
+            candidates = trade_dates[trade_dates > signal_date]
+            if next_signal is not None:
+                candidates = candidates[candidates <= next_signal]
+            if not candidates.empty:
+                execution_dates.append(candidates.iloc[0])
+    else:
+        execution_dates = list(trades["Date"].drop_duplicates())
+
+    for execution_date in execution_dates:
+        if execution_date not in history.index:
             continue
-        day_trades = trades[trades["Date"] == date]
-        weights = history.at[date, "Weights"]
+        day_trades = trades[trades["Date"] == execution_date]
+        weights = history.at[execution_date, "Weights"]
         if day_trades.empty or not isinstance(weights, dict):
             continue
         net_shares = day_trades.groupby("Ticker")["Shares"].sum()
         candidates = [ticker for ticker in net_shares.index if ticker in weights]
         if not candidates:
             continue
-        ticker = max(candidates, key=weights.get)
+        # Dynamic-allocation arrows represent risk exposure. Prefer QQQ when
+        # it is part of the rebalance; otherwise retain the generic fallback.
+        ticker = "QQQ" if "QQQ" in candidates else max(candidates, key=weights.get)
         if net_shares[ticker] != 0:
-            directions[date] = "up" if net_shares[ticker] > 0 else "down"
+            directions[execution_date] = (
+                "up" if net_shares[ticker] > 0 else "down"
+            )
     return directions
 
 

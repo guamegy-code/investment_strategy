@@ -1,0 +1,36 @@
+{
+  "status": "LOCKED",
+  "locked_on": "2026-08-01",
+  "historical_data_cutoff": "2026-07-31",
+  "oos_start": "2026-08-03",
+  "strategy": "DynamicRiskAllocationStrategy",
+  "benchmark": "STATIC_70_BND10_BIL10_GLD10",
+  "parameters": {
+    "safe_momentum_period": 40,
+    "safe_switch_buffer_pct_points": 0.25,
+    "bull_reentry_rule": "ABOVE_EMA55_AND_ROC60_POSITIVE",
+    "structural_drawdown": -0.08,
+    "bear_confirmation_days": 10,
+    "caution_enter_score": 5,
+    "caution_confirmation_days": 3,
+    "bear_recovery_score": 3,
+    "recovery_confirmation_days": 2,
+    "state_weights_qqq_gold": {
+      "BULL": [0.7, 0.1],
+      "CAUTION": [0.7, 0.15],
+      "BEAR": [0.0, 0.2],
+      "RECOVERY": [0.5, 0.15]
+    },
+    "commission": 0.00015,
+    "slippage": 0.0002,
+    "execution": "signal_close_then_next_session_open",
+    "extra_signal_delay_days": 0
+  },
+  "code_sha256": {
+    "strategy.py": "cee30c70b8b0f72efcdeb793c2fd9c7e6896725913afe80c7581b32a060d4a68",
+    "backtest.py": "67d88fed4b736f630c5b3529f63843fba6c049a9af76c9e42a4dbb5e8f41e6c8",
+    "portfolio.py": "daa389ec841921eee5a273a3337583488e3d02a3c006f5393a9c2b4d8d7e439c",
+    "indicators.py": "f81e6c7d8d9f36ae812ebcc2c5f63eb3833b3362b7811928b9042e61ac6dfee0"
+  },
+  "methodology_note": "All data through the cutoff was used during development and is retrospective, not out-of-sample. Only observations after oos_start count as final OOS evidence."
+}

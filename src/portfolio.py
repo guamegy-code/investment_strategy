@@ -7,13 +7,16 @@ from copy import deepcopy
 
 class Portfolio:
 
-    def __init__(self):
+    def __init__(self, commission=0.0, slippage=0.0):
         # All backtests use an indexed starting value of 1.0.
         self.cash = 1.0
         self.positions = {}
         self.history = []
         self.trades = []
         self.rebalances = []
+        self.commission = commission
+        self.slippage = slippage
+        self.total_costs = 0.0
 
         # -----------------------------
         # 분할 리밸런싱
@@ -54,13 +57,14 @@ class Portfolio:
     # ==================================================
     # 분할 리밸런싱 시작
     # ==================================================
-    def start_rebalance(self, target, days=5, date=None):
+    def start_rebalance(self, target, days=5, date=None, reason=None):
         self.pending_target = deepcopy(target)
         self.remaining_days = days
         self.total_days = days
         self.rebalances.append({
             "Date": date,
             "Target": deepcopy(target),
+            "Reason": reason,
         })
 
     # ==================================================
@@ -123,14 +127,31 @@ class Portfolio:
     def trade(self, ticker, shares, price, date=None):
         if abs(shares) < 1e-8:
             return
-        cost = shares * price
-        self.cash -= cost
+
+        direction = 1 if shares > 0 else -1
+        execution_price = price * (1 + direction * self.slippage)
+
+        # Do not borrow cash merely to pay transaction costs.
+        if shares > 0:
+            affordable = max(self.cash, 0.0) / (
+                execution_price * (1 + self.commission)
+            )
+            shares = min(shares, affordable)
+            if shares < 1e-8:
+                return
+
+        notional = shares * execution_price
+        fee = abs(notional) * self.commission
+        self.cash -= notional + fee
+        self.total_costs += fee + abs(shares) * abs(execution_price - price)
         self.positions[ticker] = self.positions.get(ticker, 0) + shares
         self.trades.append({
             "Date": date,
             "Ticker": ticker,
             "Shares": shares,
-            "Price": price,
+            "Price": execution_price,
+            "ReferencePrice": price,
+            "Fee": fee,
             "Cash": self.cash,
         })
 
@@ -138,14 +159,18 @@ class Portfolio:
     # ==================================================
     # 일별 기록
     # ==================================================
-    def record(self, date, prices):
-        self.history.append({
+    def record(self, date, prices, metadata=None):
+        row = {
             "Date": date,
             "Portfolio": self.value(prices),
             "Cash": self.cash,
+            "TransactionCosts": self.total_costs,
             "Weights": self.weights(prices).copy(),
             "Positions": self.positions.copy(),
-        })
+        }
+        if metadata:
+            row.update(metadata)
+        self.history.append(row)
 
     # ==================================================
     # 결과 반환

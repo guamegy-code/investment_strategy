@@ -59,6 +59,22 @@ class Performance:
             return 0
         return excess_return / annual_volatility
 
+    # ==================================================
+    # Sortino / Calmar Ratio
+    # ==================================================
+    def sortino_ratio(self):
+        downside = self.returns[self.returns < 0].std() * np.sqrt(TRADING_DAYS)
+        if downside == 0 or np.isnan(downside):
+            return 0
+        excess_return = self.returns.mean() * TRADING_DAYS - RISK_FREE_RATE
+        return excess_return / downside
+
+    def calmar_ratio(self):
+        drawdown = abs(self.mdd())
+        if drawdown == 0:
+            return 0
+        return self.cagr() / drawdown
+
 
     # ==================================================
     # 결과 요약
@@ -69,6 +85,11 @@ class Performance:
             "MDD": self.mdd(),
             "Volatility": self.volatility(),
             "Sharpe": self.sharpe_ratio(),
+            "Sortino": self.sortino_ratio(),
+            "Calmar": self.calmar_ratio(),
+            "TransactionCosts": self.history.get(
+                "TransactionCosts", pd.Series([0.0])
+            ).iloc[-1],
             "Start": self.history["Portfolio"].iloc[0],
             "End": self.history["Portfolio"].iloc[-1],
         }

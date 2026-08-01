@@ -6,14 +6,18 @@ runner.py
 
 import pandas as pd
 from backtest import Backtest
+from config import DATA_DIR
 from performance import Performance
 
 
 class Runner:
 
-    def __init__(self):
+    def __init__(self, data_dir=DATA_DIR, tickers=None, backtest_options=None):
         self.strategies = []
         self.results = []
+        self.data_dir = data_dir
+        self.tickers = tickers
+        self.backtest_options = backtest_options or {}
 
     # ==================================================
     # 전략 등록
@@ -29,7 +33,12 @@ class Runner:
         self.results = []
 
         for strategy in self.strategies:
-            backtest = Backtest(strategy)
+            backtest = Backtest(
+                strategy,
+                data_dir=self.data_dir,
+                tickers=self.tickers,
+                **self.backtest_options,
+            )
             history, trades, rebalances = backtest.run_all()
             performance = Performance(history)
             summary = performance.summary()
@@ -40,6 +49,7 @@ class Runner:
                 "history": history,
                 "trades": trades,
                 "rebalances": rebalances,
+                "market_data": backtest.data,
                 "summary": summary,
             })
 
@@ -65,6 +75,9 @@ class Runner:
             "MDD",
             "Volatility",
             "Sharpe",
+            "Sortino",
+            "Calmar",
+            "TransactionCosts",
             "Start",
             "End",
         ]

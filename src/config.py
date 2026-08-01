@@ -1,92 +1,27 @@
-"""
-config.py
-
-프로젝트 전체에서 사용하는 설정값
-"""
+"""Shared paths and runtime assumptions for the backtest."""
 
 from pathlib import Path
 
-# ======================================================
-# 프로젝트 경로
-# ======================================================
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-
 DATA_DIR = PROJECT_ROOT / "data"
+EXTENDED_DATA_DIR = PROJECT_ROOT / "data_extended"
 RESULT_DIR = PROJECT_ROOT / "results"
 
-DATA_DIR.mkdir(exist_ok=True)
-RESULT_DIR.mkdir(exist_ok=True)
+for directory in (DATA_DIR, EXTENDED_DATA_DIR, RESULT_DIR):
+    directory.mkdir(exist_ok=True)
 
-# ======================================================
-# 데이터 설정
-# ======================================================
-
-TICKERS = [
-    "QQQ",      # Nasdaq 100 (QQQ, 133690.KS, 379810.KS, etc.)
-    "BND",      # 미국 종합채권
-    "GLD",       # 금 ETF
-    "QLD",
-    "TQQQ"
- ]
-
+TICKERS = ["QQQ", "BND", "GLD", "BIL", "QLD"]
 START_DATE = "2010-01-01"
+EXTENDED_START_DATE = "1999-03-10"
+END_DATE = None
 
-END_DATE = None      # 오늘까지 다운로드
+COMMISSION = 0.00015
+SLIPPAGE = 0.00020
 
-
-# ======================================================
-# 초기 투자금
-# ======================================================
-
-# ======================================================
-# 리밸런싱
-# ======================================================
-
-REBALANCE = {
-    "frequency": "monthly",      # monthly / quarterly / yearly
-    "threshold": 0.05            # 목표 비중과 5% 이상 차이 시
-}
-
-
-# ======================================================
-# 거래 비용
-# ======================================================
-
-COMMISSION = 0.00015      # 0.015%
-SLIPPAGE = 0.00020        # 0.02%
-
-
-# ======================================================
-# RSI
-# ======================================================
-
-RSI_PERIOD = 14
-RSI_BUY = 30
-RSI_SELL = 70
-
-
-# ======================================================
-# 전략 설정
-# ======================================================
-
-USE_RSI = True
-USE_MOVING_AVERAGE = True
-
-
-# ======================================================
-# 성과 분석
-# ======================================================
-
-RISK_FREE_RATE = 0.03      # Sharpe Ratio 계산용
+RISK_FREE_RATE = 0.03
 TRADING_DAYS = 252
-
-
-# ======================================================
-# 그래프
-# ======================================================
 
 FIGURE_SIZE = (15, 8)
 SAVE_FIGURE = True
-# 그래프 창을 열어 종목별 체크박스로 표시 여부를 바꿀지 여부
 SHOW_CHART = True
