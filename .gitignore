@@ -1,9 +1,11 @@
 # Python
 __pycache__/
 *.pyc
+.yf-cache/
 
 # Data
 data/*.csv
+data_extended/*.csv
 
 # Results
 results/*

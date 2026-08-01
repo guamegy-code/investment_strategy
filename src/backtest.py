@@ -7,33 +7,108 @@ backtest.py
 import pandas as pd
 
 from config import (
+    COMMISSION,
     DATA_DIR,
+    SLIPPAGE,
     TICKERS,
 )
 
+from indicators import Indicator
 from portfolio import Portfolio
 
 
 class Backtest:
 
-    def __init__(self, strategy):
+    def __init__(
+        self,
+        strategy,
+        data_dir=DATA_DIR,
+        tickers=None,
+        commission=COMMISSION,
+        slippage=SLIPPAGE,
+        signal_delay_days=0,
+        bear_signal_delay_days=None,
+    ):
 
         self.strategy = strategy
-        self.tickers = TICKERS
+        self.data_dir = data_dir
+        self.tickers = list(tickers or TICKERS)
+        self.signal_delay_days = signal_delay_days
+        self.bear_signal_delay_days = bear_signal_delay_days
+        self.delayed_rebalance = None
         self.data = self.load_data()
-        self.portfolio = Portfolio()
+        self.portfolio = Portfolio(
+            commission=commission,
+            slippage=slippage,
+        )
+
+    def _delay_for_signal(self):
+        state = getattr(self.strategy, "state", None)
+        if hasattr(state, "value"):
+            state = state.value
+        if state == "BEAR" and self.bear_signal_delay_days is not None:
+            return self.bear_signal_delay_days
+        return self.signal_delay_days
+
+    def _queue_rebalance(self, signal, signal_date):
+        delay = self._delay_for_signal()
+        if delay <= 0:
+            # An immediately actionable new signal invalidates any older order
+            # that was still waiting for its execution date.
+            self.delayed_rebalance = None
+            self.portfolio.start_rebalance(
+                signal["target"], signal["days"], date=signal_date,
+                reason=signal.get("reason"),
+            )
+            return
+        # A later signal supersedes an order that has not started executing.
+        self.delayed_rebalance = {
+            "remaining": delay,
+            "target": signal["target"].copy(),
+            "days": signal["days"],
+            "signal_date": signal_date,
+            "reason": signal.get("reason"),
+        }
+
+    def _activate_delayed_rebalance(self, execution_date):
+        queued = self.delayed_rebalance
+        if queued is None:
+            return
+        if queued["remaining"] > 0:
+            queued["remaining"] -= 1
+            return
+        reason = queued.get("reason")
+        delay_note = f"EXECUTION_DELAY_FROM_{queued['signal_date'].date()}"
+        reason = f"{reason}|{delay_note}" if reason else delay_note
+        self.portfolio.start_rebalance(
+            queued["target"], queued["days"], date=execution_date,
+            reason=reason,
+        )
+        self.delayed_rebalance = None
 
 
     # ==================================================
     # ETF 데이터 로딩
     # ==================================================
     def load_one(self, ticker):
-        file = DATA_DIR / f"{ticker}.csv"
+        file = self.data_dir / f"{ticker}.csv"
         df = pd.read_csv(
             file,
             index_col="Date",
             parse_dates=True
         )
+        required = {
+            "ROC5",
+            "ROC20",
+            "ROC40",
+            "ROC60",
+            "EMA20_SLOPE5",
+            "EMA200_SLOPE20",
+            "DRAWDOWN120",
+            "RSI14",
+        }
+        if not required.issubset(df.columns):
+            df = Indicator.add_indicators(df)
         return df
 
 
@@ -56,10 +131,11 @@ class Backtest:
     # ==================================================
     # 현재 가격
     # ==================================================
-    def get_prices(self, row):
+    def get_prices(self, row, field="Close"):
         prices = {}
         for ticker in self.tickers:
-            prices[ticker] = row[f"{ticker}_Close"]
+            column = f"{ticker}_{field}"
+            prices[ticker] = row.get(column, row[f"{ticker}_Close"])
         return prices
 
  
@@ -71,31 +147,17 @@ class Backtest:
         for ticker in self.tickers:
             market[ticker] = {
                 "Close": row[f"{ticker}_Close"],
-                "MA20": row.get(f"{ticker}_MA20"),
-                "MA55": row.get(f"{ticker}_MA55"),
-                "MA120": row.get(f"{ticker}_MA120"),
-                "MA200": row.get(f"{ticker}_MA200"),
                 "EMA20": row.get(f"{ticker}_EMA20"),
                 "EMA55": row.get(f"{ticker}_EMA55"),
-                "EMA120": row.get(f"{ticker}_EMA120"),
                 "EMA200": row.get(f"{ticker}_EMA200"),
+                "ROC5": row.get(f"{ticker}_ROC5"),
+                "ROC20": row.get(f"{ticker}_ROC20"),
+                "ROC40": row.get(f"{ticker}_ROC40"),
+                "ROC60": row.get(f"{ticker}_ROC60"),
+                "EMA20_SLOPE5": row.get(f"{ticker}_EMA20_SLOPE5"),
+                "EMA200_SLOPE20": row.get(f"{ticker}_EMA200_SLOPE20"),
+                "DRAWDOWN120": row.get(f"{ticker}_DRAWDOWN120"),
                 "RSI14": row.get(f"{ticker}_RSI14"),
-                "DISPARITY60": row.get(f"{ticker}_DISPARITY60"),
-                "MACD": row.get(f"{ticker}_MACD"),
-                "MACD_SIGNAL": row.get(f"{ticker}_MACD_SIGNAL"),
-                "MACD_HIST": row.get(f"{ticker}_MACD_HIST"),
-                "STOCH_K": row.get(f"{ticker}_STOCH_K"),
-                "STOCH_D": row.get(f"{ticker}_STOCH_D"),
-                "ROC252": row.get(f"{ticker}_ROC252"),
-                "ATR": row.get(f"{ticker}_ATR"),
-                "ATR60": row.get(f"{ticker}_ATR60"),
-                "BB_UPPER": row.get(f"{ticker}_BB_UPPER"),
-                "BB_MIDDLE": row.get(f"{ticker}_BB_MIDDLE"),
-                "BB_LOWER": row.get(f"{ticker}_BB_LOWER"),
-                "VOL60": row.get(f"{ticker}_VOL60"),
-                "MDD252": row.get(f"{ticker}_MDD252"),
-                "QQQ_BND": row.get("QQQ_BND"),
-                "QQQ_GLD": row.get("QQQ_GLD"),
             }
         return market    
     
@@ -105,36 +167,50 @@ class Backtest:
     # ==================================================
     def run(self):
 
-        first_trade = True
+        first_signal = True
 
         for date, row in self.data.iterrows():
-            prices = self.get_prices(row)
+            # A signal observed at yesterday's close is executed at today's open.
+            open_prices = self.get_prices(row, field="Open")
+            self._activate_delayed_rebalance(date)
+            self.portfolio.update(open_prices, date=date)
+
+            prices = self.get_prices(row, field="Close")
             market = self.get_market(row)
             signal  = self.strategy.evaluate(date, market, self.portfolio)
 
             # ------------------------------------------
             # 최초 투자
             # ------------------------------------------
-            if first_trade:
+            if first_signal:
                 self.portfolio.start_rebalance(
-                    signal["target"], days=signal["days"], date=date
+                    signal["target"], days=signal["days"], date=date,
+                    reason=signal.get("reason"),
                 )
-                first_trade = False
+                first_signal = False
 
             # ------------------------------------------
             # 전략에 따른 리밸런싱
             # ------------------------------------------
             elif signal["rebalance"]:
-                self.portfolio.start_rebalance(
-                    signal["target"], signal["days"], date=date
-                )
-
-            self.portfolio.update(prices, date=date)
+                self._queue_rebalance(signal, date)
 
             # ------------------------------------------
             # 일별 기록
             # ------------------------------------------
-            self.portfolio.record(date, prices)
+            state = getattr(self.strategy, "state", None)
+            if hasattr(state, "value"):
+                state = state.value
+            self.portfolio.record(
+                date,
+                prices,
+                metadata={
+                    "StrategyState": state,
+                    "RiskOffScore": getattr(self.strategy, "risk_off_score", None),
+                    "RecoveryScore": getattr(self.strategy, "recovery_score", None),
+                    "SafeAsset": getattr(self.strategy, "safe_asset", None),
+                },
+            )
 
         return self.get_result()
     

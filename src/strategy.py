@@ -1,286 +1,353 @@
-"""
-strategy.py
-
-전략 기본 클래스
-"""
+"""Production strategy and the static benchmarks used to evaluate it."""
 
 from abc import ABC, abstractmethod
+from enum import Enum
 
 
 class BaseStrategy(ABC):
-
     @abstractmethod
     def evaluate(self, date, market, portfolio):
-        """
-        Returns
-        -------
-        {
-            "rebalance": bool,
-            "target": dict,
-            "reason": str | None
-        }
-        """
-        pass
+        """Return a rebalance decision, target weights, and execution days."""
 
 
-class Strategy1(BaseStrategy):
-
-    def __init__(self):
-        self.current_target = {
-            "QQQ": 0.6,
-            "BND": 0.3,
-            "GLD": 0.1,
-        }
-
-    def evaluate(self, date, market, portfolio):
-        qqq = market["QQQ"]
-
-        close = qqq["Close"]
-        ma200 = qqq["MA200"]
-        rsi = qqq["RSI14"]
-
-        target = {
-            "QQQ": 0.6,
-            "BND": 0.3,
-            "GLD": 0.1,
-        }
-
-        reason = None
-
-        # -----------------------------
-        # 1. RSI 과열
-        # -----------------------------
-        if rsi >= 75:
-            target = {
-                "QQQ": 0.6,
-                "BND": 0.3,
-                "GLD": 0.1,
-            }
-            reason = "RSI_OVERBOUGHT"
-        
-        # -----------------------------
-        # 2. MA200 하향 이탈
-        # -----------------------------
-        elif close < ma200:
-            target = {
-                "QQQ": 0.6,
-                "BND": 0.3,
-                "GLD": 0.1,
-            }
-            reason = "MA200_BREAKDOWN"
-
-        # -----------------------------
-        # 목표 비중 변경 여부
-        # -----------------------------
-        if target != self.current_target:
-            self.current_target = target
-            self.last_rebalance_month = date.to_period("M")
-            return {
-                "rebalance": True,
-                "target": target,
-                "days": 3,
-                "reason": reason
-            }
-
-        # -----------------------------
-        # 아무것도 안 함
-        # -----------------------------
-        return {
-            "rebalance": False,
-            "target": self.current_target,
-            "days": 3,
-            "reason": None,
-        }
-    
-class Strategy2(BaseStrategy):
-
-    def __init__(self):
-        self.current_target = {
-            "QQQ": 0.6,
-            "BND": 0.3,
-            "GLD": 0.1,
-        }
-        self.last_rebalance_month = None
-
-    def evaluate(self, date, market, portfolio):
-        qqq = market["QQQ"]
-
-        close = qqq["Close"]
-        ma200 = qqq["MA200"]
-        rsi = qqq["RSI14"]
-
-        target = {
-            "QQQ": 0.6,
-            "BND": 0.3,
-            "GLD": 0.1,
-        }
-
-        reason = None
-        day = 5
-
-        # -----------------------------
-        # 1. RSI 과열
-        # -----------------------------
-        if rsi >= 75:
-            target = {
-                "QQQ": 0.6,
-                "BND": 0.3,
-                "GLD": 0.1,
-            }
-            day = 5
-            reason = "RSI_OVERBOUGHT"
-        
-        # -----------------------------
-        # 2. MA200 하향 이탈
-        # -----------------------------
-        elif close < ma200:
-            target = {
-                "QQQ": 0.6,
-                "BND": 0.3,
-                "GLD": 0.1,
-            }
-            day = 1
-            reason = "MA200_BREAKDOWN"
-
-        # -----------------------------
-        # 목표 비중 변경 여부
-        # -----------------------------
-        if target != self.current_target:
-            self.current_target = target
-            self.last_rebalance_month = date.to_period("M")
-            return {
-                "rebalance": True,
-                "target": target,
-                "days": day,
-                "reason": reason
-            }
-
-        # -----------------------------
-        # 아무것도 안 함
-        # -----------------------------
-        return {
-            "rebalance": False,
-            "target": self.current_target,
-            "days": day,
-            "reason": None,
-        }
-
-from enum import Enum
-
-class MarketState(Enum):
+class AllocationState(Enum):
     BULL = "BULL"
-    OVERHEATED = "OVERHEATED"
+    CAUTION = "CAUTION"
     BEAR = "BEAR"
-    CRASH = "CRASH"
+    RECOVERY = "RECOVERY"
 
-class TrendStrategy(BaseStrategy):
+
+class DynamicRiskAllocationStrategy(BaseStrategy):
+    """Final QQQ regime strategy with adaptive BND/BIL allocation."""
+
+    STATE_WEIGHTS = {
+        AllocationState.BULL: (0.70, 0.10),
+        AllocationState.CAUTION: (0.70, 0.15),
+        AllocationState.BEAR: (0.00, 0.20),
+        AllocationState.RECOVERY: (0.50, 0.15),
+    }
+
+    BEAR_ENTRY_SCORE = 5
+    BEAR_CONFIRMATION_DAYS = 10
+    STRUCTURAL_DRAWDOWN = -0.08
+    CAUTION_ENTER_SCORE = 5
+    CAUTION_CONFIRMATION_DAYS = 3
+    BEAR_RECOVERY_SCORE = 3
+    RECOVERY_CONFIRMATION_DAYS = 2
+    BULL_CONFIRMATION_DAYS = 3
+    SAFE_MOMENTUM_PERIOD = 40
+    SAFE_SWITCH_BUFFER = 0.25
 
     def __init__(self):
         self.state = None
         self.target = None
+        self.safe_asset = None
+        self.last_rebalance_month = None
+        self.last_safe_selection_month = None
+        self.risk_off_score = 0
+        self.recovery_score = 0
+        self._candidate = None
+        self._candidate_days = 0
 
-    # ==================================================
-    # 목표 비중
-    # ==================================================
-    def allocation(self, state):
-        if state == MarketState.BULL:
-            return {
-                "QQQ": 0.6,
-                "BND": 0.4,
-                "GLD": 0
-            }
-        elif state == MarketState.OVERHEATED:
-            return {
-                "QQQ": 0.6,
-                "BND": 0.4,
-                "GLD": 0
-            }
-        elif state == MarketState.BEAR:
-            return {
-                "QQQ": 0.7,
-                "BND": 0.3,
-                "GLD": 0,
-            }
-        else:
-            return {
-                "QQQ": 0.7,
-                "BND": 0.3,
-                "GLD": 0,
-            }
+    @staticmethod
+    def _valid(*values):
+        return all(value is not None and value == value for value in values)
 
-    # ==================================================
-    # 시장 상태 판단
-    # ==================================================
-    def detect_state(self, market):
-        qqq = market["QQQ"]
+    def _scores(self, qqq):
+        # 단기 상태 점수는 6개 조건으로 구성한다. 하락 조건은
+        # risk_off_score, 반대의 상승 조건은 recovery_score에 합산된다.
         close = qqq["Close"]
-        ma200 = qqq["MA200"]
-        rsi = qqq["RSI14"]
-        macd = qqq["MACD"]
-        signal = qqq["MACD_SIGNAL"]
-        atr = qqq["ATR"]
-        atr_ma = qqq["ATR60"]
+        ema20 = qqq["EMA20"]
+        ema55 = qqq["EMA55"]
+        ema200 = qqq["EMA200"]
+        roc5 = qqq["ROC5"]
+        roc20 = qqq["ROC20"]
+        slope5 = qqq["EMA20_SLOPE5"]
+        if not self._valid(close, ema20, ema55, ema200, roc5, roc20, slope5):
+            return 0, 0
 
-        # --------------------------------------------------
-        # 강한 하락장
-        # --------------------------------------------------
-        if (close < ma200 and macd < signal and atr > atr_ma * 1.5):
-            return MarketState.CRASH
+        risk_off = sum((
+            close < ema20,
+            close < ema55,
+            ema20 < ema55,
+            roc5 < 0,
+            roc20 < 0,
+            slope5 < 0,
+        ))
+        recovery = sum((
+            close > ema20,
+            close > ema55,
+            ema20 > ema55,
+            roc5 > 0,
+            roc20 > 0,
+            slope5 > 0,
+        ))
+        return int(risk_off), int(recovery)
 
-        # --------------------------------------------------
-        # 약세장
-        # --------------------------------------------------
-        if (close < ma200 and macd < signal):
-            return MarketState.BEAR
-
-        # --------------------------------------------------
-        # 과열
-        # --------------------------------------------------
-        if rsi >= 75:
-            return MarketState.OVERHEATED
-
-        # --------------------------------------------------
-        # 기본
-        # --------------------------------------------------
-        return MarketState.BULL
-
-    # ==================================================
-    # 전략 평가
-    # ==================================================
-    def evaluate(self, date, market, portfolio):
-        new_state = self.detect_state(
-            market
+    def _is_structural_bear(self, qqq):
+        # 단기 약세만으로 BEAR에 진입하지 않는다. 이동평균 역배열,
+        # 60일 하락, 장기 EMA 하락, 최근 고점 대비 -8% 이하를 모두 요구한다.
+        close = qqq["Close"]
+        ema20 = qqq["EMA20"]
+        ema55 = qqq["EMA55"]
+        ema200 = qqq["EMA200"]
+        roc60 = qqq.get("ROC60")
+        slope200 = qqq.get("EMA200_SLOPE20")
+        drawdown120 = qqq.get("DRAWDOWN120")
+        if not self._valid(
+            close, ema20, ema55, ema200, roc60, slope200, drawdown120
+        ):
+            return False
+        return (
+            self.risk_off_score >= self.BEAR_ENTRY_SCORE
+            and close < ema20 < ema55 < ema200
+            and roc60 < 0
+            and slope200 < 0
+            and drawdown120 <= self.STRUCTURAL_DRAWDOWN
         )
 
-        # 최초 투자
+    def _bull_reentry_allowed(self, qqq):
+        # BEAR 이후의 짧은 반등을 걸러내기 위한 중기 추세 복귀 조건이다.
+        close = qqq.get("Close")
+        ema55 = qqq.get("EMA55")
+        roc60 = qqq.get("ROC60")
+        return self._valid(close, ema55, roc60) and close > ema55 and roc60 > 0
+
+    def _desired_state(self, qqq):
+        self.risk_off_score, self.recovery_score = self._scores(qqq)
+        structural_bear = self._is_structural_bear(qqq)
+
+        # 최초 상태: 구조적 하락이면 BEAR, 단기 약세 점수가 높으면 CAUTION,
+        # 어느 조건에도 해당하지 않으면 BULL로 시작한다.
         if self.state is None:
-            self.state = new_state
-            self.target = self.allocation(new_state)
-            return {
-                "rebalance": True,
-                "target": self.target,
-                "days": 1,
-                "reason": "INITIAL",
-            }
+            if structural_bear:
+                return AllocationState.BEAR
+            if self.risk_off_score >= self.CAUTION_ENTER_SCORE:
+                return AllocationState.CAUTION
+            return AllocationState.BULL
 
-        # 상태 변화
-        if new_state != self.state:
-            old_state = self.state
-            self.state = new_state
-            self.target = self.allocation(new_state)
-            return {
-                "rebalance": True,
-                "target": self.target,
-                "days": 3,
-                "reason": (f"{old_state.value}" f" -> " f"{new_state.value}"),
-            }
+        # BULL: 구조적 하락은 BEAR 후보, 단기 약세 5점 이상은 CAUTION 후보.
+        if self.state == AllocationState.BULL:
+            if structural_bear:
+                return AllocationState.BEAR
+            if self.risk_off_score >= self.CAUTION_ENTER_SCORE:
+                return AllocationState.CAUTION
+            return self.state
 
-        # 유지
+        # CAUTION: 구조적 하락이 확인되면 BEAR, 상승 점수 4점 이상이면 BULL.
+        if self.state == AllocationState.CAUTION:
+            if structural_bear:
+                return AllocationState.BEAR
+            if self.recovery_score >= 4:
+                return AllocationState.BULL
+            return self.state
+
+        # BEAR: 상승 조건 6개 중 3개 이상 회복되면 RECOVERY 후보가 된다.
+        if self.state == AllocationState.BEAR:
+            if self.recovery_score >= self.BEAR_RECOVERY_SCORE:
+                return AllocationState.RECOVERY
+            return self.state
+
+        # RECOVERY: 구조적 하락이 재발하면 BEAR로 돌아간다. BULL 복귀에는
+        # 상승 점수 4점과 종가>EMA55, ROC60>0을 함께 요구한다.
+        if structural_bear:
+            return AllocationState.BEAR
+        if self.recovery_score >= 4 and self._bull_reentry_allowed(qqq):
+            return AllocationState.BULL
+        if self.risk_off_score >= self.CAUTION_ENTER_SCORE:
+            return AllocationState.CAUTION
+        return self.state
+
+    def _confirmation_days(self, desired):
+        # 하루짜리 노이즈를 줄이기 위해 후보 상태가 아래 기간만큼
+        # 연속으로 유지될 때 실제 상태를 변경한다.
+        if desired == AllocationState.BEAR:
+            return self.BEAR_CONFIRMATION_DAYS
+        if desired == AllocationState.CAUTION:
+            return self.CAUTION_CONFIRMATION_DAYS
+        if desired == AllocationState.RECOVERY:
+            return self.RECOVERY_CONFIRMATION_DAYS
+        if desired == AllocationState.BULL:
+            return self.BULL_CONFIRMATION_DAYS
+        return 1
+
+    def _confirm(self, desired):
+        if desired == self.state:
+            self._candidate = None
+            self._candidate_days = 0
+            return False
+        if desired != self._candidate:
+            self._candidate = desired
+            self._candidate_days = 1
+        else:
+            self._candidate_days += 1
+        return self._candidate_days >= self._confirmation_days(desired)
+
+    @staticmethod
+    def _execution_days(state):
         return {
-            "rebalance": False,
-            "target": self.target,
-            "days": 5,
-            "reason": None,
+            AllocationState.BEAR: 1,
+            AllocationState.CAUTION: 2,
+            AllocationState.RECOVERY: 3,
+            AllocationState.BULL: 5,
+        }[state]
+
+    def _select_safe_asset(self, market):
+        roc_column = f"ROC{self.SAFE_MOMENTUM_PERIOD}"
+        bnd_roc = market["BND"].get(roc_column)
+        bil_roc = market["BIL"].get(roc_column)
+        if not self._valid(bnd_roc, bil_roc):
+            return self.safe_asset or "BND"
+        if self.safe_asset is None:
+            return "BND" if bnd_roc >= bil_roc else "BIL"
+        if (
+            self.safe_asset == "BND"
+            and bil_roc > bnd_roc + self.SAFE_SWITCH_BUFFER
+        ):
+            return "BIL"
+        if (
+            self.safe_asset == "BIL"
+            and bnd_roc > bil_roc + self.SAFE_SWITCH_BUFFER
+        ):
+            return "BND"
+        return self.safe_asset
+
+    def _target_for_state(self):
+        qqq_weight, gold_weight = self.STATE_WEIGHTS[self.state]
+        target = {
+            "QQQ": qqq_weight,
+            "BND": 0.0,
+            "BIL": 0.0,
+            "GLD": gold_weight,
+        }
+        target[self.safe_asset] = 1.0 - qqq_weight - gold_weight
+        return target
+
+    def _monthly_band_rebalance(self, date, market, portfolio):
+        month = date.to_period("M")
+        if month == self.last_rebalance_month:
+            return False
+        self.last_rebalance_month = month
+        prices = {ticker: market[ticker]["Close"] for ticker in self.target}
+        weights = portfolio.weights(prices)
+        return any(
+            abs(weights.get(ticker, 0.0) - target_weight) >= 0.05
+            for ticker, target_weight in self.target.items()
+        )
+
+    def _signal(self, rebalance, reason, days=None):
+        return {
+            "rebalance": rebalance,
+            "target": self.target.copy(),
+            "days": days or self._execution_days(self.state),
+            "reason": reason,
+        }
+
+    def evaluate(self, date, market, portfolio):
+        month = date.to_period("M")
+        previous_safe_asset = self.safe_asset
+        if month != self.last_safe_selection_month:
+            self.safe_asset = self._select_safe_asset(market)
+            self.last_safe_selection_month = month
+        safe_changed = (
+            previous_safe_asset is not None
+            and self.safe_asset != previous_safe_asset
+        )
+
+        desired = self._desired_state(market["QQQ"])
+        if self.state is None:
+            self.state = desired
+            self.target = self._target_for_state()
+            self.last_rebalance_month = month
+            return self._signal(True, "INITIAL")
+
+        rebalance = False
+        reason = None
+        if self._confirm(desired):
+            previous_state = self.state
+            self.state = desired
+            self.last_rebalance_month = month
+            self._candidate = None
+            self._candidate_days = 0
+            rebalance = True
+            reason = (
+                f"{previous_state.value}->{self.state.value}"
+                f"(risk_off={self.risk_off_score},recovery={self.recovery_score})"
+            )
+        elif self._monthly_band_rebalance(date, market, portfolio):
+            rebalance = True
+            reason = "MONTHLY_5PCT_BAND"
+
+        desired_target = self._target_for_state()
+        target_changed = desired_target != self.target
+        self.target = desired_target
+        if safe_changed:
+            rotation = f"SAFE_ROTATION_{previous_safe_asset}->{self.safe_asset}"
+            reason = f"{reason}|{rotation}" if reason else rotation
+
+        if rebalance or target_changed:
+            days = None if rebalance else 1
+            return self._signal(True, reason, days)
+        return self._signal(False, None)
+
+
+class STATIC_703010_BAND(BaseStrategy):
+    """Static QQQ 70 / BND 20 / GLD 10 benchmark with a 5% band."""
+
+    def __init__(self):
+        self.target = {"QQQ": 0.70, "BND": 0.20, "GLD": 0.10}
+        self.last_rebalance_month = None
+
+    def evaluate(self, date, market, portfolio):
+        month = date.to_period("M")
+        reason = None
+        rebalance = False
+        if self.last_rebalance_month is None:
+            rebalance = True
+            reason = "INITIAL"
+        elif month != self.last_rebalance_month:
+            prices = {ticker: market[ticker]["Close"] for ticker in self.target}
+            weights = portfolio.weights(prices)
+            rebalance = any(
+                abs(weights.get(ticker, 0.0) - target_weight) >= 0.05
+                for ticker, target_weight in self.target.items()
+            )
+            if rebalance:
+                reason = "MONTHLY_5PCT_BAND"
+        self.last_rebalance_month = month
+        return {
+            "rebalance": rebalance,
+            "target": self.target.copy(),
+            "days": 1,
+            "reason": reason,
+        }
+
+
+class STATIC_70_BIL20_GLD10(STATIC_703010_BAND):
+    def __init__(self):
+        super().__init__()
+        self.target = {"QQQ": 0.70, "BIL": 0.20, "GLD": 0.10}
+
+
+class STATIC_70_BND10_BIL10_GLD10(STATIC_703010_BAND):
+    def __init__(self):
+        super().__init__()
+        self.target = {
+            "QQQ": 0.70,
+            "BND": 0.10,
+            "BIL": 0.10,
+            "GLD": 0.10,
+        }
+
+
+class STATIC_70_BND5_BIL15_GLD10(STATIC_703010_BAND):
+    def __init__(self):
+        super().__init__()
+        self.target = {
+            "QQQ": 0.70,
+            "BND": 0.05,
+            "BIL": 0.15,
+            "GLD": 0.10,
         }
 
 
@@ -306,7 +373,6 @@ class BASIC_BANG_DIV(BaseStrategy):
         self.current_target = self.bull_weights.copy()
         self.state = "BULL"
         self.last_checked_month = None
-
         self.lower_threshold = -0.05
         self.upper_threshold = 0.05
 
@@ -323,7 +389,6 @@ class BASIC_BANG_DIV(BaseStrategy):
         current_month = date.to_period("M")
         risk_rsi = market[self.RISK_ASSET]["RSI14"]
 
-        # RSI 80 이상에서는 즉시 방어 비중으로 전환한다.
         if risk_rsi is not None and risk_rsi >= 80 and self.state != "BEAR":
             self.state = "BEAR"
             self.current_target = self.bear_weights.copy()
@@ -335,7 +400,6 @@ class BASIC_BANG_DIV(BaseStrategy):
                 f"RSI_OVERBOUGHT({risk_rsi:.1f})_TAKE_PROFIT",
             )
 
-        # RSI 30 이하에서는 Portfolio의 내장 분할 리밸런싱으로 5일에 걸쳐 복귀한다.
         if risk_rsi is not None and risk_rsi <= 30 and self.state != "BULL":
             self.state = "BULL"
             self.current_target = self.bull_weights.copy()
@@ -347,14 +411,19 @@ class BASIC_BANG_DIV(BaseStrategy):
                 f"RSI_OVERSOLD_SPLIT_{self.SPLIT_DAYS}_DAYS({risk_rsi:.1f})",
             )
 
-        # 월 1회 현재 구조의 Portfolio.weights()로 목표 비중 이탈을 검사한다.
         if current_month != self.last_checked_month:
             self.last_checked_month = current_month
-            prices = {ticker: market[ticker]["Close"] for ticker in self.current_target}
+            prices = {
+                ticker: market[ticker]["Close"]
+                for ticker in self.current_target
+            }
             weights = portfolio.weights(prices)
             for ticker, target_weight in self.current_target.items():
                 weight_diff = weights.get(ticker, 0.0) - target_weight
-                if weight_diff <= self.lower_threshold or weight_diff >= self.upper_threshold:
+                if (
+                    weight_diff <= self.lower_threshold
+                    or weight_diff >= self.upper_threshold
+                ):
                     return self._signal(
                         True,
                         self.current_target,
@@ -366,22 +435,10 @@ class BASIC_BANG_DIV(BaseStrategy):
 
 
 class RETIREMENT_7030_BAND(BaseStrategy):
-    """
-    70/30 퇴직연금 하이브리드 리밸런싱 전략 (5% 밴드)
-    - 위험자산(QQQ) 70%, 안전자산(BND 등) 30%
-    - 매일 비중을 체크하여 목표 비중에서 ±5% 이탈 시 즉각 원복 (수익실현 or 저점매수)
-    """
-
-    RISK_ASSET = "QQQ"
-    SAFE_ASSET = "BND"  # IRP용 원화 파킹 ETF인 경우 해당 티커(예: KODEX CD금리 등)로 변경
+    """Daily 5% band strategy targeting QQQ 70 / BND 30."""
 
     def __init__(self):
-        self.target_weights = {
-            self.RISK_ASSET: 0.70,
-            self.SAFE_ASSET: 0.30,
-        }
-        
-        # 5% 임계치 (비중이 65% 이하로 떨어지거나 75% 이상으로 올라갈 때)
+        self.target_weights = {"QQQ": 0.70, "BND": 0.30}
         self.lower_threshold = -0.05
         self.upper_threshold = 0.05
 
@@ -395,55 +452,38 @@ class RETIREMENT_7030_BAND(BaseStrategy):
         }
 
     def evaluate(self, date, market, portfolio):
-        # 1. 매일(daily) 현재 포트폴리오의 비중을 계산
-        prices = {ticker: market[ticker]["Close"] for ticker in self.target_weights}
+        prices = {
+            ticker: market[ticker]["Close"] for ticker in self.target_weights
+        }
         weights = portfolio.weights(prices)
-
-        # 2. 각 자산의 목표 비중 이탈 여부 확인
-        # (두 종목이므로 RISK_ASSET 하나만 검사해도 되지만, 확장성을 위해 loop 유지)
         for ticker, target_weight in self.target_weights.items():
-            current_weight = weights.get(ticker, 0.0)
-            weight_diff = current_weight - target_weight
-
-            # 3. 목표 비중에서 ±5% 이상 이탈했는지 검사
-            if weight_diff <= self.lower_threshold or weight_diff >= self.upper_threshold:
-                
-                # 리포팅을 위한 액션 태깅
-                # 비중이 기준치 이하로 떨어졌다면(-0.05 이하) 싸진 자산을 줍는 것(BUY_DIP)
-                # 비중이 기준치 이상으로 올라갔다면(+0.05 이상) 비싸진 자산을 파는 것(TAKE_PROFIT)
-                action = "BUY_DIP" if weight_diff <= self.lower_threshold else "TAKE_PROFIT"
-                
+            weight_diff = weights.get(ticker, 0.0) - target_weight
+            if (
+                weight_diff <= self.lower_threshold
+                or weight_diff >= self.upper_threshold
+            ):
+                action = (
+                    "BUY_DIP"
+                    if weight_diff <= self.lower_threshold
+                    else "TAKE_PROFIT"
+                )
                 return self._signal(
                     True,
                     self.target_weights,
-                    5,  # 즉시 1일 만에 리밸런싱 (필요시 기존 코드처럼 분할 매수로 변경 가능)
-                    f"5%_BAND_BREAK_{action}_{ticker}(diff:{weight_diff:+.3f})"
+                    5,
+                    f"5%_BAND_BREAK_{action}_{ticker}(diff:{weight_diff:+.3f})",
                 )
-
-        # 4. 임계치 이내라면 기존 홀딩 유지
         return self._signal(False, self.target_weights, 1)
 
 
 class ASYMMETRIC_TREND_BAND(BaseStrategy):
-    """
-    비대칭 밴드 + 이동평균선(SMA) 추세 필터 결합 전략
-    - 상승장(Uptrend): 익절은 무한대기(Let profits run), 추매는 예민하게(-5%)
-    - 하락장(Downtrend): 익절은 타이트하게(+5%), 추매는 신중하게(-10%)
-    """
-
-    RISK_ASSET = "QLD"
-    SAFE_ASSET = "QQQ"
-    MID_ASSET = "GLD"
+    """QLD 40 / GLD 30 / QQQ 30 with an EMA55 asymmetric band."""
 
     def __init__(self):
-        self.target_weights = {
-            self.RISK_ASSET: 0.40,
-            self.MID_ASSET: 0.30,
-            self.SAFE_ASSET: 0.30,
-        }
-        
+        self.target_weights = {"QLD": 0.40, "GLD": 0.30, "QQQ": 0.30}
 
-    def _signal(self, rebalance, target, days, reason=None):
+    @staticmethod
+    def _signal(rebalance, target, days, reason=None):
         return {
             "rebalance": rebalance,
             "target": target.copy(),
@@ -452,69 +492,42 @@ class ASYMMETRIC_TREND_BAND(BaseStrategy):
         }
 
     def evaluate(self, date, market, portfolio):
-        # 1. 현재 가격 및 비중 계산 (데이터 누락 예외 처리 방어 로직 추가)
         prices = {}
         for ticker in self.target_weights:
-            # market 데이터에 해당 티커가 없거나 "Close" 키가 없는 경우 (상장 전 등)
             if ticker not in market or "Close" not in market[ticker]:
                 return self._signal(False, self.target_weights, 1)
-            
             price = market[ticker]["Close"]
-            
-            # 결측치(None 또는 NaN)인 경우 패스 (price != price는 NaN을 판별하는 파이썬 표준 팁)
             if price is None or price != price:
                 return self._signal(False, self.target_weights, 1)
-                
             prices[ticker] = price
 
         weights = portfolio.weights(prices)
-        
-        current_risk_weight = weights.get(self.RISK_ASSET, 0.0)
-        weight_diff = current_risk_weight - self.target_weights[self.RISK_ASSET]
+        risk_weight = weights.get("QLD", 0.0)
+        weight_diff = risk_weight - self.target_weights["QLD"]
+        current_price = market["QLD"]["Close"]
+        ema55 = market["QLD"].get("EMA55", current_price)
 
-        # 2. 추세 판단 (55~200일 이동평균선 사용)
-        current_price = market[self.RISK_ASSET]["Close"]
-        base = market[self.RISK_ASSET].get("EMA55", current_price) # 없으면 현재가로 대체(항상 상승장 취급)
-        
-        is_uptrend = current_price >= base
-
-        # 3. 시장 상태에 따른 비대칭 임계치(Threshold) 설정
-        if is_uptrend:
-            # 상승장: 수익을 자르지 않음(상단 임계치 무한대), 하락 시 5% 빠지면 줍줍
-            upper_threshold = float('inf') 
+        if current_price >= ema55:
+            upper_threshold = float("inf")
             lower_threshold = -0.015
-            trend_status = "UPTREND"
+            trend = "UPTREND"
         else:
-            # 하락장: 데드캣 바운스 시 즉시 현금화(+5%), 하락 시 천천히 줍줍(-10%)
             upper_threshold = 0.015
             lower_threshold = -0.06
-            trend_status = "DOWNTREND"
+            trend = "DOWNTREND"
 
-        # 4. 리밸런싱 시그널 판단
         if weight_diff <= lower_threshold:
-            # 하단 밴드 이탈 -> 싸진 위험자산 매수
-            
-            print(f"Weight diff: {weight_diff:.3f}, Lower threshold: {lower_threshold:.3f}")
-
             return self._signal(
                 True,
                 self.target_weights,
                 1,
-                f"{trend_status}_BUY_DIP_{self.RISK_ASSET}(diff:{weight_diff:+.3f})"
+                f"{trend}_BUY_DIP_QLD(diff:{weight_diff:+.3f})",
             )
-            
-        elif weight_diff >= upper_threshold:
-            # 상단 밴드 이탈 -> 비싸진 위험자산 매도 (상승장에서는 절대 발동하지 않음)
-
-            print(f"Weight diff: {weight_diff:.3f}, Upper threshold: {upper_threshold:.3f}")
-
+        if weight_diff >= upper_threshold:
             return self._signal(
                 True,
                 self.target_weights,
                 1,
-                f"{trend_status}_TAKE_PROFIT_{self.RISK_ASSET}(diff:{weight_diff:+.3f})"
+                f"{trend}_TAKE_PROFIT_QLD(diff:{weight_diff:+.3f})",
             )
-
-        # 5. 밴드 내에 있으면 그대로 홀딩 (존버 모드)
         return self._signal(False, self.target_weights, 1)
-

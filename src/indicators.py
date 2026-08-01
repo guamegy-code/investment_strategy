@@ -85,6 +85,24 @@ class Indicator:
         return df
 
     # ==================================================
+    # Dynamic allocation trend features
+    # ==================================================
+    @staticmethod
+    def add_trend_features(df):
+        """Add short/medium-term features used by regime strategies."""
+        df["ROC5"] = df["Close"].pct_change(5) * 100
+        df["ROC20"] = df["Close"].pct_change(20) * 100
+        df["ROC40"] = df["Close"].pct_change(40) * 100
+        df["ROC60"] = df["Close"].pct_change(60) * 100
+        df["ROC90"] = df["Close"].pct_change(90) * 100
+        df["ROC120"] = df["Close"].pct_change(120) * 100
+        df["EMA20_SLOPE5"] = df["EMA20"].pct_change(5) * 100
+        df["EMA200_SLOPE20"] = df["EMA200"].pct_change(20) * 100
+        rolling_high = df["Close"].rolling(120).max()
+        df["DRAWDOWN120"] = df["Close"] / rolling_high - 1
+        return df
+
+    # ==================================================
     # ATR
     # ==================================================
     @staticmethod
@@ -141,6 +159,7 @@ class Indicator:
         df = cls.add_macd(df)
         df = cls.add_stochastic(df)
         df = cls.add_roc(df)
+        df = cls.add_trend_features(df)
         df = cls.add_atr(df)
         df = cls.add_bollinger(df)
         df = cls.add_volatility(df)
