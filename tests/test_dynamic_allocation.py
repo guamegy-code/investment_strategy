@@ -135,6 +135,92 @@ class DynamicAllocationTests(unittest.TestCase):
             {"TIGER_NASDAQ100": 0.70, "PENSION_BOND": 0.30, "PENSION_CASH": 0.0},
         )
 
+    def test_pension_strategy_separates_signal_from_traded_risk_asset(self):
+        strategy = PensionRiskAllocationStrategy(
+            signal_asset="QQQ_SIGNAL",
+            risk_asset="KOREAN_NASDAQ_ETF",
+            bond_asset="PENSION_BOND",
+            cash_asset="PENSION_CASH",
+        )
+        custom_market = {
+            "QQQ_SIGNAL": BULL["QQQ"],
+            "KOREAN_NASDAQ_ETF": {"Close": 100.0},
+            "PENSION_BOND": {"Close": 100.0, "ROC40": 1.0},
+            "PENSION_CASH": {"Close": 100.0, "ROC40": 0.0},
+        }
+
+        signal = strategy.evaluate(
+            pd.Timestamp("2024-01-02"), custom_market, StablePortfolio()
+        )
+
+        self.assertEqual(strategy.state, AllocationState.BULL)
+        self.assertEqual(
+            signal["target"],
+            {
+                "KOREAN_NASDAQ_ETF": 0.70,
+                "PENSION_BOND": 0.30,
+                "PENSION_CASH": 0.0,
+            },
+        )
+        self.assertNotIn("QQQ_SIGNAL", signal["target"])
+        self.assertEqual(
+            strategy.required_tickers,
+            (
+                "QQQ_SIGNAL",
+                "KOREAN_NASDAQ_ETF",
+                "PENSION_BOND",
+                "PENSION_CASH",
+            ),
+        )
+
+    def test_pension_strategy_splits_total_risk_across_multiple_assets(self):
+        strategy = PensionRiskAllocationStrategy(
+            signal_asset="QQQ",
+            risk_assets={
+                "KODEX_NASDAQ": 0.50,
+                "TIME_NASDAQ": 0.30,
+                "KOACT_NASDAQ": 0.20,
+            },
+            bond_asset="PENSION_BOND",
+            cash_asset="PENSION_CASH",
+        )
+        strategy.state = AllocationState.BULL
+        strategy.safe_asset = strategy.BOND_ASSET
+
+        target = strategy._target_for_state()
+
+        self.assertEqual(
+            target,
+            {
+                "KODEX_NASDAQ": 0.35,
+                "TIME_NASDAQ": 0.21,
+                "KOACT_NASDAQ": 0.14,
+                "PENSION_BOND": 0.30,
+                "PENSION_CASH": 0.0,
+            },
+        )
+        self.assertAlmostEqual(
+            sum(target[ticker] for ticker in strategy.risk_assets),
+            strategy.MAX_RISK_WEIGHT,
+        )
+        self.assertEqual(
+            strategy.required_tickers,
+            (
+                "QQQ",
+                "KODEX_NASDAQ",
+                "TIME_NASDAQ",
+                "KOACT_NASDAQ",
+                "PENSION_BOND",
+                "PENSION_CASH",
+            ),
+        )
+
+    def test_multiple_risk_asset_weights_must_sum_to_one(self):
+        with self.assertRaises(ValueError):
+            PensionRiskAllocationStrategy(
+                risk_assets={"KODEX_NASDAQ": 0.50, "TIME_NASDAQ": 0.40}
+            )
+
     def test_downside_overlay_respects_target_caps(self):
         strategy = DownsideTrendOverlayStrategy()
         overlay_market = {
@@ -222,6 +308,7 @@ class DynamicAllocationTests(unittest.TestCase):
 
     def test_pension_static_benchmark_is_replaceable_and_has_no_gold(self):
         strategy = STATIC_PENSION_7030(
+            signal_asset="QQQ_SIGNAL",
             risk_asset="TIGER_NASDAQ100",
             bond_asset="PENSION_BOND",
             cash_asset="PENSION_CASH",
@@ -236,7 +323,31 @@ class DynamicAllocationTests(unittest.TestCase):
             },
         )
         self.assertNotIn("GLD", strategy.target)
-        self.assertEqual(strategy.required_tickers, tuple(strategy.target))
+        self.assertEqual(
+            strategy.required_tickers,
+            (
+                "QQQ_SIGNAL",
+                "TIGER_NASDAQ100",
+                "PENSION_BOND",
+                "PENSION_CASH",
+            ),
+        )
+
+    def test_pension_static_supports_the_same_multiple_risk_assets(self):
+        strategy = STATIC_PENSION_7030(
+            signal_asset="QQQ",
+            risk_assets={"KODEX_NASDAQ": 0.60, "TIME_NASDAQ": 0.40},
+        )
+
+        self.assertEqual(
+            strategy.target,
+            {
+                "KODEX_NASDAQ": 0.42,
+                "TIME_NASDAQ": 0.28,
+                "BND": 0.15,
+                "BIL": 0.15,
+            },
+        )
 
     def test_static_benchmark_tracks_dynamic_market_state(self):
         strategy = STATIC_70_BND10_BIL10_GLD10()

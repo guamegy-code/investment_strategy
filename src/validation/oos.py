@@ -14,7 +14,7 @@ from config import (
     RESULT_DIR,
     SLIPPAGE,
 )
-from extended_data import ASSETS, build_extended_data
+from .extended_data import ASSETS, build_extended_data
 from performance import Performance
 from runner import Runner
 from strategy import (

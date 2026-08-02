@@ -7,7 +7,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from oos_validation import (
+from validation.oos import (
     _future_with_anchor,
     current_parameters,
     load_lock,

@@ -28,7 +28,7 @@
     "extra_signal_delay_days": 0
   },
   "code_sha256": {
-    "strategy.py": "207683bc0a7da55621e7def847ea2a76119938a248a70ca2411e068804f1cb9a",
+    "strategy.py": "676c89e0f63436dbc4a221c78884f0ba78686193e9470a4099d6bb1092045eab",
     "backtest.py": "4563246ffd32911a613108966f5c15d658e3f4e6190ecbcd782585b42cd38081",
     "portfolio.py": "2f436efa7a61effaded31adf8ef04522c79d7665cb7bcca67656eace47173c12",
     "indicators.py": "f81e6c7d8d9f36ae812ebcc2c5f63eb3833b3362b7811928b9042e61ac6dfee0"

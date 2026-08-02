@@ -5,7 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from multi_market_validation import (  # noqa: E402
+from validation.multi_market import (  # noqa: E402
     MultiMarketDownsideStrategy,
     PROFILES,
 )

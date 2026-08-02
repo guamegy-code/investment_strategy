@@ -8,13 +8,13 @@ import yfinance as yf
 
 from backtest import Backtest
 from config import EXTENDED_DATA_DIR, PROJECT_ROOT, RESULT_DIR
-from continuous_allocation_validation import (
+from .continuous_allocation import (
     WINDOWS,
     _allocation_report,
     _annual_report,
     _performance_row,
 )
-from extended_data import ASSETS
+from .extended_data import ASSETS
 from indicators import Indicator
 from strategy import (
     DownsideTrendOverlayStrategy,

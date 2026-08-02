@@ -1,8 +1,39 @@
 """Production strategy and the static benchmarks used to evaluate it."""
 
 from abc import ABC, abstractmethod
+from collections.abc import Mapping
 from enum import Enum
 from math import exp
+
+
+def _validated_asset_mix(risk_asset, risk_assets):
+    """Return a positive risk-sleeve mix whose weights sum to one."""
+    if risk_assets is None:
+        return {risk_asset: 1.0}
+    if not isinstance(risk_assets, Mapping) or not risk_assets:
+        raise ValueError("risk_assets must be a non-empty asset-to-weight mapping")
+    mix = {ticker: float(weight) for ticker, weight in risk_assets.items()}
+    if any(not ticker or weight <= 0.0 for ticker, weight in mix.items()):
+        raise ValueError("risk asset names and weights must be positive")
+    if abs(sum(mix.values()) - 1.0) > 1e-9:
+        raise ValueError("risk asset weights must sum to 1.0")
+    return mix
+
+
+def _allocate_sleeve(total_weight, asset_mix):
+    """Allocate a total weight while keeping the rounded result exact."""
+    items = list(asset_mix.items())
+    target = {}
+    allocated = 0.0
+    for index, (ticker, share) in enumerate(items):
+        weight = (
+            round(total_weight - allocated, 10)
+            if index == len(items) - 1
+            else round(total_weight * share, 10)
+        )
+        target[ticker] = weight
+        allocated += weight
+    return target
 
 
 class BaseStrategy(ABC):
@@ -21,6 +52,7 @@ class AllocationState(Enum):
 class DynamicRiskAllocationStrategy(BaseStrategy):
     """Final QQQ regime strategy with adaptive BND/BIL allocation."""
 
+    SIGNAL_ASSET = "QQQ"
     RISK_ASSET = "QQQ"
     BOND_ASSET = "BND"
     CASH_ASSET = "BIL"
@@ -260,7 +292,7 @@ class DynamicRiskAllocationStrategy(BaseStrategy):
             and self.safe_asset != previous_safe_asset
         )
 
-        desired = self._desired_state(market[self.RISK_ASSET])
+        desired = self._desired_state(market[self.SIGNAL_ASSET])
         if self.state is None:
             self.state = desired
             self.target = self._target_for_state()
@@ -300,9 +332,12 @@ class DynamicRiskAllocationStrategy(BaseStrategy):
 class PensionRiskAllocationStrategy(DynamicRiskAllocationStrategy):
     """Retirement strategy with configurable products and no gold allocation.
 
-    ``risk_asset`` is capped at 70%. ``bond_asset`` and ``cash_asset`` must be
-    replaced with products classified as safe assets by the pension provider.
-    The default US ETFs are backtest proxies, not Korean pension products.
+    ``signal_asset`` drives regime detection but is never traded when it differs
+    from ``risk_asset``. This keeps QQQ signals while trading a pension ETF.
+    The combined ``risk_assets`` sleeve is capped at 70%; its mapping defines
+    how that sleeve is split. ``bond_asset`` and ``cash_asset`` must be replaced
+    with products classified as safe assets by the pension provider. The
+    default US ETFs are backtest proxies, not Korean pension products.
     """
 
     MAX_RISK_WEIGHT = 0.70
@@ -313,11 +348,22 @@ class PensionRiskAllocationStrategy(DynamicRiskAllocationStrategy):
         AllocationState.RECOVERY: 0.50,
     }
 
-    def __init__(self, risk_asset="QQQ", bond_asset="BND", cash_asset="BIL"):
-        assets = (risk_asset, bond_asset, cash_asset)
-        if len(set(assets)) != len(assets):
+    def __init__(
+        self,
+        signal_asset=None,
+        risk_asset="QQQ",
+        risk_assets=None,
+        bond_asset="BND",
+        cash_asset="BIL",
+    ):
+        self.risk_assets = _validated_asset_mix(risk_asset, risk_assets)
+        trade_assets = (*self.risk_assets, bond_asset, cash_asset)
+        if len(set(trade_assets)) != len(trade_assets):
             raise ValueError("risk, bond, and cash assets must be different")
-        self.RISK_ASSET = risk_asset
+        self.RISK_ASSET = next(iter(self.risk_assets))
+        self.SIGNAL_ASSET = signal_asset or self.RISK_ASSET
+        if self.SIGNAL_ASSET in {bond_asset, cash_asset}:
+            raise ValueError("signal asset cannot be a bond or cash asset")
         self.BOND_ASSET = bond_asset
         self.CASH_ASSET = cash_asset
         super().__init__()
@@ -325,17 +371,19 @@ class PensionRiskAllocationStrategy(DynamicRiskAllocationStrategy):
     @property
     def required_tickers(self):
         """Market-data identifiers needed to run this strategy."""
-        return (self.RISK_ASSET, self.BOND_ASSET, self.CASH_ASSET)
+        return tuple(dict.fromkeys((
+            self.SIGNAL_ASSET,
+            *self.risk_assets,
+            self.BOND_ASSET,
+            self.CASH_ASSET,
+        )))
 
     def _target_for_state(self):
         risk_weight = self.STATE_RISK_WEIGHTS[self.state]
         if not 0.0 <= risk_weight <= self.MAX_RISK_WEIGHT:
             raise ValueError("retirement risk-asset weight must be between 0% and 70%")
-        target = {
-            self.RISK_ASSET: risk_weight,
-            self.BOND_ASSET: 0.0,
-            self.CASH_ASSET: 0.0,
-        }
+        target = _allocate_sleeve(risk_weight, self.risk_assets)
+        target.update({self.BOND_ASSET: 0.0, self.CASH_ASSET: 0.0})
         target[self.safe_asset] = round(1.0 - risk_weight, 10)
         return target
 
@@ -495,6 +543,7 @@ class _MarketRegimeObserver:
 class _StaticRegimeBandStrategy(BaseStrategy):
     """Fixed allocation with a 5% band and read-only market-regime tracking."""
 
+    SIGNAL_ASSET = "QQQ"
     RISK_ASSET = "QQQ"
     TARGET = {}
 
@@ -507,7 +556,7 @@ class _StaticRegimeBandStrategy(BaseStrategy):
         self.recovery_score = 0
 
     def evaluate(self, date, market, portfolio):
-        self.state = self._regime_observer.update(market[self.RISK_ASSET])
+        self.state = self._regime_observer.update(market[self.SIGNAL_ASSET])
         classifier = self._regime_observer.classifier
         self.risk_off_score = classifier.risk_off_score
         self.recovery_score = classifier.recovery_score
@@ -548,26 +597,39 @@ class STATIC_70_BND10_BIL10_GLD10(_StaticRegimeBandStrategy):
 
 
 class STATIC_PENSION_7030(_StaticRegimeBandStrategy):
-    """Retirement benchmark: 70% risk and an equal 30% safe-asset split."""
+    """Configurable 70/30 benchmark with a separate regime signal asset."""
 
-    def __init__(self, risk_asset="QQQ", bond_asset="BND", cash_asset="BIL"):
-        assets = (risk_asset, bond_asset, cash_asset)
-        if len(set(assets)) != len(assets):
+    def __init__(
+        self,
+        signal_asset=None,
+        risk_asset="QQQ",
+        risk_assets=None,
+        bond_asset="BND",
+        cash_asset="BIL",
+    ):
+        self.risk_assets = _validated_asset_mix(risk_asset, risk_assets)
+        trade_assets = (*self.risk_assets, bond_asset, cash_asset)
+        if len(set(trade_assets)) != len(trade_assets):
             raise ValueError("risk, bond, and cash assets must be different")
-        self.RISK_ASSET = risk_asset
+        self.RISK_ASSET = next(iter(self.risk_assets))
+        self.SIGNAL_ASSET = signal_asset or self.RISK_ASSET
+        if self.SIGNAL_ASSET in {bond_asset, cash_asset}:
+            raise ValueError("signal asset cannot be a bond or cash asset")
         self.BOND_ASSET = bond_asset
         self.CASH_ASSET = cash_asset
-        self.TARGET = {
-            self.RISK_ASSET: 0.70,
-            self.BOND_ASSET: 0.15,
-            self.CASH_ASSET: 0.15,
-        }
+        self.TARGET = _allocate_sleeve(0.70, self.risk_assets)
+        self.TARGET.update({self.BOND_ASSET: 0.15, self.CASH_ASSET: 0.15})
         super().__init__()
 
     @property
     def required_tickers(self):
         """Market-data identifiers needed to run this benchmark."""
-        return (self.RISK_ASSET, self.BOND_ASSET, self.CASH_ASSET)
+        return tuple(dict.fromkeys((
+            self.SIGNAL_ASSET,
+            *self.risk_assets,
+            self.BOND_ASSET,
+            self.CASH_ASSET,
+        )))
 
 
 class BASIC_BANG_DIV(BaseStrategy):

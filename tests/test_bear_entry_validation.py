@@ -5,7 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from bear_entry_validation import (  # noqa: E402
+from validation.bear_entry import (  # noqa: E402
     BearEntryCandidateStrategy,
     PROFILES,
 )

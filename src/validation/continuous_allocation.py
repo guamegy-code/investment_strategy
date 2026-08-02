@@ -7,7 +7,7 @@ import pandas as pd
 
 from backtest import Backtest
 from config import EXTENDED_DATA_DIR, RESULT_DIR
-from extended_data import ASSETS
+from .extended_data import ASSETS
 from performance import Performance
 from strategy import (
     BaseStrategy,

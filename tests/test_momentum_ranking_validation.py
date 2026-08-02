@@ -5,7 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from momentum_ranking_validation import (  # noqa: E402
+from validation.momentum_ranking import (  # noqa: E402
     MomentumRankingStrategy,
     PROFILES,
 )

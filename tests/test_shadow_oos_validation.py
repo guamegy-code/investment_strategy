@@ -5,7 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from shadow_oos_validation import (  # noqa: E402
+from validation.shadow_oos import (  # noqa: E402
     StrictRecoveryShadowStrategy,
     current_shadow_parameters,
     load_shadow_lock,

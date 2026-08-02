@@ -5,7 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from continuous_allocation_validation import (  # noqa: E402
+from validation.continuous_allocation import (  # noqa: E402
     ContinuousRiskAllocationStrategy,
     PROFILES,
 )

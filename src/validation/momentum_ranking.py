@@ -7,7 +7,7 @@ import pandas as pd
 
 from backtest import Backtest
 from config import EXTENDED_DATA_DIR, RESULT_DIR
-from continuous_allocation_validation import (
+from .continuous_allocation import (
     EXECUTION_DAYS,
     REBALANCE_BAND,
     WINDOWS,
@@ -15,7 +15,7 @@ from continuous_allocation_validation import (
     _annual_report,
     _performance_row,
 )
-from extended_data import ASSETS
+from .extended_data import ASSETS
 from strategy import (
     BaseStrategy,
     DownsideTrendOverlayStrategy,
