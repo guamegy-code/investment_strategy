@@ -2,6 +2,7 @@
 
 import json
 from dataclasses import dataclass
+from unicodedata import east_asian_width
 
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
@@ -66,6 +67,8 @@ REGIME_COLORS = {
     "RECOVERY": "#5AC8FA",
 }
 ALLOCATION_DISPLAY_ORDER = ("QQQ", "BND", "GLD", "BIL", "QLD", "TQQQ")
+DEFAULT_RISK_ASSETS = ("QQQ", "QLD", "TQQQ")
+RISK_WEIGHT_TOLERANCE = 1e-6
 
 INDICATORS = {
     "Price": ["Close"],
@@ -316,7 +319,21 @@ def series_from_start(series, start_date, normalize=False, base_series=None):
     return index_to_start(series) if normalize else series
 
 
-def rebalance_marker_events(history, trades, rebalances):
+def strategy_risk_assets(strategy):
+    """Return the traded assets that make up a strategy's risk sleeve."""
+    configured = getattr(strategy, "risk_assets", None)
+    if isinstance(configured, dict) and configured:
+        return tuple(configured)
+    configured = getattr(strategy, "RISK_ASSETS", None)
+    if configured:
+        return tuple(configured)
+    configured = getattr(strategy, "RISK_ASSET", None)
+    if configured:
+        return (configured,)
+    return DEFAULT_RISK_ASSETS
+
+
+def rebalance_marker_events(history, trades, rebalances, risk_assets=("QQQ",)):
     """Match each rebalance signal with its first execution and target.
 
     Rebalance signals are recorded at day t's close and the engine executes
@@ -361,53 +378,151 @@ def rebalance_marker_events(history, trades, rebalances):
         weights = history.at[execution_date, "Weights"]
         if day_trades.empty or not isinstance(weights, dict):
             continue
-        net_shares = day_trades.groupby("Ticker")["Shares"].sum()
-        candidates = [ticker for ticker in net_shares.index if ticker in weights]
-        if not candidates:
-            continue
-        # Dynamic-allocation arrows represent risk exposure. Prefer QQQ when
-        # it is part of the rebalance; otherwise retain the generic fallback.
-        ticker = "QQQ" if "QQQ" in candidates else max(candidates, key=weights.get)
-        if net_shares[ticker] != 0:
-            matched_events[execution_date] = {
-                "direction": "up" if net_shares[ticker] > 0 else "down",
-                "signal_date": pd.Timestamp(rebalance["Date"]),
-                "target": rebalance.get("Target", {}),
-                "execution_days": rebalance.get("ExecutionDays", 1),
-                "pre_weights": rebalance.get(
-                    "PreWeights",
-                    history.at[pd.Timestamp(rebalance["Date"]), "Weights"]
-                    if pd.Timestamp(rebalance["Date"]) in history.index
-                    else {},
-                ),
-                "reason": rebalance.get("Reason"),
-            }
+        target = rebalance.get("Target", {})
+        pre_weights = rebalance.get(
+            "PreWeights",
+            history.at[pd.Timestamp(rebalance["Date"]), "Weights"]
+            if pd.Timestamp(rebalance["Date"]) in history.index
+            else {},
+        )
+        risk_assets = tuple(risk_assets)
+        before_risk = sum(
+            float(pre_weights.get(ticker, 0.0)) for ticker in risk_assets
+        )
+        target_risk = sum(
+            float(target.get(ticker, 0.0)) for ticker in risk_assets
+        )
+        risk_change = target_risk - before_risk
+        direction = (
+            "up"
+            if risk_change > RISK_WEIGHT_TOLERANCE
+            else "down"
+            if risk_change < -RISK_WEIGHT_TOLERANCE
+            else "same"
+        )
+        matched_events[execution_date] = {
+            "direction": direction,
+            "signal_date": pd.Timestamp(rebalance["Date"]),
+            "target": target,
+            "execution_days": rebalance.get("ExecutionDays", 1),
+            "pre_weights": pre_weights,
+            "risk_assets": risk_assets,
+            "before_risk": before_risk,
+            "target_risk": target_risk,
+            "reason": rebalance.get("Reason"),
+        }
     return matched_events
 
 
-def rebalance_directions(history, trades, rebalances):
-    """Return an up/down marker for each rebalance's first execution date."""
+def rebalance_directions(history, trades, rebalances, risk_assets=("QQQ",)):
+    """Return a risk-sleeve up/down/same marker for each rebalance."""
     return {
         date: event["direction"]
         for date, event in rebalance_marker_events(
-            history, trades, rebalances
+            history, trades, rebalances, risk_assets=risk_assets
         ).items()
     }
 
 
-def format_rebalance_table(pre_weights, target):
-    """Format before/target weights as aligned asset rows."""
+def _display_width(value):
+    return sum(
+        2 if east_asian_width(char) in {"W", "F"} else 1
+        for char in value
+    )
+
+
+def _pad_display(value, width):
+    return value + " " * max(width - _display_width(value), 0)
+
+
+def _align_right_display(value, width):
+    return " " * max(width - _display_width(value), 0) + value
+
+
+def format_rebalance_table(pre_weights, target, risk_assets=()):
+    """Format aligned asset rows with risk assets displayed first."""
     if not isinstance(target, dict) or not target:
         return "목표 비중 정보 없음"
     if not isinstance(pre_weights, dict):
         pre_weights = {}
-    tickers = [ticker for ticker in ALLOCATION_DISPLAY_ORDER if ticker in target]
+    risk_assets = tuple(risk_assets)
+    tickers = [ticker for ticker in risk_assets if ticker in target]
+    tickers.extend(
+        ticker
+        for ticker in ALLOCATION_DISPLAY_ORDER
+        if ticker in target and ticker not in tickers
+    )
     tickers.extend(sorted(ticker for ticker in target if ticker not in tickers))
-    rows = ["종목       이전(%)   목표(%)", "-" * 29]
+    asset_header = "종목"
+    before_header = "이전(%)"
+    target_header = "목표(%)"
+    asset_width = max(_display_width(asset_header), *map(_display_width, tickers))
+    before_width = max(_display_width(before_header), 7)
+    target_width = max(_display_width(target_header), 7)
+    header = (
+        f"{_pad_display(asset_header, asset_width)}  "
+        f"{_align_right_display(before_header, before_width)}  "
+        f"{_align_right_display(target_header, target_width)}"
+    )
+    rows = [header, "-" * _display_width(header)]
     for ticker in tickers:
         before = float(pre_weights.get(ticker, 0.0)) * 100
         goal = float(target[ticker]) * 100
-        rows.append(f"{ticker:<6}{before:>10.1f}{goal:>10.1f}")
+        rows.append(
+            f"{_pad_display(ticker, asset_width)}  "
+            f"{before:>{before_width}.1f}  {goal:>{target_width}.1f}"
+        )
+    return "\n".join(rows)
+
+
+def nearest_chart_date(clicked_date, series_by_name):
+    """Return the nearest date available in the displayed data area."""
+    available = pd.DatetimeIndex([])
+    for series in series_by_name.values():
+        if series is None or series.empty:
+            continue
+        available = available.union(pd.DatetimeIndex(series.dropna().index))
+    if available.empty:
+        return None
+    available = available.sort_values().unique()
+    clicked_date = pd.Timestamp(clicked_date)
+    if clicked_date.tzinfo is not None:
+        clicked_date = clicked_date.tz_localize(None)
+    position = available.get_indexer([clicked_date], method="nearest")[0]
+    return pd.Timestamp(available[position])
+
+
+def chart_values_on_date(series_by_name, date):
+    """Collect finite values that exist on the selected chart date."""
+    values = {}
+    for name, series in series_by_name.items():
+        if date not in series.index:
+            continue
+        value = series.loc[date]
+        if isinstance(value, pd.Series):
+            value = value.iloc[-1]
+        if pd.notna(value):
+            values[name] = float(value)
+    return values
+
+
+def format_chart_value_popup(date, strategy_values, price_values):
+    """Format strategy and price levels using one aligned name column."""
+    rows = [f"날짜: {pd.Timestamp(date):%Y-%m-%d}"]
+    names = (*strategy_values, *price_values)
+    name_width = max(map(_display_width, names), default=0)
+    if strategy_values:
+        rows.extend(("", "전략"))
+        rows.extend(
+            f"{_pad_display(name, name_width)}  {value:,.4f}"
+            for name, value in strategy_values.items()
+        )
+    if price_values:
+        rows.extend(("", "가격(시작일=1)"))
+        rows.extend(
+            f"{_pad_display(name, name_width)}  {value:,.4f}"
+            for name, value in price_values.items()
+        )
     return "\n".join(rows)
 
 
@@ -523,9 +638,12 @@ def draw_strategy_lines(price_axis, results, strategy_visibility, state_color_se
         dates_by_marker = []
         visible_dates_by_marker = []
         strategy_rebalance_events[name] = rebalance_marker_events(
-            history, result["trades"], result.get("rebalances", [])
+            history,
+            result["trades"],
+            result.get("rebalances", []),
+            risk_assets=strategy_risk_assets(result["strategy"]),
         )
-        for direction, marker in (("up", "^"), ("down", "v")):
+        for direction, marker in (("up", "^"), ("down", "v"), ("same", "o")):
             dates = [
                 date
                 for date, event in strategy_rebalance_events[name].items()
@@ -710,6 +828,27 @@ def draw_chart(results, price_data=None, show_chart=SHOW_CHART):
         zorder=10,
         visible=False,
     )
+    value_annotation = price_axis.annotate(
+        "",
+        xy=(0, 0),
+        xytext=(14, 18),
+        textcoords="offset points",
+        ha="left",
+        va="bottom",
+        multialignment="left",
+        fontsize=9,
+        fontfamily=["Consolas", "Malgun Gothic"],
+        color="#1D1D1F",
+        bbox={
+            "boxstyle": "round,pad=0.45",
+            "facecolor": "white",
+            "edgecolor": "#007AFF",
+            "alpha": 0.96,
+        },
+        arrowprops={"arrowstyle": "->", "color": "#007AFF", "linewidth": 0.8},
+        zorder=10,
+        visible=False,
+    )
     panel_lines, indicator_lines, indicator_series = draw_indicator_lines(
         panel_axes, market_data, active_start_date, len(results), selection
     )
@@ -788,6 +927,7 @@ def draw_chart(results, price_data=None, show_chart=SHOW_CHART):
 
     def refresh_lines():
         rebalance_annotation.set_visible(False)
+        value_annotation.set_visible(False)
         for name, line in strategy_lines.items():
             values = series_from_start(strategy_series[name], active_start_date, normalize=True)
             line.set_data(values.index, values)
@@ -836,6 +976,8 @@ def draw_chart(results, price_data=None, show_chart=SHOW_CHART):
                 marker_event = strategy_rebalance_events[name].get(execution_date)
                 if marker_event is None:
                     continue
+                event.chart_popup_handled = True
+                value_annotation.set_visible(False)
                 offsets = marker.get_offsets()
                 rebalance_annotation.xy = tuple(offsets[point_index])
                 axis_box = price_axis.get_window_extent()
@@ -850,10 +992,15 @@ def draw_chart(results, price_data=None, show_chart=SHOW_CHART):
                 # The horizontal alignment anchors the box on either side of
                 # the marker; multiline content itself must remain left-aligned.
                 rebalance_annotation.set_multialignment("left")
+                allocation_table = format_rebalance_table(
+                    marker_event["pre_weights"],
+                    marker_event["target"],
+                    marker_event["risk_assets"],
+                )
                 rebalance_annotation.set_text(
                     f"체결일: {execution_date:%Y-%m-%d}\n"
                     f"분할 체결 기간: {marker_event['execution_days']}거래일\n\n"
-                    f"{format_rebalance_table(marker_event['pre_weights'], marker_event['target'])}"
+                    f"{allocation_table}"
                 )
                 rebalance_annotation.set_visible(True)
                 # Render once to measure the real text box, then clamp it to
@@ -867,6 +1014,82 @@ def draw_chart(results, price_data=None, show_chart=SHOW_CHART):
         if rebalance_annotation.get_visible():
             rebalance_annotation.set_visible(False)
             fig.canvas.draw_idle()
+
+    def on_chart_value_click(event):
+        if event.button == 3:
+            was_visible = (
+                rebalance_annotation.get_visible()
+                or value_annotation.get_visible()
+            )
+            rebalance_annotation.set_visible(False)
+            value_annotation.set_visible(False)
+            if was_visible:
+                fig.canvas.draw_idle()
+            return
+        if (
+            event.button != 1
+            or event.inaxes is not price_axis
+            or event.xdata is None
+            or event.ydata is None
+            or getattr(event, "chart_popup_handled", False)
+            or toolbar_navigation_is_active()
+        ):
+            return
+
+        displayed_strategies = {
+            name: series_from_start(
+                strategy_series[name], active_start_date, normalize=True
+            )
+            for name, line in strategy_lines.items()
+            if line.get_visible()
+        }
+        displayed_prices = {
+            ticker: series_from_start(
+                data["Close"], active_start_date, normalize=True
+            )
+            for ticker, data in market_data.items()
+            if (
+                "Price" in selection.visible_rows
+                and ticker in selection.visible_tickers
+                and selection.matrix["Price"].get(ticker, False)
+                and "Close" in data
+            )
+        }
+        all_displayed = {
+            **{f"strategy:{name}": series for name, series in displayed_strategies.items()},
+            **{f"price:{ticker}": series for ticker, series in displayed_prices.items()},
+        }
+        clicked_date = pd.Timestamp(mdates.num2date(event.xdata))
+        selected_date = nearest_chart_date(clicked_date, all_displayed)
+        if selected_date is None:
+            rebalance_annotation.set_visible(False)
+            value_annotation.set_visible(False)
+            fig.canvas.draw_idle()
+            return
+
+        strategy_values = chart_values_on_date(
+            displayed_strategies, selected_date
+        )
+        price_values = chart_values_on_date(displayed_prices, selected_date)
+        rebalance_annotation.set_visible(False)
+        value_annotation.xy = (mdates.date2num(selected_date), event.ydata)
+        axis_box = price_axis.get_window_extent()
+        place_left = event.x > (axis_box.x0 + axis_box.x1) / 2
+        place_below = event.y > (axis_box.y0 + axis_box.y1) / 2
+        value_annotation.set_position((
+            -14 if place_left else 14,
+            -18 if place_below else 18,
+        ))
+        value_annotation.set_ha("right" if place_left else "left")
+        value_annotation.set_va("top" if place_below else "bottom")
+        value_annotation.set_multialignment("left")
+        value_annotation.set_text(format_chart_value_popup(
+            selected_date, strategy_values, price_values
+        ))
+        value_annotation.set_visible(True)
+        fig.canvas.draw()
+        fit_annotation_inside_axis(value_annotation, price_axis, fig)
+        fig.canvas.draw_idle()
 
     def refresh_timeframe_visibility(_=None):
         displayed_days = abs(price_axis.get_xlim()[1] - price_axis.get_xlim()[0])
@@ -965,9 +1188,19 @@ def draw_chart(results, price_data=None, show_chart=SHOW_CHART):
             reset_y_limits()
             fig.canvas.draw_idle()
 
-    def toolbar_zoom_is_active():
+    def toolbar_navigation_mode():
         toolbar = getattr(fig.canvas.manager, "toolbar", None)
-        mode = str(getattr(toolbar, "mode", "")).lower() if toolbar is not None else ""
+        return (
+            str(getattr(toolbar, "mode", "")).lower()
+            if toolbar is not None
+            else ""
+        )
+
+    def toolbar_navigation_is_active():
+        return bool(toolbar_navigation_mode())
+
+    def toolbar_zoom_is_active():
+        mode = toolbar_navigation_mode()
         # Matplotlib labels Pan mode as "pan/zoom".  It must not trigger the
         # custom rectangle-zoom handler, or a pan drag is applied twice.
         return "zoom" in mode and "pan" not in mode
@@ -1437,6 +1670,7 @@ def draw_chart(results, price_data=None, show_chart=SHOW_CHART):
     fig.canvas.mpl_connect("scroll_event", prevent_y_zoom_when_x_is_limited)
     fig.canvas.mpl_connect("button_press_event", on_zoom_press)
     fig.canvas.mpl_connect("button_press_event", on_rebalance_marker_click)
+    fig.canvas.mpl_connect("button_press_event", on_chart_value_click)
     fig.canvas.mpl_connect("button_release_event", on_zoom_release)
     fig.canvas.mpl_connect("button_press_event", on_strategy_click)
     fig.canvas.mpl_connect("button_press_event", on_matrix_click)

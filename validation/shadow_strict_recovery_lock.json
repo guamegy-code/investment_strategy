@@ -26,6 +26,6 @@
     "extra_signal_delay_days": 0
   },
   "code_sha256": {
-    "shadow_oos_validation.py": "f8dc3f1c399273d39792a8fe56a4a4e47e5f7b94c29918d16dc9847ee2e40b88"
+    "validation/shadow_oos.py": "7e859dd8f03df7f9fc2b2f5448be0f6efd02d616ff26543b23a9d2b81e4d9775"
   }
 }

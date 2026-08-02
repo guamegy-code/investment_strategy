@@ -7,7 +7,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from extended_data import _cash_total_return, _stitch
+from validation.extended_data import _cash_total_return, _stitch
 
 
 class ExtendedDataTests(unittest.TestCase):

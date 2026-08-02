@@ -14,8 +14,8 @@ from config import (
     RESULT_DIR,
     SLIPPAGE,
 )
-from extended_data import ASSETS, build_extended_data
-from oos_validation import _future_with_anchor, verify_lock as verify_production_lock
+from .extended_data import ASSETS, build_extended_data
+from .oos import _future_with_anchor, verify_lock as verify_production_lock
 from performance import Performance
 from runner import Runner
 from strategy import AllocationState, DynamicRiskAllocationStrategy

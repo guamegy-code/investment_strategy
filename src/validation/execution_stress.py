@@ -3,8 +3,8 @@
 import pandas as pd
 
 from config import COMMISSION, EXTENDED_DATA_DIR, RESULT_DIR, SLIPPAGE
-from extended_data import ASSETS
-from extended_stress import _window_report
+from .extended_data import ASSETS
+from .extended_stress import _window_report
 from runner import Runner
 from strategy import (
     DynamicRiskAllocationStrategy,

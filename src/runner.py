@@ -12,12 +12,27 @@ from performance import Performance
 
 class Runner:
 
-    def __init__(self, data_dir=DATA_DIR, tickers=None, backtest_options=None):
+    def __init__(
+        self,
+        data_dir=DATA_DIR,
+        tickers=None,
+        backtest_options=None,
+        use_strategy_tickers=False,
+    ):
         self.strategies = []
         self.results = []
         self.data_dir = data_dir
         self.tickers = tickers
         self.backtest_options = backtest_options or {}
+        self.use_strategy_tickers = use_strategy_tickers
+
+    def tickers_for(self, strategy):
+        """Use a strategy's own assets when histories may start differently."""
+        if self.use_strategy_tickers:
+            required = getattr(strategy, "required_tickers", None)
+            if required:
+                return required
+        return self.tickers
 
     # ==================================================
     # 전략 등록
@@ -36,7 +51,7 @@ class Runner:
             backtest = Backtest(
                 strategy,
                 data_dir=self.data_dir,
-                tickers=self.tickers,
+                tickers=self.tickers_for(strategy),
                 **self.backtest_options,
             )
             history, trades, rebalances = backtest.run_all()

@@ -3,12 +3,11 @@
 import pandas as pd
 
 from config import EXTENDED_DATA_DIR, RESULT_DIR
-from extended_data import ASSETS, build_extended_data
+from .extended_data import ASSETS, build_extended_data
 from performance import Performance
 from runner import Runner
 from strategy import (
     DynamicRiskAllocationStrategy,
-    STATIC_703010_BAND,
     STATIC_70_BND10_BIL10_GLD10,
 )
 
@@ -93,7 +92,6 @@ def run_extended_stress(download=True):
     for strategy in (
         DynamicRiskAllocationStrategy(),
         STATIC_70_BND10_BIL10_GLD10(),
-        STATIC_703010_BAND(),
     ):
         runner.add_strategy(strategy)
     results = runner.run()

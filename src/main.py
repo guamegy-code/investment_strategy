@@ -5,16 +5,14 @@ import pandas as pd
 from attribution import DynamicAllocationAttribution
 from chart import draw_chart
 from config import END_DATE, RESULT_DIR, START_DATE
-from runner import Runner
-from strategy import (
-    ASYMMETRIC_TREND_BAND,
-    BASIC_BANG_DIV,
-    DownsideTrendOverlayStrategy,
-    DynamicRiskAllocationStrategy,
-    RETIREMENT_7030_BAND,
-    STATIC_703010_BAND,
-    STATIC_70_BND10_BIL10_GLD10,
+from pension_strategies import (
+    PensionKodexStrategy,
+    PensionKoActStrategy,
+    PensionNasdaqMixStrategy,
+    PensionTimeStrategy,
 )
+from runner import Runner
+from strategy import PensionRiskAllocationStrategy, STATIC_PENSION_7030
 
 
 def save_results(results):
@@ -22,7 +20,7 @@ def save_results(results):
         result["strategy"].__class__.__name__: result["history"]
         for result in results
     }
-    benchmark = histories.get("STATIC_703010_BAND")
+    benchmark = histories.get("STATIC_70_BND10_BIL10_GLD10")
 
     for result in results:
         name = result["strategy"].__class__.__name__
@@ -51,18 +49,32 @@ def save_results(results):
     )
 
 
-def main():
-    runner = Runner(tickers=("QQQ", "BND", "GLD", "BIL", "QLD"))
-    for strategy in (
-        DynamicRiskAllocationStrategy(),
-        DownsideTrendOverlayStrategy(),
-        STATIC_703010_BAND(),
-        STATIC_70_BND10_BIL10_GLD10(),
-        BASIC_BANG_DIV(),
-        RETIREMENT_7030_BAND(),
-        ASYMMETRIC_TREND_BAND(),
-    ):
+def build_runner():
+    """Configure the active strategies shown in the application."""
+    strategies = (
+        PensionRiskAllocationStrategy(),
+        STATIC_PENSION_7030(),
+        PensionNasdaqMixStrategy(),
+        PensionKodexStrategy(),
+        PensionTimeStrategy(),
+        PensionKoActStrategy(),
+    )
+    required_tickers = tuple(dict.fromkeys(
+        ticker
+        for strategy in strategies
+        for ticker in strategy.required_tickers
+    ))
+    runner = Runner(
+        tickers=required_tickers,
+        use_strategy_tickers=True,
+    )
+    for strategy in strategies:
         runner.add_strategy(strategy)
+    return runner
+
+
+def main():
+    runner = build_runner()
     results = runner.run()
 
     print("=" * 50)
