@@ -12,7 +12,13 @@ from pension_strategies import (
     PensionTimeStrategy,
 )
 from runner import Runner
-from strategy import PensionRiskAllocationStrategy, STATIC_PENSION_7030
+from strategy import (
+    PensionBlendedRiskAllocationStrategy,
+    PensionBlendedVXUSSubstitutionStrategy,
+    PensionRiskAllocationStrategy,
+    PensionVXUSSubstitutionStrategy,
+    STATIC_PENSION_7030,
+)
 
 
 def save_results(results):
@@ -53,6 +59,9 @@ def build_runner():
     """Configure the active strategies shown in the application."""
     strategies = (
         PensionRiskAllocationStrategy(),
+        PensionBlendedRiskAllocationStrategy(),
+        PensionVXUSSubstitutionStrategy(),
+        PensionBlendedVXUSSubstitutionStrategy(),
         STATIC_PENSION_7030(),
         PensionNasdaqMixStrategy(),
         PensionKodexStrategy(),
