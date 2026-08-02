@@ -2,6 +2,7 @@
 
 from abc import ABC, abstractmethod
 from enum import Enum
+from math import exp
 
 
 class BaseStrategy(ABC):
@@ -289,6 +290,141 @@ class DynamicRiskAllocationStrategy(BaseStrategy):
             days = None if rebalance else 1
             return self._signal(True, reason, days)
         return self._signal(False, None)
+
+
+class DownsideTrendOverlayStrategy(BaseStrategy):
+    """Keep QQQ near 70% and reduce it continuously during negative trends."""
+
+    MIN_QQQ_WEIGHT = 0.20
+    MAX_QQQ_WEIGHT = 0.70
+    MAX_GLD_WEIGHT = 0.20
+    TARGET_QQQ_VOLATILITY = 0.25
+    REBALANCE_BAND = 0.05
+    EXECUTION_DAYS = 3
+
+    def __init__(self):
+        self.target = None
+        self.last_signal_month = None
+        self.trend_score = 0.0
+        self.volatility_multiplier = 1.0
+
+    @staticmethod
+    def _valid(*values):
+        return all(value is not None and value == value for value in values)
+
+    @staticmethod
+    def _clip(value, lower, upper):
+        return max(lower, min(value, upper))
+
+    @classmethod
+    def _scaled_signal(cls, value, scale):
+        return cls._clip(value / scale, -1.0, 1.0)
+
+    def _qqq_weight(self, qqq):
+        close = qqq.get("Close")
+        ema200 = qqq.get("EMA200")
+        roc60 = qqq.get("ROC60")
+        roc120 = qqq.get("ROC120")
+        roc252 = qqq.get("ROC252")
+        volatility = qqq.get("VOL60")
+        if not self._valid(close, ema200, roc60, roc120, roc252, volatility):
+            self.trend_score = 0.0
+            self.volatility_multiplier = 1.0
+            return self.MAX_QQQ_WEIGHT
+
+        signals = (
+            self._scaled_signal(roc60, 15.0),
+            self._scaled_signal(roc120, 25.0),
+            self._scaled_signal(roc252, 40.0),
+            self._scaled_signal(close / ema200 - 1.0, 0.15),
+        )
+        self.trend_score = sum(signals) / len(signals)
+        self.volatility_multiplier = self._clip(
+            self.TARGET_QQQ_VOLATILITY / max(float(volatility), 0.01),
+            0.25,
+            1.0,
+        )
+        volatility_stress = 1.0 / self.volatility_multiplier
+        reduction = self._clip(
+            max(0.0, -self.trend_score) * volatility_stress,
+            0.0,
+            1.0,
+        )
+        tactical_range = self.MAX_QQQ_WEIGHT - self.MIN_QQQ_WEIGHT
+        return self.MAX_QQQ_WEIGHT - tactical_range * reduction
+
+    def _safe_weights(self, market, remaining):
+        scores = {}
+        for ticker in ("BND", "BIL", "GLD"):
+            roc60 = market[ticker].get("ROC60")
+            roc120 = market[ticker].get("ROC120")
+            volatility = market[ticker].get("VOL60")
+            if not self._valid(roc60, roc120, volatility):
+                scores[ticker] = 0.0
+                continue
+            momentum = (float(roc60) + float(roc120)) / 200.0
+            scores[ticker] = momentum - 0.25 * float(volatility)
+
+        maximum = max(scores.values())
+        scaled = {
+            ticker: exp((score - maximum) / 0.05)
+            for ticker, score in scores.items()
+        }
+        total = sum(scaled.values())
+        safe = {
+            ticker: remaining * value / total
+            for ticker, value in scaled.items()
+        }
+
+        gold_cap = min(self.MAX_GLD_WEIGHT, remaining)
+        if safe["GLD"] > gold_cap:
+            excess = safe["GLD"] - gold_cap
+            safe["GLD"] = gold_cap
+            non_gold = safe["BND"] + safe["BIL"]
+            if non_gold > 0:
+                safe["BND"] += excess * safe["BND"] / non_gold
+                safe["BIL"] += excess * safe["BIL"] / non_gold
+            else:
+                safe["BND"] += excess / 2.0
+                safe["BIL"] += excess / 2.0
+        return safe
+
+    def _desired_target(self, market):
+        qqq_weight = self._qqq_weight(market["QQQ"])
+        target = {"QQQ": qqq_weight}
+        target.update(self._safe_weights(market, 1.0 - qqq_weight))
+        return target
+
+    def _signal(self, rebalance, reason):
+        return {
+            "rebalance": rebalance,
+            "target": self.target.copy(),
+            "days": self.EXECUTION_DAYS,
+            "reason": reason,
+        }
+
+    def evaluate(self, date, market, portfolio):
+        month = date.to_period("M")
+        if self.target is None:
+            self.target = self._desired_target(market)
+            self.last_signal_month = month
+            return self._signal(True, "INITIAL_DOWNSIDE_OVERLAY")
+        if month == self.last_signal_month:
+            return self._signal(False, None)
+
+        self.last_signal_month = month
+        desired = self._desired_target(market)
+        prices = {ticker: market[ticker]["Close"] for ticker in desired}
+        current = portfolio.weights(prices)
+        self.target = desired
+        rebalance = any(
+            abs(current.get(ticker, 0.0) - weight) >= self.REBALANCE_BAND
+            for ticker, weight in desired.items()
+        )
+        return self._signal(
+            rebalance,
+            "MONTHLY_DOWNSIDE_OVERLAY_5PCT_BAND" if rebalance else None,
+        )
 
 
 class _MarketRegimeObserver:

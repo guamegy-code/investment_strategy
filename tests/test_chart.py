@@ -82,6 +82,7 @@ class RebalanceMarkerTests(unittest.TestCase):
             textcoords="offset points",
             ha="left",
             va="bottom",
+            multialignment="left",
         )
         figure.canvas.draw()
 
@@ -92,6 +93,7 @@ class RebalanceMarkerTests(unittest.TestCase):
         axis_box = axis.get_window_extent(figure.canvas.get_renderer())
         self.assertLessEqual(annotation_box.x1, axis_box.x1 - 7.5)
         self.assertLessEqual(annotation_box.y1, axis_box.y1 - 7.5)
+        self.assertEqual(annotation._multialignment, "left")
         plt.close(figure)
 
 

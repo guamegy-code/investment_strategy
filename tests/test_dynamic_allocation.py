@@ -11,6 +11,7 @@ from strategy import (
     ASYMMETRIC_TREND_BAND,
     AllocationState,
     BASIC_BANG_DIV,
+    DownsideTrendOverlayStrategy,
     DynamicRiskAllocationStrategy,
     RETIREMENT_7030_BAND,
     STATIC_703010_BAND,
@@ -77,6 +78,29 @@ class DynamicAllocationTests(unittest.TestCase):
         self.assertEqual(
             self.strategy.STATE_WEIGHTS[AllocationState.RECOVERY], (0.50, 0.15)
         )
+
+    def test_downside_overlay_respects_target_caps(self):
+        strategy = DownsideTrendOverlayStrategy()
+        overlay_market = {
+            "QQQ": {
+                "Close": 85.0,
+                "EMA200": 100.0,
+                "ROC60": -20.0,
+                "ROC120": -30.0,
+                "ROC252": -40.0,
+                "VOL60": 0.40,
+            },
+            "BND": {"Close": 100.0, "ROC60": 2.0, "ROC120": 3.0, "VOL60": 0.06},
+            "BIL": {"Close": 100.0, "ROC60": 1.0, "ROC120": 2.0, "VOL60": 0.01},
+            "GLD": {"Close": 100.0, "ROC60": 8.0, "ROC120": 10.0, "VOL60": 0.15},
+        }
+
+        target = strategy._desired_target(overlay_market)
+
+        self.assertAlmostEqual(sum(target.values()), 1.0)
+        self.assertGreaterEqual(target["QQQ"], 0.20)
+        self.assertLessEqual(target["QQQ"], 0.70)
+        self.assertLessEqual(target["GLD"], 0.20)
 
     def test_complete_state_cycle(self):
         self.evaluate(BULL)

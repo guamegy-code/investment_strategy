@@ -3,7 +3,7 @@
   "locked_on": "2026-08-01",
   "historical_data_cutoff": "2026-07-31",
   "oos_start": "2026-08-03",
-  "code_hash_note": "2026-08-02: hashes refreshed after a static-benchmark-only refactor and addition of pre-trade weight/execution-period metadata for chart popups; locked DynamicRiskAllocationStrategy parameters, trades, and performance are unchanged.",
+  "code_hash_note": "2026-08-02: hashes refreshed after adding the independent DownsideTrendOverlayStrategy and exposing ROC120, ROC252, and VOL60 to all strategies. Locked DynamicRiskAllocationStrategy parameters, trades, rebalances, and performance were verified unchanged.",
   "strategy": "DynamicRiskAllocationStrategy",
   "benchmark": "STATIC_70_BND10_BIL10_GLD10",
   "parameters": {
@@ -28,8 +28,8 @@
     "extra_signal_delay_days": 0
   },
   "code_sha256": {
-    "strategy.py": "1a916a98a1208b766af9dcb027b141188e972135df87eb58b26df26c6612feaa",
-    "backtest.py": "67d88fed4b736f630c5b3529f63843fba6c049a9af76c9e42a4dbb5e8f41e6c8",
+    "strategy.py": "a05906f2127a1b727086e0b435a2a0b82a6b50f23e2750ed621b76d7ce6bf6d8",
+    "backtest.py": "4563246ffd32911a613108966f5c15d658e3f4e6190ecbcd782585b42cd38081",
     "portfolio.py": "2f436efa7a61effaded31adf8ef04522c79d7665cb7bcca67656eace47173c12",
     "indicators.py": "f81e6c7d8d9f36ae812ebcc2c5f63eb3833b3362b7811928b9042e61ac6dfee0"
   },

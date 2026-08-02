@@ -696,6 +696,7 @@ def draw_chart(results, price_data=None, show_chart=SHOW_CHART):
         textcoords="offset points",
         ha="left",
         va="bottom",
+        multialignment="left",
         fontsize=9,
         fontfamily=["Consolas", "Malgun Gothic"],
         color="#1D1D1F",
@@ -846,6 +847,9 @@ def draw_chart(results, price_data=None, show_chart=SHOW_CHART):
                 ))
                 rebalance_annotation.set_ha("right" if place_left else "left")
                 rebalance_annotation.set_va("top" if place_below else "bottom")
+                # The horizontal alignment anchors the box on either side of
+                # the marker; multiline content itself must remain left-aligned.
+                rebalance_annotation.set_multialignment("left")
                 rebalance_annotation.set_text(
                     f"체결일: {execution_date:%Y-%m-%d}\n"
                     f"분할 체결 기간: {marker_event['execution_days']}거래일\n\n"

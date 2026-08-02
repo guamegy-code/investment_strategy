@@ -9,6 +9,7 @@ from runner import Runner
 from strategy import (
     ASYMMETRIC_TREND_BAND,
     BASIC_BANG_DIV,
+    DownsideTrendOverlayStrategy,
     DynamicRiskAllocationStrategy,
     RETIREMENT_7030_BAND,
     STATIC_703010_BAND,
@@ -54,6 +55,7 @@ def main():
     runner = Runner(tickers=("QQQ", "BND", "GLD", "BIL", "QLD"))
     for strategy in (
         DynamicRiskAllocationStrategy(),
+        DownsideTrendOverlayStrategy(),
         STATIC_703010_BAND(),
         STATIC_70_BND10_BIL10_GLD10(),
         BASIC_BANG_DIV(),
