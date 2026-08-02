@@ -6,6 +6,7 @@ __pycache__/
 # Data
 data/*.csv
 data_extended/*.csv
+data_multimarket/*.csv
 
 # Results
 results/*
