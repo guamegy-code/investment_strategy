@@ -14,7 +14,6 @@ from pension_strategies import (
 from runner import Runner
 from strategy import (
     PensionBlendedRiskAllocationStrategy,
-    PensionBlendedVXUSSubstitutionStrategy,
     PensionRiskAllocationStrategy,
     PensionVXUSSubstitutionStrategy,
     STATIC_PENSION_7030,
@@ -61,12 +60,11 @@ def build_runner():
         PensionRiskAllocationStrategy(),
         PensionBlendedRiskAllocationStrategy(),
         PensionVXUSSubstitutionStrategy(),
-        PensionBlendedVXUSSubstitutionStrategy(),
-        STATIC_PENSION_7030(),
-        PensionNasdaqMixStrategy(),
-        PensionKodexStrategy(),
-        PensionTimeStrategy(),
-        PensionKoActStrategy(),
+        #STATIC_PENSION_7030(),
+        #PensionNasdaqMixStrategy(),
+        #PensionKodexStrategy(),
+        #PensionTimeStrategy(),
+        #PensionKoActStrategy(),
     )
     required_tickers = tuple(dict.fromkeys(
         ticker
@@ -75,6 +73,10 @@ def build_runner():
     ))
     runner = Runner(
         tickers=required_tickers,
+        backtest_options={
+            "start_date": START_DATE,
+            "end_date": END_DATE,
+        },
         use_strategy_tickers=True,
     )
     for strategy in strategies:
@@ -85,11 +87,13 @@ def build_runner():
 def main():
     runner = build_runner()
     results = runner.run()
+    summary = runner.summary()
+    displayed_period = runner.backtest_period()
 
     print("=" * 50)
-    print(f"Backtest period: {START_DATE} ~ {END_DATE}")
+    print(f"Backtest period: {displayed_period}")
     print("=" * 50)
-    print("\n", runner.summary(), "\n")
+    print("\n", summary, "\n")
     save_results(results)
     draw_chart(results)
 

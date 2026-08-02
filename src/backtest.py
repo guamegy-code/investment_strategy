@@ -28,6 +28,8 @@ class Backtest:
         slippage=SLIPPAGE,
         signal_delay_days=0,
         bear_signal_delay_days=None,
+        start_date=None,
+        end_date=None,
     ):
 
         self.strategy = strategy
@@ -35,6 +37,12 @@ class Backtest:
         self.tickers = list(tickers or TICKERS)
         self.signal_delay_days = signal_delay_days
         self.bear_signal_delay_days = bear_signal_delay_days
+        self.start_date = (
+            pd.Timestamp(start_date) if start_date is not None else None
+        )
+        self.end_date = (
+            pd.Timestamp(end_date) if end_date is not None else None
+        )
         self.delayed_rebalance = None
         self.data = self.load_data()
         self.portfolio = Portfolio(
@@ -128,6 +136,14 @@ class Backtest:
             else:
                 merged = merged.join(df, how="inner")
         merged.sort_index(inplace=True)
+        if self.start_date is not None:
+            merged = merged.loc[merged.index >= self.start_date]
+        if self.end_date is not None:
+            merged = merged.loc[merged.index <= self.end_date]
+        if merged.empty:
+            raise ValueError(
+                "No overlapping market data in the configured backtest period"
+            )
         return merged
 
 

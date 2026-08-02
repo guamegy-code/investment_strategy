@@ -178,6 +178,11 @@ def ticker_color(index, strategy_count):
     return APPLE_COLORS[(index + strategy_count) % len(APPLE_COLORS)]
 
 
+def ticker_chart_color(ticker, visible_tickers, strategy_count):
+    """Return the color used by both a visible ticker label and its lines."""
+    return ticker_color(list(visible_tickers).index(ticker), strategy_count)
+
+
 def indicator_line_style(row):
     if row in ROW_LINE_STYLES:
         return ROW_LINE_STYLES[row]
@@ -214,6 +219,12 @@ def build_selection(results, market_data, saved):
     matrix_rows = list(MATRIX_ROWS)
     has_visible_rows = isinstance(saved.get("visible_rows"), list)
     has_visible_tickers = isinstance(saved.get("visible_tickers"), list)
+    saved_matrix_tickers = {
+        ticker
+        for row in saved_matrix.values()
+        if isinstance(row, dict)
+        for ticker in row
+    }
 
     strategies = {
         result["strategy"].__class__.__name__: bool(saved_strategies.get(result["strategy"].__class__.__name__, True))
@@ -232,7 +243,13 @@ def build_selection(results, market_data, saved):
                     ticker,
                     saved_matrix.get(indicator, {}).get(
                         ticker,
-                        bool(saved_tickers.get(ticker, True)) and bool(saved_indicators.get(indicator, indicator == "Price")),
+                        bool(saved_tickers.get(ticker, True)) and bool(
+                            saved_indicators.get(
+                                indicator,
+                                indicator == "Price"
+                                or (indicator == "Disparity" and ticker == "QQQ"),
+                            )
+                        ),
                     ),
                 )
             )
@@ -242,7 +259,11 @@ def build_selection(results, market_data, saved):
     }
     visible_rows = [row for row in matrix_rows if row in saved["visible_rows"]] if has_visible_rows else matrix_rows
     visible_tickers = (
-        [ticker for ticker in market_data if ticker in saved["visible_tickers"]]
+        [
+            ticker for ticker in market_data
+            if ticker in saved["visible_tickers"]
+            or ticker not in saved_matrix_tickers
+        ]
         if has_visible_tickers
         else [ticker for ticker in market_data if saved_tickers.get(ticker, True)]
     )
@@ -288,9 +309,20 @@ def style_control_axis(axis, title):
         spine.set_color("#E5E5EA")
 
 
-def load_market_data():
+def chart_tickers(results):
+    """Add alternative risk assets used by active strategies to the chart."""
+    tickers = list(TICKERS)
+    for result in results:
+        strategy = result.get("strategy")
+        alternative = getattr(strategy, "ALTERNATIVE_RISK_ASSET", None)
+        if alternative:
+            tickers.append(alternative)
+    return tuple(dict.fromkeys(tickers))
+
+
+def load_market_data(tickers=None):
     market_data = {}
-    for ticker in TICKERS:
+    for ticker in tickers or TICKERS:
         path = DATA_DIR / f"{ticker}.csv"
         if not path.exists():
             print(f"Chart skipped for {ticker}: {path} not found")
@@ -689,10 +721,15 @@ def draw_indicator_lines(panel_axes, market_data, chart_start, strategy_count, s
     panel_lines = {"price": [], "oscillator": [], "risk": []}
     indicator_lines = {}
     indicator_series = {}
-    for ticker_index, (ticker, data) in enumerate(market_data.items()):
+    for ticker, data in market_data.items():
         if chart_start is not None:
             data = data.loc[data.index >= chart_start]
-        color = ticker_color(ticker_index, strategy_count)
+        color_tickers = (
+            selection.visible_tickers
+            if ticker in selection.visible_tickers
+            else market_data
+        )
+        color = ticker_chart_color(ticker, color_tickers, strategy_count)
         for indicator, columns in INDICATORS.items():
             axis = panel_axes[PANEL_BY_INDICATOR[indicator]]
             for column in columns:
@@ -773,7 +810,11 @@ def draw_timeframe_candles(price_axis, market_data, chart_start):
 
 def draw_chart(results, price_data=None, show_chart=SHOW_CHART):
     """Draw strategy performance and a ticker-by-indicator selection matrix."""
-    market_data = price_data if price_data is not None else load_market_data()
+    market_data = (
+        price_data
+        if price_data is not None
+        else load_market_data(chart_tickers(results))
+    )
     selection = build_selection(results, market_data, load_selection())
     strategy_names = list(selection.strategies)
     matrix_rows = list(MATRIX_ROWS)
@@ -990,6 +1031,10 @@ def draw_chart(results, price_data=None, show_chart=SHOW_CHART):
                 and ticker in selection.visible_tickers
                 and selection.matrix[row][ticker]
             )
+            if ticker in selection.visible_tickers:
+                line.set_color(ticker_chart_color(
+                    ticker, selection.visible_tickers, len(results)
+                ))
             line.set_linestyle(displayed_indicator_line_style(row, selection))
         update_panels()
 
@@ -1496,7 +1541,10 @@ def draw_chart(results, price_data=None, show_chart=SHOW_CHART):
         for index, ticker in enumerate(matrix_tickers):
             x = MATRIX_FIRST_COLUMN_X + index * column_step
             matrix_axis.text(x, ticker_title_y, ticker, transform=matrix_axis.transAxes, ha="center", va="center",
-                             fontsize=CONTROL_FONT_SIZE, color=ticker_color(index, len(results)))
+                             fontsize=CONTROL_FONT_SIZE,
+                             color=ticker_chart_color(
+                                 ticker, selection.visible_tickers, len(results)
+                             ))
         for row_index, row in enumerate(displayed_rows):
             y = row_start - row_index * row_step
             matrix_axis.text(MATRIX_LABEL_X, y, row, transform=matrix_axis.transAxes, va="center",

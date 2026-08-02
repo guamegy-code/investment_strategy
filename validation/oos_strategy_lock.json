@@ -3,7 +3,7 @@
   "locked_on": "2026-08-01",
   "historical_data_cutoff": "2026-07-31",
   "oos_start": "2026-08-03",
-  "code_hash_note": "2026-08-02: hash refreshed after restoring the original pension strategies, adding independent 25-point BND/BIL blended comparison strategies, and replacing pandas iterrows/index lookups with value-equivalent tuple/dict iteration for runtime performance. DynamicRiskAllocationStrategy defaults, parameters, state transitions, target weights, and execution ordering remain unchanged.",
+  "code_hash_note": "2026-08-02: hash refreshed after removing the experimental BND-or-BIL VXUS substitution production class; its event-attribution candidate remains validation-only. DynamicRiskAllocationStrategy defaults, parameters, state transitions, target weights, and execution ordering remain unchanged.",
   "strategy": "DynamicRiskAllocationStrategy",
   "benchmark": "STATIC_70_BND10_BIL10_GLD10",
   "parameters": {
@@ -28,8 +28,8 @@
     "extra_signal_delay_days": 0
   },
   "code_sha256": {
-    "strategy.py": "80ab59cb2db4229061123d55b13e7f00cc191f30cb020aef57e5e413e4c10a09",
-    "backtest.py": "de98accb0e841f69fa07cf2d349c315dc5fd94b42852bfe334213e9e599a4650",
+    "strategy.py": "c8f9c0e6154c017d35e5089b77e9fd6f27ede0de0db14b7d39c8e74e9c98dcef",
+    "backtest.py": "3c2be7836468057abc08de09f65d76593eb8c16475a7a0db11ba41e0795e0d59",
     "portfolio.py": "2f436efa7a61effaded31adf8ef04522c79d7665cb7bcca67656eace47173c12",
     "indicators.py": "f81e6c7d8d9f36ae812ebcc2c5f63eb3833b3362b7811928b9042e61ac6dfee0"
   },

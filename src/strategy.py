@@ -483,7 +483,9 @@ class _PensionVXUSSubstitutionMixin:
         )
         if risk_weight < self.MAX_RISK_WEIGHT and target[self.BOND_ASSET] > 0.0:
             available_risk_capacity = self.MAX_RISK_WEIGHT - risk_weight
-            vxus_weight = min(target[self.BOND_ASSET], available_risk_capacity)
+            vxus_weight = min(
+                target[self.BOND_ASSET], available_risk_capacity
+            )
             target[self.ALTERNATIVE_RISK_ASSET] = round(vxus_weight, 10)
             target[self.BOND_ASSET] = round(
                 target[self.BOND_ASSET] - vxus_weight, 10
@@ -504,14 +506,6 @@ class PensionVXUSSubstitutionStrategy(
     combined QQQ and VXUS target at or below the pension risk-asset cap.
     BIL is never replaced.
     """
-
-
-
-class PensionBlendedVXUSSubstitutionStrategy(
-    _PensionVXUSSubstitutionMixin,
-    PensionBlendedRiskAllocationStrategy,
-):
-    """VXUS substitution combined with the 25-point BND/BIL ladder."""
 
 
 class DownsideTrendOverlayStrategy(BaseStrategy):

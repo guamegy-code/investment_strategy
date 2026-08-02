@@ -11,6 +11,8 @@ import matplotlib.pyplot as plt
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from chart import (
+    build_selection,
+    chart_tickers,
     chart_values_on_date,
     format_chart_value_popup,
     format_rebalance_table,
@@ -23,7 +25,66 @@ from chart import (
     state_line_segments,
     strategy_risk_assets,
     strategy_state_series,
+    ticker_chart_color,
 )
+
+
+class ChartTickerSelectionTests(unittest.TestCase):
+    def test_new_selection_enables_qqq_disparity_by_default(self):
+        class Strategy:
+            pass
+
+        market_data = {
+            "QQQ": pd.DataFrame({"Close": [1.0]}),
+            "BND": pd.DataFrame({"Close": [1.0]}),
+        }
+
+        selection = build_selection(
+            [{"strategy": Strategy()}], market_data, saved={}
+        )
+
+        self.assertTrue(selection.matrix["Disparity"]["QQQ"])
+        self.assertFalse(selection.matrix["Disparity"]["BND"])
+
+    def test_ticker_label_and_graph_use_the_same_visible_order_color(self):
+        visible_tickers = ("QQQ", "BND", "BIL", "VXUS")
+
+        graph_color = ticker_chart_color("VXUS", visible_tickers, 10)
+        checkbox_color = ticker_chart_color("VXUS", visible_tickers, 10)
+
+        self.assertEqual(graph_color, checkbox_color)
+        self.assertEqual(graph_color, "#FF9500")
+
+    def test_active_alternative_risk_asset_is_added_to_chart_tickers(self):
+        class VXUSStrategy:
+            ALTERNATIVE_RISK_ASSET = "VXUS"
+
+        tickers = chart_tickers([{"strategy": VXUSStrategy()}])
+
+        self.assertIn("VXUS", tickers)
+        self.assertEqual(len(tickers), len(set(tickers)))
+
+    def test_new_ticker_is_visible_when_loading_an_older_saved_selection(self):
+        class VXUSStrategy:
+            pass
+
+        saved = {
+            "visible_tickers": ["QQQ"],
+            "visible_rows": ["Price"],
+            "matrix": {"Price": {"QQQ": True, "BND": False}},
+        }
+        market_data = {
+            "QQQ": pd.DataFrame({"Close": [1.0]}),
+            "BND": pd.DataFrame({"Close": [1.0]}),
+            "VXUS": pd.DataFrame({"Close": [1.0]}),
+        }
+
+        selection = build_selection(
+            [{"strategy": VXUSStrategy()}], market_data, saved
+        )
+
+        self.assertEqual(selection.visible_tickers, ["QQQ", "VXUS"])
+        self.assertTrue(selection.matrix["Price"]["VXUS"])
 
 
 class RebalanceMarkerTests(unittest.TestCase):

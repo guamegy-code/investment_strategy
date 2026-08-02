@@ -58,6 +58,8 @@ class Runner:
             performance = Performance(history)
             summary = performance.summary()
             summary["Strategy"] = strategy.__class__.__name__
+            summary["StartDate"] = history.index.min()
+            summary["EndDate"] = history.index.max()
 
             self.results.append({
                 "strategy": strategy,
@@ -97,3 +99,18 @@ class Runner:
             "End",
         ]
         return df[columns]
+
+    def backtest_period(self):
+        """Return the actual period when every strategy shares it."""
+        periods = {
+            (
+                pd.Timestamp(result["summary"]["StartDate"]),
+                pd.Timestamp(result["summary"]["EndDate"]),
+            )
+            for result in self.results
+        }
+        if len(periods) != 1:
+            return "varies by strategy"
+
+        start_date, end_date = periods.pop()
+        return f"{start_date:%Y-%m-%d} ~ {end_date:%Y-%m-%d}"

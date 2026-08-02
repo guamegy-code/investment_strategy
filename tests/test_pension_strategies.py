@@ -6,6 +6,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from main import build_runner
+from config import END_DATE, START_DATE
 from pension_strategies import (
     PensionKodexStrategy,
     PensionKoActStrategy,
@@ -15,7 +16,6 @@ from pension_strategies import (
 from strategy import (
     AllocationState,
     PensionBlendedRiskAllocationStrategy,
-    PensionBlendedVXUSSubstitutionStrategy,
     PensionRiskAllocationStrategy,
     PensionVXUSSubstitutionStrategy,
 )
@@ -77,12 +77,6 @@ class PensionStrategyTests(unittest.TestCase):
                 "PensionRiskAllocationStrategy",
                 "PensionBlendedRiskAllocationStrategy",
                 "PensionVXUSSubstitutionStrategy",
-                "PensionBlendedVXUSSubstitutionStrategy",
-                "STATIC_PENSION_7030",
-                "PensionNasdaqMixStrategy",
-                "PensionKodexStrategy",
-                "PensionTimeStrategy",
-                "PensionKoActStrategy",
             ),
         )
         self.assertEqual(
@@ -92,12 +86,13 @@ class PensionStrategyTests(unittest.TestCase):
                 "BND",
                 "BIL",
                 "VXUS",
-                "379810.KS",
-                "426030.KS",
-                "0015B0.KS",
             ),
         )
         self.assertTrue(runner.use_strategy_tickers)
+        self.assertEqual(
+            runner.backtest_options,
+            {"start_date": START_DATE, "end_date": END_DATE},
+        )
 
     def test_vxus_substitution_respects_combined_risk_cap(self):
         strategy = PensionVXUSSubstitutionStrategy()
@@ -160,25 +155,6 @@ class PensionStrategyTests(unittest.TestCase):
         target = strategy._target_for_state()
 
         self.assertEqual(target, {"QQQ": 0.70, "BND": 0.225, "BIL": 0.075})
-
-    def test_vxus_replaces_only_the_blended_bnd_portion(self):
-        strategy = PensionBlendedVXUSSubstitutionStrategy()
-        strategy.state = AllocationState.RECOVERY
-        strategy.safe_asset_mix = {"BND": 0.75, "BIL": 0.25}
-
-        target = strategy._target_for_state()
-
-        self.assertEqual(
-            target,
-            {
-                "QQQ": 0.50,
-                "BND": 0.175,
-                "BIL": 0.125,
-                "VXUS": 0.20,
-            },
-        )
-        self.assertLessEqual(target["QQQ"] + target["VXUS"], 0.70)
-
 
 if __name__ == "__main__":
     unittest.main()
