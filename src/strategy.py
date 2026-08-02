@@ -291,14 +291,42 @@ class DynamicRiskAllocationStrategy(BaseStrategy):
         return self._signal(False, None)
 
 
-class STATIC_703010_BAND(BaseStrategy):
-    """Static QQQ 70 / BND 20 / GLD 10 benchmark with a 5% band."""
+class _MarketRegimeObserver:
+    """Observe DynamicRiskAllocationStrategy states without changing weights."""
 
     def __init__(self):
-        self.target = {"QQQ": 0.70, "BND": 0.20, "GLD": 0.10}
+        self.classifier = DynamicRiskAllocationStrategy()
+
+    def update(self, qqq):
+        desired = self.classifier._desired_state(qqq)
+        if self.classifier.state is None:
+            self.classifier.state = desired
+        elif self.classifier._confirm(desired):
+            self.classifier.state = desired
+            self.classifier._candidate = None
+            self.classifier._candidate_days = 0
+        return self.classifier.state
+
+
+class _StaticRegimeBandStrategy(BaseStrategy):
+    """Fixed allocation with a 5% band and read-only market-regime tracking."""
+
+    TARGET = {}
+
+    def __init__(self):
+        self.target = self.TARGET.copy()
         self.last_rebalance_month = None
+        self._regime_observer = _MarketRegimeObserver()
+        self.state = None
+        self.risk_off_score = 0
+        self.recovery_score = 0
 
     def evaluate(self, date, market, portfolio):
+        self.state = self._regime_observer.update(market["QQQ"])
+        classifier = self._regime_observer.classifier
+        self.risk_off_score = classifier.risk_off_score
+        self.recovery_score = classifier.recovery_score
+
         month = date.to_period("M")
         reason = None
         rebalance = False
@@ -323,32 +351,21 @@ class STATIC_703010_BAND(BaseStrategy):
         }
 
 
-class STATIC_70_BIL20_GLD10(STATIC_703010_BAND):
-    def __init__(self):
-        super().__init__()
-        self.target = {"QQQ": 0.70, "BIL": 0.20, "GLD": 0.10}
+class STATIC_703010_BAND(_StaticRegimeBandStrategy):
+    """Classic QQQ 70 / BND 20 / GLD 10 comparison benchmark."""
+
+    TARGET = {"QQQ": 0.70, "BND": 0.20, "GLD": 0.10}
 
 
-class STATIC_70_BND10_BIL10_GLD10(STATIC_703010_BAND):
-    def __init__(self):
-        super().__init__()
-        self.target = {
-            "QQQ": 0.70,
-            "BND": 0.10,
-            "BIL": 0.10,
-            "GLD": 0.10,
-        }
+class STATIC_70_BND10_BIL10_GLD10(_StaticRegimeBandStrategy):
+    """Selected benchmark splitting defensive assets between BND and BIL."""
 
-
-class STATIC_70_BND5_BIL15_GLD10(STATIC_703010_BAND):
-    def __init__(self):
-        super().__init__()
-        self.target = {
-            "QQQ": 0.70,
-            "BND": 0.05,
-            "BIL": 0.15,
-            "GLD": 0.10,
-        }
+    TARGET = {
+        "QQQ": 0.70,
+        "BND": 0.10,
+        "BIL": 0.10,
+        "GLD": 0.10,
+    }
 
 
 class BASIC_BANG_DIV(BaseStrategy):

@@ -3,6 +3,7 @@
   "locked_on": "2026-08-01",
   "historical_data_cutoff": "2026-07-31",
   "oos_start": "2026-08-03",
+  "code_hash_note": "2026-08-02: hashes refreshed after a static-benchmark-only refactor and addition of pre-trade weight/execution-period metadata for chart popups; locked DynamicRiskAllocationStrategy parameters, trades, and performance are unchanged.",
   "strategy": "DynamicRiskAllocationStrategy",
   "benchmark": "STATIC_70_BND10_BIL10_GLD10",
   "parameters": {
@@ -27,9 +28,9 @@
     "extra_signal_delay_days": 0
   },
   "code_sha256": {
-    "strategy.py": "cee30c70b8b0f72efcdeb793c2fd9c7e6896725913afe80c7581b32a060d4a68",
+    "strategy.py": "1a916a98a1208b766af9dcb027b141188e972135df87eb58b26df26c6612feaa",
     "backtest.py": "67d88fed4b736f630c5b3529f63843fba6c049a9af76c9e42a4dbb5e8f41e6c8",
-    "portfolio.py": "daa389ec841921eee5a273a3337583488e3d02a3c006f5393a9c2b4d8d7e439c",
+    "portfolio.py": "2f436efa7a61effaded31adf8ef04522c79d7665cb7bcca67656eace47173c12",
     "indicators.py": "f81e6c7d8d9f36ae812ebcc2c5f63eb3833b3362b7811928b9042e61ac6dfee0"
   },
   "methodology_note": "All data through the cutoff was used during development and is retrospective, not out-of-sample. Only observations after oos_start count as final OOS evidence."

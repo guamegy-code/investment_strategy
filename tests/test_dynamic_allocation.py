@@ -13,9 +13,8 @@ from strategy import (
     BASIC_BANG_DIV,
     DynamicRiskAllocationStrategy,
     RETIREMENT_7030_BAND,
-    STATIC_70_BIL20_GLD10,
+    STATIC_703010_BAND,
     STATIC_70_BND10_BIL10_GLD10,
-    STATIC_70_BND5_BIL15_GLD10,
 )
 
 
@@ -132,16 +131,28 @@ class DynamicAllocationTests(unittest.TestCase):
         self.assertAlmostEqual(self.strategy.target["BND"], 0.20)
         self.assertEqual(self.strategy.target["BIL"], 0.0)
 
-    def test_static_bil_benchmarks_sum_to_one(self):
+    def test_retained_static_benchmarks_sum_to_one(self):
         for strategy_class in (
-            STATIC_70_BIL20_GLD10,
+            STATIC_703010_BAND,
             STATIC_70_BND10_BIL10_GLD10,
-            STATIC_70_BND5_BIL15_GLD10,
         ):
             target = strategy_class().target
             self.assertAlmostEqual(sum(target.values()), 1.0)
             self.assertEqual(target["QQQ"], 0.70)
-            self.assertIn("BIL", target)
+
+    def test_static_benchmark_tracks_dynamic_market_state(self):
+        strategy = STATIC_70_BND10_BIL10_GLD10()
+
+        strategy.evaluate(self.date, BULL, self.portfolio)
+        self.assertEqual(strategy.state, AllocationState.BULL)
+        for _ in range(3):
+            strategy.evaluate(self.date, CAUTION, self.portfolio)
+
+        self.assertEqual(strategy.state, AllocationState.CAUTION)
+        self.assertEqual(
+            strategy.target,
+            {"QQQ": 0.70, "BND": 0.10, "BIL": 0.10, "GLD": 0.10},
+        )
 
     def test_basic_bang_div_uses_qqq_rsi(self):
         strategy = BASIC_BANG_DIV()
