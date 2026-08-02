@@ -3,12 +3,14 @@ import unittest
 from pathlib import Path
 
 import pandas as pd
+import matplotlib.pyplot as plt
 
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from chart import (
     format_rebalance_table,
+    fit_annotation_inside_axis,
     rebalance_directions,
     rebalance_marker_events,
     state_line_segments,
@@ -68,6 +70,29 @@ class RebalanceMarkerTests(unittest.TestCase):
         self.assertIn("종목       이전(%)   목표(%)", table)
         self.assertIn("QQQ         68.4      70.0", table)
         self.assertIn("BND         21.6      20.0", table)
+
+    def test_popup_is_clamped_inside_the_chart_axis(self):
+        figure, axis = plt.subplots(figsize=(4, 2))
+        annotation = axis.annotate(
+            "체결일: 2024-01-03\n분할 체결 기간: 5거래일\n\n"
+            "종목       이전(%)   목표(%)\nQQQ         68.4      70.0",
+            xy=(0.99, 0.99),
+            xycoords="axes fraction",
+            xytext=(14, 18),
+            textcoords="offset points",
+            ha="left",
+            va="bottom",
+        )
+        figure.canvas.draw()
+
+        fit_annotation_inside_axis(annotation, axis, figure)
+        figure.canvas.draw()
+
+        annotation_box = annotation.get_window_extent(figure.canvas.get_renderer())
+        axis_box = axis.get_window_extent(figure.canvas.get_renderer())
+        self.assertLessEqual(annotation_box.x1, axis_box.x1 - 7.5)
+        self.assertLessEqual(annotation_box.y1, axis_box.y1 - 7.5)
+        plt.close(figure)
 
 
 class StateColoredLineTests(unittest.TestCase):

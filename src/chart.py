@@ -411,6 +411,42 @@ def format_rebalance_table(pre_weights, target):
     return "\n".join(rows)
 
 
+def fit_annotation_inside_axis(annotation, axis, figure, padding=8):
+    """Shift an annotation until its text box stays inside the chart panel."""
+    renderer = figure.canvas.get_renderer()
+    annotation_box = annotation.get_window_extent(renderer=renderer)
+    axis_box = axis.get_window_extent(renderer=renderer)
+    left = axis_box.x0 + padding
+    right = axis_box.x1 - padding
+    bottom = axis_box.y0 + padding
+    top = axis_box.y1 - padding
+
+    if annotation_box.width > right - left:
+        shift_x = left - annotation_box.x0
+    elif annotation_box.x1 > right:
+        shift_x = right - annotation_box.x1
+    elif annotation_box.x0 < left:
+        shift_x = left - annotation_box.x0
+    else:
+        shift_x = 0
+
+    if annotation_box.height > top - bottom:
+        shift_y = bottom - annotation_box.y0
+    elif annotation_box.y1 > top:
+        shift_y = top - annotation_box.y1
+    elif annotation_box.y0 < bottom:
+        shift_y = bottom - annotation_box.y0
+    else:
+        shift_y = 0
+
+    offset_x, offset_y = annotation.get_position()
+    pixels_to_points = 72 / figure.dpi
+    annotation.set_position((
+        offset_x + shift_x * pixels_to_points,
+        offset_y + shift_y * pixels_to_points,
+    ))
+
+
 def strategy_state_series(history):
     """Return chartable strategy states, excluding missing or unknown values."""
     if history is None or history.empty or "StrategyState" not in history:
@@ -801,12 +837,27 @@ def draw_chart(results, price_data=None, show_chart=SHOW_CHART):
                     continue
                 offsets = marker.get_offsets()
                 rebalance_annotation.xy = tuple(offsets[point_index])
+                axis_box = price_axis.get_window_extent()
+                place_left = event.x > (axis_box.x0 + axis_box.x1) / 2
+                place_below = event.y > (axis_box.y0 + axis_box.y1) / 2
+                rebalance_annotation.set_position((
+                    -14 if place_left else 14,
+                    -18 if place_below else 18,
+                ))
+                rebalance_annotation.set_ha("right" if place_left else "left")
+                rebalance_annotation.set_va("top" if place_below else "bottom")
                 rebalance_annotation.set_text(
                     f"체결일: {execution_date:%Y-%m-%d}\n"
                     f"분할 체결 기간: {marker_event['execution_days']}거래일\n\n"
                     f"{format_rebalance_table(marker_event['pre_weights'], marker_event['target'])}"
                 )
                 rebalance_annotation.set_visible(True)
+                # Render once to measure the real text box, then clamp it to
+                # the plot panel so it never covers the controls on the right.
+                fig.canvas.draw()
+                fit_annotation_inside_axis(
+                    rebalance_annotation, price_axis, fig
+                )
                 fig.canvas.draw_idle()
                 return
         if rebalance_annotation.get_visible():
