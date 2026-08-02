@@ -11,9 +11,10 @@ from strategy import (
     BASIC_BANG_DIV,
     DownsideTrendOverlayStrategy,
     DynamicRiskAllocationStrategy,
+    PensionRiskAllocationStrategy,
     RETIREMENT_7030_BAND,
-    STATIC_703010_BAND,
     STATIC_70_BND10_BIL10_GLD10,
+    STATIC_PENSION_7030,
 )
 
 
@@ -22,7 +23,7 @@ def save_results(results):
         result["strategy"].__class__.__name__: result["history"]
         for result in results
     }
-    benchmark = histories.get("STATIC_703010_BAND")
+    benchmark = histories.get("STATIC_70_BND10_BIL10_GLD10")
 
     for result in results:
         name = result["strategy"].__class__.__name__
@@ -55,9 +56,10 @@ def main():
     runner = Runner(tickers=("QQQ", "BND", "GLD", "BIL", "QLD"))
     for strategy in (
         DynamicRiskAllocationStrategy(),
+        PensionRiskAllocationStrategy(),
         DownsideTrendOverlayStrategy(),
-        STATIC_703010_BAND(),
         STATIC_70_BND10_BIL10_GLD10(),
+        STATIC_PENSION_7030(),
         BASIC_BANG_DIV(),
         RETIREMENT_7030_BAND(),
         ASYMMETRIC_TREND_BAND(),

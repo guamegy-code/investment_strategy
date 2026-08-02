@@ -21,6 +21,11 @@ class AllocationState(Enum):
 class DynamicRiskAllocationStrategy(BaseStrategy):
     """Final QQQ regime strategy with adaptive BND/BIL allocation."""
 
+    RISK_ASSET = "QQQ"
+    BOND_ASSET = "BND"
+    CASH_ASSET = "BIL"
+    DIVERSIFIER_ASSET = "GLD"
+
     STATE_WEIGHTS = {
         AllocationState.BULL: (0.70, 0.10),
         AllocationState.CAUTION: (0.70, 0.15),
@@ -195,31 +200,31 @@ class DynamicRiskAllocationStrategy(BaseStrategy):
 
     def _select_safe_asset(self, market):
         roc_column = f"ROC{self.SAFE_MOMENTUM_PERIOD}"
-        bnd_roc = market["BND"].get(roc_column)
-        bil_roc = market["BIL"].get(roc_column)
+        bnd_roc = market[self.BOND_ASSET].get(roc_column)
+        bil_roc = market[self.CASH_ASSET].get(roc_column)
         if not self._valid(bnd_roc, bil_roc):
-            return self.safe_asset or "BND"
+            return self.safe_asset or self.BOND_ASSET
         if self.safe_asset is None:
-            return "BND" if bnd_roc >= bil_roc else "BIL"
+            return self.BOND_ASSET if bnd_roc >= bil_roc else self.CASH_ASSET
         if (
-            self.safe_asset == "BND"
+            self.safe_asset == self.BOND_ASSET
             and bil_roc > bnd_roc + self.SAFE_SWITCH_BUFFER
         ):
-            return "BIL"
+            return self.CASH_ASSET
         if (
-            self.safe_asset == "BIL"
+            self.safe_asset == self.CASH_ASSET
             and bnd_roc > bil_roc + self.SAFE_SWITCH_BUFFER
         ):
-            return "BND"
+            return self.BOND_ASSET
         return self.safe_asset
 
     def _target_for_state(self):
         qqq_weight, gold_weight = self.STATE_WEIGHTS[self.state]
         target = {
-            "QQQ": qqq_weight,
-            "BND": 0.0,
-            "BIL": 0.0,
-            "GLD": gold_weight,
+            self.RISK_ASSET: qqq_weight,
+            self.BOND_ASSET: 0.0,
+            self.CASH_ASSET: 0.0,
+            self.DIVERSIFIER_ASSET: gold_weight,
         }
         target[self.safe_asset] = 1.0 - qqq_weight - gold_weight
         return target
@@ -255,7 +260,7 @@ class DynamicRiskAllocationStrategy(BaseStrategy):
             and self.safe_asset != previous_safe_asset
         )
 
-        desired = self._desired_state(market["QQQ"])
+        desired = self._desired_state(market[self.RISK_ASSET])
         if self.state is None:
             self.state = desired
             self.target = self._target_for_state()
@@ -290,6 +295,49 @@ class DynamicRiskAllocationStrategy(BaseStrategy):
             days = None if rebalance else 1
             return self._signal(True, reason, days)
         return self._signal(False, None)
+
+
+class PensionRiskAllocationStrategy(DynamicRiskAllocationStrategy):
+    """Retirement strategy with configurable products and no gold allocation.
+
+    ``risk_asset`` is capped at 70%. ``bond_asset`` and ``cash_asset`` must be
+    replaced with products classified as safe assets by the pension provider.
+    The default US ETFs are backtest proxies, not Korean pension products.
+    """
+
+    MAX_RISK_WEIGHT = 0.70
+    STATE_RISK_WEIGHTS = {
+        AllocationState.BULL: 0.70,
+        AllocationState.CAUTION: 0.70,
+        AllocationState.BEAR: 0.00,
+        AllocationState.RECOVERY: 0.50,
+    }
+
+    def __init__(self, risk_asset="QQQ", bond_asset="BND", cash_asset="BIL"):
+        assets = (risk_asset, bond_asset, cash_asset)
+        if len(set(assets)) != len(assets):
+            raise ValueError("risk, bond, and cash assets must be different")
+        self.RISK_ASSET = risk_asset
+        self.BOND_ASSET = bond_asset
+        self.CASH_ASSET = cash_asset
+        super().__init__()
+
+    @property
+    def required_tickers(self):
+        """Market-data identifiers needed to run this strategy."""
+        return (self.RISK_ASSET, self.BOND_ASSET, self.CASH_ASSET)
+
+    def _target_for_state(self):
+        risk_weight = self.STATE_RISK_WEIGHTS[self.state]
+        if not 0.0 <= risk_weight <= self.MAX_RISK_WEIGHT:
+            raise ValueError("retirement risk-asset weight must be between 0% and 70%")
+        target = {
+            self.RISK_ASSET: risk_weight,
+            self.BOND_ASSET: 0.0,
+            self.CASH_ASSET: 0.0,
+        }
+        target[self.safe_asset] = round(1.0 - risk_weight, 10)
+        return target
 
 
 class DownsideTrendOverlayStrategy(BaseStrategy):
@@ -447,6 +495,7 @@ class _MarketRegimeObserver:
 class _StaticRegimeBandStrategy(BaseStrategy):
     """Fixed allocation with a 5% band and read-only market-regime tracking."""
 
+    RISK_ASSET = "QQQ"
     TARGET = {}
 
     def __init__(self):
@@ -458,7 +507,7 @@ class _StaticRegimeBandStrategy(BaseStrategy):
         self.recovery_score = 0
 
     def evaluate(self, date, market, portfolio):
-        self.state = self._regime_observer.update(market["QQQ"])
+        self.state = self._regime_observer.update(market[self.RISK_ASSET])
         classifier = self._regime_observer.classifier
         self.risk_off_score = classifier.risk_off_score
         self.recovery_score = classifier.recovery_score
@@ -487,12 +536,6 @@ class _StaticRegimeBandStrategy(BaseStrategy):
         }
 
 
-class STATIC_703010_BAND(_StaticRegimeBandStrategy):
-    """Classic QQQ 70 / BND 20 / GLD 10 comparison benchmark."""
-
-    TARGET = {"QQQ": 0.70, "BND": 0.20, "GLD": 0.10}
-
-
 class STATIC_70_BND10_BIL10_GLD10(_StaticRegimeBandStrategy):
     """Selected benchmark splitting defensive assets between BND and BIL."""
 
@@ -502,6 +545,29 @@ class STATIC_70_BND10_BIL10_GLD10(_StaticRegimeBandStrategy):
         "BIL": 0.10,
         "GLD": 0.10,
     }
+
+
+class STATIC_PENSION_7030(_StaticRegimeBandStrategy):
+    """Retirement benchmark: 70% risk and an equal 30% safe-asset split."""
+
+    def __init__(self, risk_asset="QQQ", bond_asset="BND", cash_asset="BIL"):
+        assets = (risk_asset, bond_asset, cash_asset)
+        if len(set(assets)) != len(assets):
+            raise ValueError("risk, bond, and cash assets must be different")
+        self.RISK_ASSET = risk_asset
+        self.BOND_ASSET = bond_asset
+        self.CASH_ASSET = cash_asset
+        self.TARGET = {
+            self.RISK_ASSET: 0.70,
+            self.BOND_ASSET: 0.15,
+            self.CASH_ASSET: 0.15,
+        }
+        super().__init__()
+
+    @property
+    def required_tickers(self):
+        """Market-data identifiers needed to run this benchmark."""
+        return (self.RISK_ASSET, self.BOND_ASSET, self.CASH_ASSET)
 
 
 class BASIC_BANG_DIV(BaseStrategy):
