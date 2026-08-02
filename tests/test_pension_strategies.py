@@ -77,6 +77,7 @@ class PensionStrategyTests(unittest.TestCase):
                 "PensionRiskAllocationStrategy",
                 "PensionBlendedRiskAllocationStrategy",
                 "PensionVXUSSubstitutionStrategy",
+                "ASYMMETRIC_TREND_BAND_ADD_DEFENSE2",
             ),
         )
         self.assertEqual(
@@ -86,6 +87,7 @@ class PensionStrategyTests(unittest.TestCase):
                 "BND",
                 "BIL",
                 "VXUS",
+                "GLD",
             ),
         )
         self.assertTrue(runner.use_strategy_tickers)

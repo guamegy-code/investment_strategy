@@ -932,3 +932,359 @@ class ASYMMETRIC_TREND_BAND(BaseStrategy):
                 f"{trend}_TAKE_PROFIT_QLD(diff:{weight_diff:+.3f})",
             )
         return self._signal(False, self.target_weights, 1)
+
+
+import math
+
+
+class ASYMMETRIC_TREND_BAND_ADD_DEFENSE(BaseStrategy):
+    """
+    비대칭 밴드 + 이동평균선(SMA) 추세 필터 + MDD 방어 + 동적 타겟 추적 결합 전략
+    - 상승장(Uptrend): 최고 도달 비중을 새로운 타겟으로 갱신(Trailing Target). 고점 기준 -3% 하락 시 줍줍.
+    - 하락장(Downtrend): 추세 이탈 시 60% 기본 비중으로 리셋하여 수익 확정. 반등 시 타이트하게 익절(+3%).
+    """
+
+    RISK_ASSET = "QQQ"
+    SAFE_ASSET = "BND"
+    MID_ASSET = "GLD"
+
+    def __init__(self):
+        # 고정값이 아닌 시작(Base) 비중으로 정의
+        self.base_weights = {
+            self.RISK_ASSET: 0.60,
+            self.MID_ASSET: 0.10,
+            self.SAFE_ASSET: 0.30,
+        }
+        
+        self.defensive_weights = {
+            self.RISK_ASSET: 0.30,
+            self.MID_ASSET: 0.10,
+            self.SAFE_ASSET: 0.70,
+        }
+        
+        # [핵심 추가] 시장 상황에 따라 유연하게 갱신되는 위험 자산 추적 비중
+        self.trailing_risk_target = self.base_weights[self.RISK_ASSET]
+        
+        self.is_defensive_mode = False
+        self.highest_price = 0.0
+        self.lowest_price = float('inf')
+        
+        # 장기 추세 변곡점 판단용 플래그
+        self.was_uptrend = True
+
+    def _signal(self, rebalance, target, days, reason=None):
+        return {
+            "rebalance": rebalance,
+            "target": target.copy(),
+            "days": days,
+            "reason": reason,
+        }
+
+    def evaluate(self, date, market, portfolio):
+        # 1. 무결성 검증
+        prices = {}
+        for ticker in self.base_weights:
+            if ticker not in market or "Close" not in market[ticker]:
+                return self._signal(False, self.base_weights, 1, f"Missing data for {ticker}")
+            
+            price = market[ticker]["Close"]
+            if price is None or math.isnan(float(price)):
+                return self._signal(False, self.base_weights, 1, f"NaN price for {ticker}")
+            prices[ticker] = price
+
+        current_price = market[self.RISK_ASSET]["Close"]
+        ma55 = market[self.RISK_ASSET].get("EMA55", current_price)
+        ma200 = market[self.RISK_ASSET].get("EMA200", current_price)
+
+        is_uptrend = ma55 >= ma200
+
+        weights = portfolio.weights(prices)
+        current_risk_weight = weights.get(self.RISK_ASSET, 0.0)
+
+        # ========================================================
+        # [핵심 로직] Trailing Target Weight (동적 목표 비중 갱신)
+        # ========================================================
+        if is_uptrend:
+            # 상승장: 자연스럽게 불어난 비중을 새로운 목표 비중으로 승격시킴
+            if current_risk_weight > self.trailing_risk_target:
+                self.trailing_risk_target = current_risk_weight
+        else:
+            # 하락장 전환 시: 쌓아둔 막대한 수익을 확정(Take Profit)하고 기본 비중(60%)으로 안전하게 리셋
+            if self.was_uptrend:
+                print(f"[{date.date()}] 하락장(역배열) 전환! 수익 실현 및 목표 비중 60% 리셋")
+                self.trailing_risk_target = self.base_weights[self.RISK_ASSET]
+        
+        self.was_uptrend = is_uptrend
+
+        # 실시간 동적 타겟 딕셔너리 생성
+        dynamic_target_weights = self.base_weights.copy()
+        dynamic_target_weights[self.RISK_ASSET] = self.trailing_risk_target
+        # 늘어난 위험 자산 비중만큼 안전 자산(BND) 비중을 삭감 (최소 0% 제한)
+        dynamic_target_weights[self.SAFE_ASSET] = max(0.0, 1.0 - dynamic_target_weights[self.RISK_ASSET] - dynamic_target_weights[self.MID_ASSET])
+
+        # ========================================================
+        # 2. 극한 하락 방어(Risk-Off) 로직
+        # ========================================================
+        if current_price > self.highest_price:
+            self.highest_price = current_price
+        if current_price < self.lowest_price:
+            self.lowest_price = current_price
+            
+        drawdown_from_peak = (current_price - self.highest_price) / self.highest_price if self.highest_price > 0 else 0.0
+
+        if drawdown_from_peak <= -0.25 and not self.is_defensive_mode:
+            self.is_defensive_mode = True
+            # 폭락 시 동적 타겟도 60%로 리셋하여 복귀 시 무리한 매수 방지
+            self.trailing_risk_target = self.base_weights[self.RISK_ASSET] 
+            print(f"[{date.date()}] 최고점 대비 {drawdown_from_peak:.1%} 하락! 방어 모드(QQQ 20%) 대피")
+            self.highest_price = current_price
+            self.lowest_price = current_price
+            return self._signal(True, self.defensive_weights, 1, "TRAILING_STOP_DEFENSIVE_MODE")
+
+        if self.is_defensive_mode and is_uptrend:
+            self.is_defensive_mode = False
+            if current_risk_weight > dynamic_target_weights[self.RISK_ASSET]:
+                print(f"[{date.date()}] 방어 모드 해제 및 리밸런싱 스킵 (수익방치)")
+            else:
+                print(f"[{date.date()}] 방어 모드 해제 -> 상승장 타겟 비중 복귀")
+                return self._signal(True, dynamic_target_weights, 1, "TREND_RECOVERY_NORMAL_MODE")
+
+        # 현재 활성화된 타겟 비중 결정 및 비중 차이 계산
+        active_target_weights = self.defensive_weights if self.is_defensive_mode else dynamic_target_weights
+        weight_diff = current_risk_weight - active_target_weights[self.RISK_ASSET]
+
+        # ========================================================
+        # 3. 비대칭 밴드 임계치 및 극단적 지표 대응
+        # ========================================================
+        if is_uptrend:
+            upper_threshold = 0.1 #float('inf') 
+            lower_threshold = -0.03
+            trend_status = "UPTREND"
+        else:
+            upper_threshold = 0.03
+            lower_threshold = -0.09
+            trend_status = "DOWNTREND"
+
+        rsi = market[self.RISK_ASSET].get("RSI14", 50)
+        disparity60 = market[self.RISK_ASSET].get("DISPARITY60", 100)
+
+        if rsi > 95 and disparity60 >= 110:
+            if is_uptrend and current_risk_weight > active_target_weights[self.RISK_ASSET]:
+                pass # 상승장 수익 방치
+            else:
+                print(f"[{date.date()}] 극단적 과매수 익절 발동")
+                self.highest_price = current_price
+                self.lowest_price = current_price
+                return self._signal(True, active_target_weights, 1, "EXTREME_OVERBOUGHT")
+
+        if rsi <= 20 and disparity60 <= 90:
+            self.highest_price = current_price
+            self.lowest_price = current_price
+            return self._signal(True, active_target_weights, 1, "EXTREME_OVERSELL_BUY")
+
+        # ========================================================
+        # 4. 밴드 이탈 리밸런싱 (진정한 고점 기준 줍줍)
+        # ========================================================
+        if weight_diff <= lower_threshold:
+            print(f"[{date.date()}] {trend_status} 매수(Buy Dip) 발동 | 타겟({active_target_weights[self.RISK_ASSET]:.1%}) 대비 차이: {weight_diff:+.3f}")
+            self.highest_price = current_price
+            self.lowest_price = current_price
+            return self._signal(True, active_target_weights, 1, f"{trend_status}_BUY_DIP")
+            
+        elif weight_diff >= upper_threshold:
+            print(f"[{date.date()}] {trend_status} 상단 밴드 이탈 매도 | 비중차이: {weight_diff:+.3f}")
+            self.highest_price = current_price
+            self.lowest_price = current_price
+            return self._signal(True, active_target_weights, 1, f"{trend_status}_TAKE_PROFIT")
+
+        return self._signal(False, active_target_weights, 1)
+
+class ASYMMETRIC_TREND_BAND_ADD_DEFENSE2(BaseStrategy):
+
+    """
+    비대칭 밴드 + 이동평균선(SMA) 추세 필터 + MDD 방어(Risk-Off) 결합 전략
+    - 상승장(Uptrend): 익절은 무한대기(Let profits run), 추매는 예민하게(-3%)
+    - 하락장(Downtrend): 익절은 타이트하게(+3%), 추매는 신중하게(-6%)
+    - 극한 하락(-25% MDD): 위험 자산(QQQ) 비중을 20%로 강제 축소하여 방어 모드 전환
+    - 추세 회복(Recovery): 방어 모드에서 상승장 전환 시, 이미 비중이 크다면 강제 매도 없이 스킵
+    """
+
+    RISK_ASSET = "QQQ"
+    SAFE_ASSET = "BND"
+    MID_ASSET = "GLD"
+
+    @property
+    def required_tickers(self):
+        """이 전략을 실행하기 위해 필요한 종목 데이터 목록 반환"""
+        return [self.RISK_ASSET, self.SAFE_ASSET, self.MID_ASSET]
+  
+
+    def __init__(self):
+        # 기본 타겟 비중 (상승장 및 평시)
+        self.target_weights = {
+            self.RISK_ASSET: 0.65,
+            self.MID_ASSET: 0.05,
+            self.SAFE_ASSET: 0.30,
+        }
+        
+        # [추가] 극한 하락장 방어용(Risk-Off) 타겟 비중
+        self.defensive_weights = {
+            self.RISK_ASSET: 0.30,  # 60% -> 30% 대폭 축소
+            self.MID_ASSET: 0.10,
+            self.SAFE_ASSET: 0.60,  # 채권/현금 비중 30% -> 70% 확대
+        }
+        
+        # 방어 모드 상태 플래그
+        self.is_defensive_mode = False
+
+        # 트레일링 스탑/익절용 최고/최저가 추적 변수
+        self.highest_price = 0.0
+        self.lowest_price = float('inf')
+
+    def _signal(self, rebalance, target, days, reason=None):
+        """매매 시그널을 생성하여 백테스트 엔진에 전달하는 포맷"""
+        return {
+            "rebalance": rebalance,
+            "target": target.copy(),
+            "days": days,
+            "reason": reason,
+        }
+
+    def evaluate(self, date, market, portfolio):
+        """
+        매일(또는 주기적으로) 호출되어 리밸런싱 여부를 판단하는 핵심 로직
+        """
+        # 1. 현재 가격 및 데이터 무결성 검증 방어 로직
+        prices = {}
+        for ticker in self.target_weights:
+            if ticker not in market or "Close" not in market[ticker]:
+                return self._signal(False, self.target_weights, 1, f"Missing data for {ticker}")
+            
+            price = market[ticker]["Close"]
+            if price is None or math.isnan(float(price)):
+                return self._signal(False, self.target_weights, 1, f"NaN price for {ticker}")
+                
+            prices[ticker] = price
+
+        # 2. 현재 가격 및 이평선 조회 (55~200일 이동평균선 사용)
+        current_price = market[self.RISK_ASSET]["Close"]
+        ma20 = market[self.RISK_ASSET].get("EMA20", current_price)
+        ma55 = market[self.RISK_ASSET].get("EMA55", current_price)   # EMA55로 수정
+        ma200 = market[self.RISK_ASSET].get("EMA200", current_price)
+
+
+        is_uptrend = ma55 >= ma200
+
+        # ========================================================
+        # [수정됨] 3. 현재 포트폴리오 비중 선행 계산
+        # (추세 회복 시 비중을 체크하기 위해 위로 끌어올림)
+        # ========================================================
+        weights = portfolio.weights(prices)
+        current_risk_weight = weights.get(self.RISK_ASSET, 0.0)
+
+        # ========================================================
+        # 4. [회피 로직] 상승장 전환 시 방어 모드 해제 -> 기본 비중 복귀
+        # ========================================================
+        if self.is_defensive_mode and is_uptrend:
+            self.is_defensive_mode = False
+            
+            # [요청하신 핵심 로직] 비중을 60%로 늘리려는데, 이미 60%를 초과한 상태라면 스킵!
+            if current_risk_weight > self.target_weights[self.RISK_ASSET]:
+                print(f"[{date.date()}] 추세 회복(EMA55>=EMA200) 방어 모드 해제! 단, 현재비중({current_risk_weight:.1%})이 목표({self.target_weights[self.RISK_ASSET]:.1%})보다 커서 매도 리밸런싱 스킵(수익방치)")
+                # 시그널을 반환하지 않고 아래로 흘려보내어 자연스럽게 홀딩(False)되도록 함
+            else:
+                print(f"[{date.date()}] 추세 회복(EMA55>=EMA200) -> 방어 모드 해제 및 기본 비중 복귀 매수")
+                return self._signal(
+                    True, 
+                    self.target_weights, 
+                    1, 
+                    f"TREND_RECOVERY_NORMAL_MODE_{self.RISK_ASSET}"
+                )
+
+        # 5. 현재 모드에 따른 목표 비중 선택 및 비중 차이(Weight Diff) 계산
+        active_target_weights = self.defensive_weights if self.is_defensive_mode else self.target_weights
+        weight_diff = current_risk_weight - active_target_weights[self.RISK_ASSET]
+
+        # 6. 시장 상태에 따른 비대칭 임계치(Threshold) 설정
+        if is_uptrend:
+            upper_threshold = float('inf') 
+            lower_threshold = -0.03
+            trend_status = "UPTREND"
+        else:
+            upper_threshold = 0.03
+            lower_threshold = -0.06
+            trend_status = "DOWNTREND"
+
+        # 7. 극단적 과매수/과매도 강제 리밸런싱 조건
+        rsi = market[self.RISK_ASSET].get("RSI14", 50)
+        disparity60 = market[self.RISK_ASSET].get("DISPARITY60", 100)
+
+        if rsi > 95 and disparity60 >= 110:
+
+            print(f"[{date.date()}] 극단적 과매수 익절 발동 (RSI: {rsi:.1f}, Disp60: {disparity60:.1f}) -> 현재:{current_price:.2f}, 현재비중:{current_risk_weight:.1%} 목표 비중 복귀")
+            self.highest_price = current_price
+            self.lowest_price = current_price
+            return self._signal(
+                True,
+                active_target_weights,
+                1,
+                f"EXTREME_OVERBOUGHT_TAKE_PROFIT_{self.RISK_ASSET}(rsi:{rsi:.1f},disp:{disparity60:.1f})"
+            )
+
+        if rsi <= 20 and disparity60 <= 90:
+            print(f"[{date.date()}] 극단적 과매도 줍줍 발동 (RSI: {rsi:.1f}, Disp60: {disparity60:.1f}) -> 목표 비중 복귀")
+            self.highest_price = current_price
+            self.lowest_price = current_price
+            return self._signal(
+                True,
+                active_target_weights,
+                1,
+                f"EXTREME_OVERSELL_BUY_{self.RISK_ASSET}(rsi:{rsi:.1f},disp:{disparity60:.1f})"
+            )
+
+        # 8. 트레일링 스탑 - 고점 대비 -25% 하락 시 방어 모드 발동
+        if current_price > self.highest_price:
+            self.highest_price = current_price
+        if current_price < self.lowest_price:
+            self.lowest_price = current_price
+            
+        drawdown_from_peak = (current_price - self.highest_price) / self.highest_price if self.highest_price > 0 else 0.0
+
+        # 고점 대비 -25% 이상 폭락 시 방어 비중(QQQ 30%)으로 대피
+        if drawdown_from_peak <= -0.25 and not self.is_defensive_mode:
+            self.is_defensive_mode = True
+            print(f"[{date.date()}] 최고점 대비 {drawdown_from_peak:.1%} 하락 발동! -> 방어 모드(QQQ 20%)로 긴급 대피")
+            self.highest_price = current_price
+            self.lowest_price = current_price
+            return self._signal(
+                True, 
+                self.defensive_weights, 
+                1, 
+                f"TRAILING_STOP_DEFENSIVE_MODE_{self.RISK_ASSET}(-25%)"
+            )
+
+        # 9. 비중 이탈(Weight Diff) 밴드 확인 및 리밸런싱 시그널 반환
+        if weight_diff <= lower_threshold:
+            print(f"[{date.date()}] {trend_status} 매수(Buy Dip) 발동 | 비중차이: {weight_diff:+.3f} -> 현재:{current_price:.2f}, 현재비중:{current_risk_weight:.1%}")
+            self.highest_price = current_price
+            self.lowest_price = current_price
+            return self._signal(
+                True,
+                active_target_weights,
+                1,
+                f"{trend_status}_BUY_DIP_{self.RISK_ASSET}(diff:{weight_diff:+.3f})"
+            )
+            
+        elif weight_diff >= upper_threshold:
+            print(f"[{date.date()}] {trend_status} 상단 밴드 이탈 매도 | 비중차이: {weight_diff:+.3f} -> 현재:{current_price:.2f}, 현재비중:{current_risk_weight:.1%}")
+            self.highest_price = current_price
+            self.lowest_price = current_price
+            return self._signal(
+                True,
+                active_target_weights,
+                1,
+                f"{trend_status}_TAKE_PROFIT_{self.RISK_ASSET}(diff:{weight_diff:+.3f})"
+            )
+
+        # 10. 임계치 이탈이 없다면 그대로 홀딩 (존버 모드)
+        return self._signal(False, active_target_weights, 1)

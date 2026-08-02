@@ -17,6 +17,7 @@ from strategy import (
     PensionRiskAllocationStrategy,
     PensionVXUSSubstitutionStrategy,
     STATIC_PENSION_7030,
+    ASYMMETRIC_TREND_BAND_ADD_DEFENSE2,
 )
 
 
@@ -65,6 +66,7 @@ def build_runner():
         #PensionKodexStrategy(),
         #PensionTimeStrategy(),
         #PensionKoActStrategy(),
+        ASYMMETRIC_TREND_BAND_ADD_DEFENSE2(),
     )
     required_tickers = tuple(dict.fromkeys(
         ticker
