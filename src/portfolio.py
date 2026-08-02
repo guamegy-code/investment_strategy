@@ -22,6 +22,7 @@ class Portfolio:
         # 분할 리밸런싱
         # -----------------------------
         self.pending_target = None
+        self.active_rebalance = None
         self.remaining_days = 0
         self.total_days = 0
 
@@ -61,11 +62,13 @@ class Portfolio:
         self.pending_target = deepcopy(target)
         self.remaining_days = days
         self.total_days = days
-        self.rebalances.append({
+        self.active_rebalance = {
             "Date": date,
             "Target": deepcopy(target),
+            "ExecutionDays": days,
             "Reason": reason,
-        })
+        }
+        self.rebalances.append(self.active_rebalance)
 
     # ==================================================
     # 분할 리밸런싱 실행
@@ -75,6 +78,14 @@ class Portfolio:
             return
         current = self.weights(prices)
         total = self.value(prices)
+        if (
+            self.active_rebalance is not None
+            and "PreWeights" not in self.active_rebalance
+        ):
+            # Capture the actual weights at the first execution price, before
+            # any trade belonging to this rebalance is applied.
+            self.active_rebalance["ExecutionDate"] = date
+            self.active_rebalance["PreWeights"] = current.copy()
 
         target = {}
         for ticker in self.pending_target:
@@ -87,6 +98,7 @@ class Portfolio:
         self.remaining_days -= 1
         if self.remaining_days == 0:
             self.pending_target = None
+            self.active_rebalance = None
             self.total_days = 0
 
     # ==================================================

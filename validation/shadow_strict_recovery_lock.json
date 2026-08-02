@@ -1,0 +1,31 @@
+{
+  "status": "LOCKED_SHADOW",
+  "selected_on": "2026-08-02",
+  "historical_data_cutoff": "2026-07-31",
+  "oos_start": "2026-08-03",
+  "strategy": "STRICT_RECOVERY_SHADOW",
+  "baseline": "PRODUCTION_BASELINE",
+  "production_lock_dependency": "validation/oos_strategy_lock.json",
+  "selection_note": "Selected retrospectively after comparing BEAR and RECOVERY variants on all data through the cutoff. Only observations on or after the OOS start are forward evidence.",
+  "parameters": {
+    "base_strategy": "DynamicRiskAllocationStrategy",
+    "bear_entry_rule": "UNCHANGED_FROM_PRODUCTION",
+    "recovery_entry_score": 4,
+    "recovery_close_above_ema20": true,
+    "recovery_roc20_positive": true,
+    "recovery_confirmation_days": 2,
+    "state_weights_qqq_safe_gold": {
+      "BULL": [0.7, 0.2, 0.1],
+      "CAUTION": [0.7, 0.15, 0.15],
+      "BEAR": [0.0, 0.8, 0.2],
+      "RECOVERY": [0.5, 0.35, 0.15]
+    },
+    "commission": 0.00015,
+    "slippage": 0.0002,
+    "execution": "signal_close_then_next_session_open",
+    "extra_signal_delay_days": 0
+  },
+  "code_sha256": {
+    "shadow_oos_validation.py": "f8dc3f1c399273d39792a8fe56a4a4e47e5f7b94c29918d16dc9847ee2e40b88"
+  }
+}

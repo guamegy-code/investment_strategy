@@ -11,11 +11,11 @@ from strategy import (
     ASYMMETRIC_TREND_BAND,
     AllocationState,
     BASIC_BANG_DIV,
+    DownsideTrendOverlayStrategy,
     DynamicRiskAllocationStrategy,
     RETIREMENT_7030_BAND,
-    STATIC_70_BIL20_GLD10,
+    STATIC_703010_BAND,
     STATIC_70_BND10_BIL10_GLD10,
-    STATIC_70_BND5_BIL15_GLD10,
 )
 
 
@@ -79,6 +79,29 @@ class DynamicAllocationTests(unittest.TestCase):
             self.strategy.STATE_WEIGHTS[AllocationState.RECOVERY], (0.50, 0.15)
         )
 
+    def test_downside_overlay_respects_target_caps(self):
+        strategy = DownsideTrendOverlayStrategy()
+        overlay_market = {
+            "QQQ": {
+                "Close": 85.0,
+                "EMA200": 100.0,
+                "ROC60": -20.0,
+                "ROC120": -30.0,
+                "ROC252": -40.0,
+                "VOL60": 0.40,
+            },
+            "BND": {"Close": 100.0, "ROC60": 2.0, "ROC120": 3.0, "VOL60": 0.06},
+            "BIL": {"Close": 100.0, "ROC60": 1.0, "ROC120": 2.0, "VOL60": 0.01},
+            "GLD": {"Close": 100.0, "ROC60": 8.0, "ROC120": 10.0, "VOL60": 0.15},
+        }
+
+        target = strategy._desired_target(overlay_market)
+
+        self.assertAlmostEqual(sum(target.values()), 1.0)
+        self.assertGreaterEqual(target["QQQ"], 0.20)
+        self.assertLessEqual(target["QQQ"], 0.70)
+        self.assertLessEqual(target["GLD"], 0.20)
+
     def test_complete_state_cycle(self):
         self.evaluate(BULL)
         self.assertEqual(self.strategy.state, AllocationState.BULL)
@@ -132,16 +155,28 @@ class DynamicAllocationTests(unittest.TestCase):
         self.assertAlmostEqual(self.strategy.target["BND"], 0.20)
         self.assertEqual(self.strategy.target["BIL"], 0.0)
 
-    def test_static_bil_benchmarks_sum_to_one(self):
+    def test_retained_static_benchmarks_sum_to_one(self):
         for strategy_class in (
-            STATIC_70_BIL20_GLD10,
+            STATIC_703010_BAND,
             STATIC_70_BND10_BIL10_GLD10,
-            STATIC_70_BND5_BIL15_GLD10,
         ):
             target = strategy_class().target
             self.assertAlmostEqual(sum(target.values()), 1.0)
             self.assertEqual(target["QQQ"], 0.70)
-            self.assertIn("BIL", target)
+
+    def test_static_benchmark_tracks_dynamic_market_state(self):
+        strategy = STATIC_70_BND10_BIL10_GLD10()
+
+        strategy.evaluate(self.date, BULL, self.portfolio)
+        self.assertEqual(strategy.state, AllocationState.BULL)
+        for _ in range(3):
+            strategy.evaluate(self.date, CAUTION, self.portfolio)
+
+        self.assertEqual(strategy.state, AllocationState.CAUTION)
+        self.assertEqual(
+            strategy.target,
+            {"QQQ": 0.70, "BND": 0.10, "BIL": 0.10, "GLD": 0.10},
+        )
 
     def test_basic_bang_div_uses_qqq_rsi(self):
         strategy = BASIC_BANG_DIV()

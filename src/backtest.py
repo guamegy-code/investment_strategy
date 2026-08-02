@@ -102,10 +102,13 @@ class Backtest:
             "ROC20",
             "ROC40",
             "ROC60",
+            "ROC120",
+            "ROC252",
             "EMA20_SLOPE5",
             "EMA200_SLOPE20",
             "DRAWDOWN120",
             "RSI14",
+            "VOL60",
         }
         if not required.issubset(df.columns):
             df = Indicator.add_indicators(df)
@@ -154,10 +157,13 @@ class Backtest:
                 "ROC20": row.get(f"{ticker}_ROC20"),
                 "ROC40": row.get(f"{ticker}_ROC40"),
                 "ROC60": row.get(f"{ticker}_ROC60"),
+                "ROC120": row.get(f"{ticker}_ROC120"),
+                "ROC252": row.get(f"{ticker}_ROC252"),
                 "EMA20_SLOPE5": row.get(f"{ticker}_EMA20_SLOPE5"),
                 "EMA200_SLOPE20": row.get(f"{ticker}_EMA200_SLOPE20"),
                 "DRAWDOWN120": row.get(f"{ticker}_DRAWDOWN120"),
                 "RSI14": row.get(f"{ticker}_RSI14"),
+                "VOL60": row.get(f"{ticker}_VOL60"),
             }
         return market    
     

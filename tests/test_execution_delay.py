@@ -71,6 +71,26 @@ class ExecutionDelayTests(unittest.TestCase):
         self.assertIsNone(backtest.delayed_rebalance)
         self.assertEqual(backtest.portfolio.pending_target, {"QQQ": 0.5})
 
+    def test_first_execution_records_pre_rebalance_weights(self):
+        portfolio = Portfolio()
+        portfolio.cash = 0.0
+        portfolio.positions = {"QQQ": 0.6, "BND": 0.4}
+        portfolio.start_rebalance(
+            {"QQQ": 0.7, "BND": 0.3},
+            days=1,
+            date=pd.Timestamp("2024-01-02"),
+        )
+
+        portfolio.update(
+            {"QQQ": 1.0, "BND": 1.0},
+            date=pd.Timestamp("2024-01-03"),
+        )
+
+        event = portfolio.get_rebalances()[0]
+        self.assertEqual(event["ExecutionDate"], pd.Timestamp("2024-01-03"))
+        self.assertEqual(event["ExecutionDays"], 1)
+        self.assertEqual(event["PreWeights"], {"QQQ": 0.6, "BND": 0.4})
+
 
 if __name__ == "__main__":
     unittest.main()

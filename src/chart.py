@@ -6,7 +6,7 @@ from dataclasses import dataclass
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from matplotlib.collections import LineCollection, PolyCollection
-from matplotlib.patches import Rectangle
+from matplotlib.patches import Patch, Rectangle
 from matplotlib.ticker import NullFormatter, NullLocator
 from matplotlib.widgets import CheckButtons, TextBox
 import numpy as np
@@ -59,6 +59,13 @@ TIMEFRAME_STYLES = {
 TIMEFRAME_MAX_DAYS = {"daily": 365.25, "weekly": 3 * 365.25, "monthly": 10 * 365.25}
 CANDLE_UP_COLOR = "#FF3B30"
 CANDLE_DOWN_COLOR = "#007AFF"
+REGIME_COLORS = {
+    "BULL": "#34C759",
+    "CAUTION": "#FFCC00",
+    "BEAR": "#FF3B30",
+    "RECOVERY": "#5AC8FA",
+}
+ALLOCATION_DISPLAY_ORDER = ("QQQ", "BND", "GLD", "BIL", "QLD", "TQQQ")
 
 INDICATORS = {
     "Price": ["Close"],
@@ -87,6 +94,7 @@ DETAIL_ROWS = {"MA", "EMA", "Bollinger", "MACD", "Stochastic", "ATR"}
 @dataclass
 class ChartSelection:
     strategies: dict
+    state_colors: dict
     matrix: dict
     visible_rows: list
     visible_tickers: list
@@ -148,6 +156,7 @@ def save_selection(selection):
         json.dump(
             {
                 "strategies": selection.strategies,
+                "state_colors": selection.state_colors,
                 "matrix": selection.matrix,
                 "visible_rows": selection.visible_rows,
                 "visible_tickers": selection.visible_tickers,
@@ -195,6 +204,7 @@ def displayed_indicator_line_style(row, selection):
 
 def build_selection(results, market_data, saved):
     saved_strategies = saved.get("strategies", {}) if isinstance(saved.get("strategies"), dict) else {}
+    saved_state_colors = saved.get("state_colors", {}) if isinstance(saved.get("state_colors"), dict) else {}
     saved_matrix = saved.get("matrix", {}) if isinstance(saved.get("matrix"), dict) else {}
     saved_tickers = saved.get("tickers", {}) if isinstance(saved.get("tickers"), dict) else {}
     saved_indicators = saved.get("indicators", {}) if isinstance(saved.get("indicators"), dict) else {}
@@ -204,6 +214,12 @@ def build_selection(results, market_data, saved):
 
     strategies = {
         result["strategy"].__class__.__name__: bool(saved_strategies.get(result["strategy"].__class__.__name__, True))
+        for result in results
+    }
+    state_colors = {
+        result["strategy"].__class__.__name__: bool(
+            saved_state_colors.get(result["strategy"].__class__.__name__, False)
+        )
         for result in results
     }
     matrix = {
@@ -227,7 +243,13 @@ def build_selection(results, market_data, saved):
         if has_visible_tickers
         else [ticker for ticker in market_data if saved_tickers.get(ticker, True)]
     )
-    return ChartSelection(strategies, matrix, visible_rows, visible_tickers)
+    return ChartSelection(
+        strategies,
+        state_colors,
+        matrix,
+        visible_rows,
+        visible_tickers,
+    )
 
 
 def style_axes(fig, axes):
@@ -294,8 +316,8 @@ def series_from_start(series, start_date, normalize=False, base_series=None):
     return index_to_start(series) if normalize else series
 
 
-def rebalance_directions(history, trades, rebalances):
-    """Return an up/down marker for each rebalance's first execution date.
+def rebalance_marker_events(history, trades, rebalances):
+    """Match each rebalance signal with its first execution and target.
 
     Rebalance signals are recorded at day t's close and the engine executes
     them from day t+1's open. Matching trades to the signal date therefore
@@ -305,30 +327,34 @@ def rebalance_directions(history, trades, rebalances):
         return {}
     trades = trades.dropna(subset=["Date"]).copy()
     trades["Date"] = pd.to_datetime(trades["Date"])
-    directions = {}
+    matched_events = {}
     if rebalances:
-        signal_dates = sorted(
-            pd.Timestamp(event["Date"])
-            for event in rebalances
-            if event.get("Date") is not None
+        ordered_rebalances = sorted(
+            (event for event in rebalances if event.get("Date") is not None),
+            key=lambda event: pd.Timestamp(event["Date"]),
         )
-        execution_dates = []
         trade_dates = trades["Date"].drop_duplicates().sort_values()
-        for index, signal_date in enumerate(signal_dates):
+        execution_events = []
+        for index, rebalance in enumerate(ordered_rebalances):
+            signal_date = pd.Timestamp(rebalance["Date"])
             next_signal = (
-                signal_dates[index + 1]
-                if index + 1 < len(signal_dates)
+                pd.Timestamp(ordered_rebalances[index + 1]["Date"])
+                if index + 1 < len(ordered_rebalances)
                 else None
             )
             candidates = trade_dates[trade_dates > signal_date]
             if next_signal is not None:
                 candidates = candidates[candidates <= next_signal]
             if not candidates.empty:
-                execution_dates.append(candidates.iloc[0])
+                execution_events.append((candidates.iloc[0], rebalance))
     else:
-        execution_dates = list(trades["Date"].drop_duplicates())
+        execution_events = [
+            (date, {"Date": date, "Target": history.at[date, "Weights"]})
+            for date in trades["Date"].drop_duplicates()
+            if date in history.index
+        ]
 
-    for execution_date in execution_dates:
+    for execution_date, rebalance in execution_events:
         if execution_date not in history.index:
             continue
         day_trades = trades[trades["Date"] == execution_date]
@@ -343,22 +369,134 @@ def rebalance_directions(history, trades, rebalances):
         # it is part of the rebalance; otherwise retain the generic fallback.
         ticker = "QQQ" if "QQQ" in candidates else max(candidates, key=weights.get)
         if net_shares[ticker] != 0:
-            directions[execution_date] = (
-                "up" if net_shares[ticker] > 0 else "down"
-            )
-    return directions
+            matched_events[execution_date] = {
+                "direction": "up" if net_shares[ticker] > 0 else "down",
+                "signal_date": pd.Timestamp(rebalance["Date"]),
+                "target": rebalance.get("Target", {}),
+                "execution_days": rebalance.get("ExecutionDays", 1),
+                "pre_weights": rebalance.get(
+                    "PreWeights",
+                    history.at[pd.Timestamp(rebalance["Date"]), "Weights"]
+                    if pd.Timestamp(rebalance["Date"]) in history.index
+                    else {},
+                ),
+                "reason": rebalance.get("Reason"),
+            }
+    return matched_events
 
 
-def draw_strategy_lines(price_axis, results, strategy_visibility):
+def rebalance_directions(history, trades, rebalances):
+    """Return an up/down marker for each rebalance's first execution date."""
+    return {
+        date: event["direction"]
+        for date, event in rebalance_marker_events(
+            history, trades, rebalances
+        ).items()
+    }
+
+
+def format_rebalance_table(pre_weights, target):
+    """Format before/target weights as aligned asset rows."""
+    if not isinstance(target, dict) or not target:
+        return "목표 비중 정보 없음"
+    if not isinstance(pre_weights, dict):
+        pre_weights = {}
+    tickers = [ticker for ticker in ALLOCATION_DISPLAY_ORDER if ticker in target]
+    tickers.extend(sorted(ticker for ticker in target if ticker not in tickers))
+    rows = ["종목       이전(%)   목표(%)", "-" * 29]
+    for ticker in tickers:
+        before = float(pre_weights.get(ticker, 0.0)) * 100
+        goal = float(target[ticker]) * 100
+        rows.append(f"{ticker:<6}{before:>10.1f}{goal:>10.1f}")
+    return "\n".join(rows)
+
+
+def fit_annotation_inside_axis(annotation, axis, figure, padding=8):
+    """Shift an annotation until its text box stays inside the chart panel."""
+    renderer = figure.canvas.get_renderer()
+    annotation_box = annotation.get_window_extent(renderer=renderer)
+    axis_box = axis.get_window_extent(renderer=renderer)
+    left = axis_box.x0 + padding
+    right = axis_box.x1 - padding
+    bottom = axis_box.y0 + padding
+    top = axis_box.y1 - padding
+
+    if annotation_box.width > right - left:
+        shift_x = left - annotation_box.x0
+    elif annotation_box.x1 > right:
+        shift_x = right - annotation_box.x1
+    elif annotation_box.x0 < left:
+        shift_x = left - annotation_box.x0
+    else:
+        shift_x = 0
+
+    if annotation_box.height > top - bottom:
+        shift_y = bottom - annotation_box.y0
+    elif annotation_box.y1 > top:
+        shift_y = top - annotation_box.y1
+    elif annotation_box.y0 < bottom:
+        shift_y = bottom - annotation_box.y0
+    else:
+        shift_y = 0
+
+    offset_x, offset_y = annotation.get_position()
+    pixels_to_points = 72 / figure.dpi
+    annotation.set_position((
+        offset_x + shift_x * pixels_to_points,
+        offset_y + shift_y * pixels_to_points,
+    ))
+
+
+def strategy_state_series(history):
+    """Return chartable strategy states, excluding missing or unknown values."""
+    if history is None or history.empty or "StrategyState" not in history:
+        return pd.Series(dtype="object")
+    states = history["StrategyState"]
+    return states.where(states.isin(REGIME_COLORS))
+
+
+def state_line_segments(values, states):
+    """Build adjacent portfolio-line segments colored by the starting state."""
+    frame = pd.concat(
+        [values.rename("value"), states.reindex(values.index).rename("state")],
+        axis=1,
+    ).dropna(subset=["value"])
+    segments = []
+    colors = []
+    for index in range(len(frame) - 1):
+        state = frame.iloc[index]["state"]
+        if state not in REGIME_COLORS:
+            continue
+        start = frame.index[index]
+        end = frame.index[index + 1]
+        segments.append([
+            (mdates.date2num(start), frame.iloc[index]["value"]),
+            (mdates.date2num(end), frame.iloc[index + 1]["value"]),
+        ])
+        colors.append(REGIME_COLORS[state])
+    return segments, colors
+
+
+def draw_strategy_lines(price_axis, results, strategy_visibility, state_color_selection):
     strategy_lines = {}
+    strategy_state_lines = {}
     strategy_markers = {}
     strategy_series = {}
+    strategy_states = {}
+    state_color_available = {}
     marker_dates = {}
+    visible_marker_dates = {}
+    strategy_rebalance_events = {}
     for index, result in enumerate(results):
         name = result["strategy"].__class__.__name__
         history = result["history"]
         strategy_series[name] = history["Portfolio"]
+        strategy_states[name] = strategy_state_series(history)
+        state_color_available[name] = strategy_states[name].notna().any()
         values = index_to_start(strategy_series[name])
+        state_color_enabled = (
+            state_color_available[name] and state_color_selection[name]
+        )
         (line,) = price_axis.plot(
             values.index,
             values,
@@ -366,30 +504,56 @@ def draw_strategy_lines(price_axis, results, strategy_visibility):
             linewidth=1.2,
             solid_capstyle="round",
             visible=strategy_visibility[name],
+            alpha=0.0 if state_color_enabled else 1.0,
         )
         strategy_lines[name] = line
+        segments, colors = state_line_segments(values, strategy_states[name])
+        state_line = LineCollection(
+            segments,
+            colors=colors,
+            linewidths=1.8,
+            capstyle="round",
+            zorder=2.5,
+            visible=strategy_visibility[name] and state_color_enabled,
+        )
+        price_axis.add_collection(state_line)
+        strategy_state_lines[name] = state_line
 
         markers = []
         dates_by_marker = []
+        visible_dates_by_marker = []
+        strategy_rebalance_events[name] = rebalance_marker_events(
+            history, result["trades"], result.get("rebalances", [])
+        )
         for direction, marker in (("up", "^"), ("down", "v")):
             dates = [
                 date
-                for date, value in rebalance_directions(
-                    history, result["trades"], result.get("rebalances", [])
-                ).items()
-                if value == direction
+                for date, event in strategy_rebalance_events[name].items()
+                if event["direction"] == direction
             ]
             points = values.reindex(dates).dropna()
             if not points.empty:
                 markers.append(price_axis.scatter(
                     points.index, points.values, marker=marker, s=60,
                     color="#1D1D1F", edgecolors="white", linewidths=0.7,
-                    zorder=3, visible=strategy_visibility[name],
+                    zorder=3, visible=strategy_visibility[name], picker=5,
                 ))
                 dates_by_marker.append(dates)
+                visible_dates_by_marker.append(list(points.index))
         strategy_markers[name] = markers
         marker_dates[name] = dates_by_marker
-    return strategy_lines, strategy_markers, strategy_series, marker_dates
+        visible_marker_dates[name] = visible_dates_by_marker
+    return (
+        strategy_lines,
+        strategy_state_lines,
+        strategy_markers,
+        strategy_series,
+        strategy_states,
+        state_color_available,
+        marker_dates,
+        visible_marker_dates,
+        strategy_rebalance_events,
+    )
 
 
 def draw_indicator_lines(panel_axes, market_data, chart_start, strategy_count, selection):
@@ -491,6 +655,18 @@ def draw_chart(results, price_data=None, show_chart=SHOW_CHART):
     )
     price_axis, oscillator_axis, risk_axis = axes
     panel_axes = {"price": price_axis, "oscillator": oscillator_axis, "risk": risk_axis}
+    state_legend = fig.legend(
+        handles=[Patch(facecolor=color, edgecolor="none", label=state)
+                 for state, color in REGIME_COLORS.items()],
+        loc="upper left",
+        bbox_to_anchor=(CHART_LEFT, 0.99),
+        ncol=4,
+        frameon=False,
+        fontsize=9,
+        handlelength=1.2,
+        columnspacing=1.2,
+    )
+    state_legend.set_visible(False)
     if fig.canvas.manager is not None:
         fig.canvas.manager.set_window_title("투자 전략")
     style_axes(fig, axes)
@@ -500,8 +676,39 @@ def draw_chart(results, price_data=None, show_chart=SHOW_CHART):
         default=None,
     )
     active_start_date = default_start_date
-    strategy_lines, strategy_markers, strategy_series, marker_dates = draw_strategy_lines(
-        price_axis, results, selection.strategies
+    (
+        strategy_lines,
+        strategy_state_lines,
+        strategy_markers,
+        strategy_series,
+        strategy_states,
+        state_color_available,
+        marker_dates,
+        visible_marker_dates,
+        strategy_rebalance_events,
+    ) = draw_strategy_lines(
+        price_axis, results, selection.strategies, selection.state_colors
+    )
+    rebalance_annotation = price_axis.annotate(
+        "",
+        xy=(0, 0),
+        xytext=(14, 18),
+        textcoords="offset points",
+        ha="left",
+        va="bottom",
+        multialignment="left",
+        fontsize=9,
+        fontfamily=["Consolas", "Malgun Gothic"],
+        color="#1D1D1F",
+        bbox={
+            "boxstyle": "round,pad=0.45",
+            "facecolor": "white",
+            "edgecolor": "#D2D2D7",
+            "alpha": 0.96,
+        },
+        arrowprops={"arrowstyle": "->", "color": "#6E6E73", "linewidth": 0.8},
+        zorder=10,
+        visible=False,
     )
     panel_lines, indicator_lines, indicator_series = draw_indicator_lines(
         panel_axes, market_data, active_start_date, len(results), selection
@@ -571,13 +778,31 @@ def draw_chart(results, price_data=None, show_chart=SHOW_CHART):
         selection.strategies = {name: line.get_visible() for name, line in strategy_lines.items()}
         save_selection(selection)
 
+    def refresh_state_legend():
+        state_legend.set_visible(any(
+            strategy_lines[name].get_visible()
+            and state_color_available[name]
+            and selection.state_colors[name]
+            for name in strategy_names
+        ))
+
     def refresh_lines():
+        rebalance_annotation.set_visible(False)
         for name, line in strategy_lines.items():
             values = series_from_start(strategy_series[name], active_start_date, normalize=True)
             line.set_data(values.index, values)
-            for marker, dates in zip(strategy_markers[name], marker_dates[name]):
+            state_enabled = state_color_available[name] and selection.state_colors[name]
+            line.set_alpha(0.0 if state_enabled else 1.0)
+            segments, colors = state_line_segments(values, strategy_states[name])
+            strategy_state_lines[name].set_segments(segments)
+            strategy_state_lines[name].set_color(colors)
+            strategy_state_lines[name].set_visible(line.get_visible() and state_enabled)
+            for marker_index, (marker, dates) in enumerate(zip(
+                strategy_markers[name], marker_dates[name]
+            )):
                 points = values.reindex(dates).dropna()
                 marker.set_offsets(np.column_stack((marker.axes.convert_xunits(points.index), points.values)))
+                visible_marker_dates[name][marker_index] = list(points.index)
         for (row, ticker, _), line in indicator_lines.items():
             series, base_series = indicator_series[(row, ticker, _)]
             values = series_from_start(series, active_start_date, base_series=base_series)
@@ -590,6 +815,58 @@ def draw_chart(results, price_data=None, show_chart=SHOW_CHART):
             line.set_linestyle(displayed_indicator_line_style(row, selection))
         update_panels()
         rescale()
+        refresh_state_legend()
+
+    def on_rebalance_marker_click(event):
+        if event.button != 1 or event.inaxes is not price_axis:
+            return
+        for name in strategy_names:
+            if not strategy_lines[name].get_visible():
+                continue
+            for marker_index, marker in enumerate(strategy_markers[name]):
+                contains, details = marker.contains(event)
+                indices = details.get("ind", [])
+                if not contains or len(indices) == 0:
+                    continue
+                point_index = int(indices[0])
+                dates = visible_marker_dates[name][marker_index]
+                if point_index >= len(dates):
+                    continue
+                execution_date = pd.Timestamp(dates[point_index])
+                marker_event = strategy_rebalance_events[name].get(execution_date)
+                if marker_event is None:
+                    continue
+                offsets = marker.get_offsets()
+                rebalance_annotation.xy = tuple(offsets[point_index])
+                axis_box = price_axis.get_window_extent()
+                place_left = event.x > (axis_box.x0 + axis_box.x1) / 2
+                place_below = event.y > (axis_box.y0 + axis_box.y1) / 2
+                rebalance_annotation.set_position((
+                    -14 if place_left else 14,
+                    -18 if place_below else 18,
+                ))
+                rebalance_annotation.set_ha("right" if place_left else "left")
+                rebalance_annotation.set_va("top" if place_below else "bottom")
+                # The horizontal alignment anchors the box on either side of
+                # the marker; multiline content itself must remain left-aligned.
+                rebalance_annotation.set_multialignment("left")
+                rebalance_annotation.set_text(
+                    f"체결일: {execution_date:%Y-%m-%d}\n"
+                    f"분할 체결 기간: {marker_event['execution_days']}거래일\n\n"
+                    f"{format_rebalance_table(marker_event['pre_weights'], marker_event['target'])}"
+                )
+                rebalance_annotation.set_visible(True)
+                # Render once to measure the real text box, then clamp it to
+                # the plot panel so it never covers the controls on the right.
+                fig.canvas.draw()
+                fit_annotation_inside_axis(
+                    rebalance_annotation, price_axis, fig
+                )
+                fig.canvas.draw_idle()
+                return
+        if rebalance_annotation.get_visible():
+            rebalance_annotation.set_visible(False)
+            fig.canvas.draw_idle()
 
     def refresh_timeframe_visibility(_=None):
         displayed_days = abs(price_axis.get_xlim()[1] - price_axis.get_xlim()[0])
@@ -803,16 +1080,33 @@ def draw_chart(results, price_data=None, show_chart=SHOW_CHART):
     ))
     style_control_axis(strategy_axis, "전략")
     strategy_controls = []
+    state_color_controls = []
     for index, name in enumerate(strategy_names):
         y = 1 - (CONTROL_BOX_PADDING_INCHES + index * CONTROL_ROW_SPACING_INCHES) / strategy_panel_height()
         box, mark = add_checkbox(strategy_axis, 0.08, y)
-        strategy_axis.text(0.15, y, name, transform=strategy_axis.transAxes, va="center", fontsize=CONTROL_FONT_SIZE,
+        strategy_axis.text(0.13, y, name, transform=strategy_axis.transAxes, va="center", fontsize=CONTROL_FONT_SIZE,
                            color=strategy_lines[name].get_color())
         strategy_controls.append((name, box, mark))
+        if state_color_available[name]:
+            state_box, state_mark = add_checkbox(strategy_axis, 0.94, y)
+            state_color_controls.append((name, state_box, state_mark))
+        else:
+            strategy_axis.text(
+                0.94, y, "-", transform=strategy_axis.transAxes,
+                ha="center", va="center", fontsize=CONTROL_FONT_SIZE,
+                color="#AEAEB2",
+            )
+    strategy_axis.text(
+        0.94, 1.01, "상태색", transform=strategy_axis.transAxes,
+        ha="center", va="bottom", fontsize=CONTROL_FONT_SIZE - 2,
+        color="#6E6E73",
+    )
 
     def refresh_strategy_controls():
         for name, _, mark in strategy_controls:
             mark.set_visible(strategy_lines[name].get_visible())
+        for name, _, mark in state_color_controls:
+            mark.set_visible(selection.state_colors[name])
 
     def on_strategy_click(event):
         if event.inaxes is not strategy_axis:
@@ -821,11 +1115,32 @@ def draw_chart(results, price_data=None, show_chart=SHOW_CHART):
             if box.contains(event)[0]:
                 line = strategy_lines[name]
                 line.set_visible(not line.get_visible())
+                strategy_state_lines[name].set_visible(
+                    line.get_visible()
+                    and state_color_available[name]
+                    and selection.state_colors[name]
+                )
                 for marker in strategy_markers[name]:
                     marker.set_visible(line.get_visible())
                 refresh_strategy_controls()
                 update_panels()
                 rescale()
+                refresh_state_legend()
+                persist()
+                fig.canvas.draw_idle()
+                return
+        for name, box, _ in state_color_controls:
+            if box.contains(event)[0]:
+                selection.state_colors[name] = not selection.state_colors[name]
+                strategy_lines[name].set_alpha(
+                    0.0 if selection.state_colors[name] else 1.0
+                )
+                strategy_state_lines[name].set_visible(
+                    strategy_lines[name].get_visible()
+                    and selection.state_colors[name]
+                )
+                refresh_strategy_controls()
+                refresh_state_legend()
                 persist()
                 fig.canvas.draw_idle()
                 return
@@ -1121,6 +1436,7 @@ def draw_chart(results, price_data=None, show_chart=SHOW_CHART):
     price_axis.callbacks.connect("xlim_changed", refresh_timeframe_visibility)
     fig.canvas.mpl_connect("scroll_event", prevent_y_zoom_when_x_is_limited)
     fig.canvas.mpl_connect("button_press_event", on_zoom_press)
+    fig.canvas.mpl_connect("button_press_event", on_rebalance_marker_click)
     fig.canvas.mpl_connect("button_release_event", on_zoom_release)
     fig.canvas.mpl_connect("button_press_event", on_strategy_click)
     fig.canvas.mpl_connect("button_press_event", on_matrix_click)
