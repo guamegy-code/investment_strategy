@@ -2,7 +2,9 @@ import sys
 import unittest
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
+import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 
 
@@ -16,6 +18,7 @@ from chart import (
     nearest_chart_date,
     rebalance_directions,
     rebalance_marker_events,
+    set_date_guide,
     series_from_start,
     state_line_segments,
     strategy_risk_assets,
@@ -183,6 +186,22 @@ class RebalanceMarkerTests(unittest.TestCase):
 
 
 class ChartValuePopupTests(unittest.TestCase):
+    def test_vertical_date_guide_moves_to_popup_date_and_can_be_hidden(self):
+        figure, axis = plt.subplots()
+        guide = axis.axvline(0, visible=False)
+        selected_date = pd.Timestamp("2024-01-08")
+
+        set_date_guide(guide, selected_date)
+
+        expected = mdates.date2num(selected_date)
+        self.assertTrue(guide.get_visible())
+        self.assertEqual(tuple(guide.get_xdata()), (expected, expected))
+
+        set_date_guide(guide)
+
+        self.assertFalse(guide.get_visible())
+        plt.close(figure)
+
     def test_price_level_is_normalized_to_the_selected_start_date(self):
         dates = pd.bdate_range("2024-01-02", periods=3)
         prices = pd.Series([100.0, 110.0, 121.0], index=dates)
@@ -251,6 +270,11 @@ class StateColoredLineTests(unittest.TestCase):
 
         self.assertEqual(len(segments), 4)
         self.assertEqual(colors, ["#34C759", "#FFCC00", "#FF3B30", "#5AC8FA"])
+        expected_points = np.column_stack((mdates.date2num(dates), values.to_numpy()))
+        np.testing.assert_allclose(
+            segments,
+            np.stack((expected_points[:-1], expected_points[1:]), axis=1),
+        )
 
     def test_missing_strategy_state_returns_empty_series(self):
         history = pd.DataFrame({"Portfolio": [1.0, 1.1]})

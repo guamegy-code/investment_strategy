@@ -321,6 +321,9 @@ def series_from_start(series, start_date, normalize=False, base_series=None):
 
 def strategy_risk_assets(strategy):
     """Return the traded assets that make up a strategy's risk sleeve."""
+    explicit = getattr(strategy, "risk_asset_tickers", None)
+    if explicit:
+        return tuple(explicit)
     configured = getattr(strategy, "risk_assets", None)
     if isinstance(configured, dict) and configured:
         return tuple(configured)
@@ -562,6 +565,16 @@ def fit_annotation_inside_axis(annotation, axis, figure, padding=8):
     ))
 
 
+def set_date_guide(line, date=None):
+    """Move a vertical popup guide to ``date`` or hide it when absent."""
+    if date is None:
+        line.set_visible(False)
+        return
+    x_value = mdates.date2num(pd.Timestamp(date))
+    line.set_xdata((x_value, x_value))
+    line.set_visible(True)
+
+
 def strategy_state_series(history):
     """Return chartable strategy states, excluding missing or unknown values."""
     if history is None or history.empty or "StrategyState" not in history:
@@ -576,19 +589,17 @@ def state_line_segments(values, states):
         [values.rename("value"), states.reindex(values.index).rename("state")],
         axis=1,
     ).dropna(subset=["value"])
-    segments = []
-    colors = []
-    for index in range(len(frame) - 1):
-        state = frame.iloc[index]["state"]
-        if state not in REGIME_COLORS:
-            continue
-        start = frame.index[index]
-        end = frame.index[index + 1]
-        segments.append([
-            (mdates.date2num(start), frame.iloc[index]["value"]),
-            (mdates.date2num(end), frame.iloc[index + 1]["value"]),
-        ])
-        colors.append(REGIME_COLORS[state])
+    if len(frame) < 2:
+        return np.empty((0, 2, 2)), []
+
+    points = np.column_stack((
+        mdates.date2num(frame.index.to_numpy()),
+        frame["value"].to_numpy(),
+    ))
+    starting_states = frame["state"].to_numpy()[:-1]
+    valid = np.isin(starting_states, tuple(REGIME_COLORS))
+    segments = np.stack((points[:-1], points[1:]), axis=1)[valid]
+    colors = [REGIME_COLORS[state] for state in starting_states[valid]]
     return segments, colors
 
 
@@ -726,23 +737,27 @@ def draw_timeframe_candles(price_axis, market_data, chart_start):
                 ).dropna()
             if candles.empty:
                 continue
-            wick_segments = []
-            body_vertices = []
-            colors = []
-            for date, row in candles.iterrows():
-                color = CANDLE_UP_COLOR if row.Close >= row.Open else CANDLE_DOWN_COLOR
-                date_number = mdates.date2num(date)
-                body_bottom = min(row.Open, row.Close)
-                body_height = max(abs(row.Close - row.Open), 1e-10)
-                half_width = style["width"] / 2
-                wick_segments.append([(date_number, row.Low), (date_number, row.High)])
-                body_vertices.append([
-                    (date_number - half_width, body_bottom),
-                    (date_number - half_width, body_bottom + body_height),
-                    (date_number + half_width, body_bottom + body_height),
-                    (date_number + half_width, body_bottom),
-                ])
-                colors.append(color)
+            date_numbers = mdates.date2num(candles.index.to_numpy())
+            opens = candles["Open"].to_numpy()
+            highs = candles["High"].to_numpy()
+            lows = candles["Low"].to_numpy()
+            closes = candles["Close"].to_numpy()
+            body_bottoms = np.minimum(opens, closes)
+            body_tops = body_bottoms + np.maximum(np.abs(closes - opens), 1e-10)
+            half_width = style["width"] / 2
+            colors = np.where(
+                closes >= opens, CANDLE_UP_COLOR, CANDLE_DOWN_COLOR
+            )
+            wick_segments = np.stack((
+                np.column_stack((date_numbers, lows)),
+                np.column_stack((date_numbers, highs)),
+            ), axis=1)
+            body_vertices = np.stack((
+                np.column_stack((date_numbers - half_width, body_bottoms)),
+                np.column_stack((date_numbers - half_width, body_tops)),
+                np.column_stack((date_numbers + half_width, body_tops)),
+                np.column_stack((date_numbers + half_width, body_bottoms)),
+            ), axis=1)
             wicks = LineCollection(wick_segments, colors=colors, linewidths=0.8,
                                    alpha=0.75, zorder=2, visible=False)
             bodies = PolyCollection(body_vertices, facecolors=colors, edgecolors=colors,
@@ -849,6 +864,15 @@ def draw_chart(results, price_data=None, show_chart=SHOW_CHART):
         zorder=10,
         visible=False,
     )
+    value_date_guide = price_axis.axvline(
+        0,
+        color="#007AFF",
+        linewidth=0.8,
+        linestyle="--",
+        alpha=0.65,
+        zorder=8,
+        visible=False,
+    )
     panel_lines, indicator_lines, indicator_series = draw_indicator_lines(
         panel_axes, market_data, active_start_date, len(results), selection
     )
@@ -928,6 +952,7 @@ def draw_chart(results, price_data=None, show_chart=SHOW_CHART):
     def refresh_lines():
         rebalance_annotation.set_visible(False)
         value_annotation.set_visible(False)
+        set_date_guide(value_date_guide)
         for name, line in strategy_lines.items():
             values = series_from_start(strategy_series[name], active_start_date, normalize=True)
             line.set_data(values.index, values)
@@ -957,6 +982,17 @@ def draw_chart(results, price_data=None, show_chart=SHOW_CHART):
         rescale()
         refresh_state_legend()
 
+    def refresh_indicator_display():
+        """Update checkbox-driven visibility without recalculating chart data."""
+        for (row, ticker, _), line in indicator_lines.items():
+            line.set_visible(
+                row in selection.visible_rows
+                and ticker in selection.visible_tickers
+                and selection.matrix[row][ticker]
+            )
+            line.set_linestyle(displayed_indicator_line_style(row, selection))
+        update_panels()
+
     def on_rebalance_marker_click(event):
         if event.button != 1 or event.inaxes is not price_axis:
             return
@@ -978,6 +1014,7 @@ def draw_chart(results, price_data=None, show_chart=SHOW_CHART):
                     continue
                 event.chart_popup_handled = True
                 value_annotation.set_visible(False)
+                set_date_guide(value_date_guide)
                 offsets = marker.get_offsets()
                 rebalance_annotation.xy = tuple(offsets[point_index])
                 axis_box = price_axis.get_window_extent()
@@ -1023,6 +1060,7 @@ def draw_chart(results, price_data=None, show_chart=SHOW_CHART):
             )
             rebalance_annotation.set_visible(False)
             value_annotation.set_visible(False)
+            set_date_guide(value_date_guide)
             if was_visible:
                 fig.canvas.draw_idle()
             return
@@ -1064,6 +1102,7 @@ def draw_chart(results, price_data=None, show_chart=SHOW_CHART):
         if selected_date is None:
             rebalance_annotation.set_visible(False)
             value_annotation.set_visible(False)
+            set_date_guide(value_date_guide)
             fig.canvas.draw_idle()
             return
 
@@ -1072,6 +1111,7 @@ def draw_chart(results, price_data=None, show_chart=SHOW_CHART):
         )
         price_values = chart_values_on_date(displayed_prices, selected_date)
         rebalance_annotation.set_visible(False)
+        set_date_guide(value_date_guide, selected_date)
         value_annotation.xy = (mdates.date2num(selected_date), event.ydata)
         axis_box = price_axis.get_window_extent()
         place_left = event.x > (axis_box.x0 + axis_box.x1) / 2
@@ -1501,7 +1541,7 @@ def draw_chart(results, price_data=None, show_chart=SHOW_CHART):
             if box.contains(event)[0]:
                 selection.matrix[row][ticker] = not selection.matrix[row][ticker]
                 refresh_matrix_controls()
-                refresh_lines()
+                refresh_indicator_display()
                 refresh_timeframe_visibility()
                 persist()
                 fig.canvas.draw_idle()
@@ -1615,7 +1655,8 @@ def draw_chart(results, price_data=None, show_chart=SHOW_CHART):
         change_button_axis.set_visible(True)
         date_input_axis.set_visible(True)
         update_control_layout()
-        refresh_lines()
+        refresh_indicator_display()
+        refresh_timeframe_visibility()
         draw_matrix()
         persist()
         fig.canvas.draw_idle()

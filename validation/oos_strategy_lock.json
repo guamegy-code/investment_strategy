@@ -3,7 +3,7 @@
   "locked_on": "2026-08-01",
   "historical_data_cutoff": "2026-07-31",
   "oos_start": "2026-08-03",
-  "code_hash_note": "2026-08-02: hash refreshed after adding configurable asset-role constants and the independent PensionRiskAllocationStrategy. DynamicRiskAllocationStrategy defaults, parameters, state transitions, and target weights remain unchanged.",
+  "code_hash_note": "2026-08-02: hash refreshed after restoring the original pension strategies, adding independent 25-point BND/BIL blended comparison strategies, and replacing pandas iterrows/index lookups with value-equivalent tuple/dict iteration for runtime performance. DynamicRiskAllocationStrategy defaults, parameters, state transitions, target weights, and execution ordering remain unchanged.",
   "strategy": "DynamicRiskAllocationStrategy",
   "benchmark": "STATIC_70_BND10_BIL10_GLD10",
   "parameters": {
@@ -28,8 +28,8 @@
     "extra_signal_delay_days": 0
   },
   "code_sha256": {
-    "strategy.py": "676c89e0f63436dbc4a221c78884f0ba78686193e9470a4099d6bb1092045eab",
-    "backtest.py": "4563246ffd32911a613108966f5c15d658e3f4e6190ecbcd782585b42cd38081",
+    "strategy.py": "80ab59cb2db4229061123d55b13e7f00cc191f30cb020aef57e5e413e4c10a09",
+    "backtest.py": "de98accb0e841f69fa07cf2d349c315dc5fd94b42852bfe334213e9e599a4650",
     "portfolio.py": "2f436efa7a61effaded31adf8ef04522c79d7665cb7bcca67656eace47173c12",
     "indicators.py": "f81e6c7d8d9f36ae812ebcc2c5f63eb3833b3362b7811928b9042e61ac6dfee0"
   },

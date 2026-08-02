@@ -12,7 +12,13 @@ from pension_strategies import (
     PensionNasdaqMixStrategy,
     PensionTimeStrategy,
 )
-from strategy import AllocationState
+from strategy import (
+    AllocationState,
+    PensionBlendedRiskAllocationStrategy,
+    PensionBlendedVXUSSubstitutionStrategy,
+    PensionRiskAllocationStrategy,
+    PensionVXUSSubstitutionStrategy,
+)
 
 
 class PensionStrategyTests(unittest.TestCase):
@@ -69,6 +75,9 @@ class PensionStrategyTests(unittest.TestCase):
             tuple(strategy.__class__.__name__ for strategy in runner.strategies),
             (
                 "PensionRiskAllocationStrategy",
+                "PensionBlendedRiskAllocationStrategy",
+                "PensionVXUSSubstitutionStrategy",
+                "PensionBlendedVXUSSubstitutionStrategy",
                 "STATIC_PENSION_7030",
                 "PensionNasdaqMixStrategy",
                 "PensionKodexStrategy",
@@ -82,12 +91,93 @@ class PensionStrategyTests(unittest.TestCase):
                 "QQQ",
                 "BND",
                 "BIL",
+                "VXUS",
                 "379810.KS",
                 "426030.KS",
                 "0015B0.KS",
             ),
         )
         self.assertTrue(runner.use_strategy_tickers)
+
+    def test_vxus_substitution_respects_combined_risk_cap(self):
+        strategy = PensionVXUSSubstitutionStrategy()
+        strategy.state = AllocationState.RECOVERY
+        strategy.safe_asset = "BND"
+
+        target = strategy._target_for_state()
+
+        self.assertEqual(target["QQQ"], 0.50)
+        self.assertEqual(target["VXUS"], 0.20)
+        self.assertEqual(target["BND"], 0.30)
+        self.assertLessEqual(target["QQQ"] + target["VXUS"], 0.70)
+        self.assertAlmostEqual(sum(target.values()), 1.0)
+
+    def test_vxus_substitution_never_replaces_bil(self):
+        strategy = PensionVXUSSubstitutionStrategy()
+        strategy.state = AllocationState.BEAR
+        strategy.safe_asset = "BIL"
+
+        target = strategy._target_for_state()
+
+        self.assertEqual(target["QQQ"], 0.0)
+        self.assertEqual(target["VXUS"], 0.0)
+        self.assertEqual(target["BIL"], 1.0)
+
+    def test_vxus_is_reported_as_a_risk_asset(self):
+        strategy = PensionVXUSSubstitutionStrategy()
+
+        self.assertEqual(strategy.risk_asset_tickers, ("QQQ", "VXUS"))
+        self.assertIn("VXUS", strategy.required_tickers)
+
+    def test_pension_strategy_uses_25_point_safe_asset_ladder(self):
+        cases = (
+            (1.00, 1.00),
+            (0.50, 0.75),
+            (0.25, 0.75),
+            (0.00, 0.50),
+            (-0.25, 0.50),
+            (-0.50, 0.25),
+            (-1.00, 0.00),
+        )
+        for spread, expected_bnd_share in cases:
+            strategy = PensionBlendedRiskAllocationStrategy()
+            strategy._select_safe_asset({
+                "BND": {"ROC40": 2.0 + spread},
+                "BIL": {"ROC40": 2.0},
+            })
+            self.assertEqual(
+                strategy.safe_asset_mix["BND"], expected_bnd_share
+            )
+            self.assertEqual(
+                strategy.safe_asset_mix["BIL"], 1.0 - expected_bnd_share
+            )
+
+    def test_safe_asset_ladder_scales_the_state_safe_sleeve(self):
+        strategy = PensionBlendedRiskAllocationStrategy()
+        strategy.state = AllocationState.BULL
+        strategy.safe_asset_mix = {"BND": 0.75, "BIL": 0.25}
+
+        target = strategy._target_for_state()
+
+        self.assertEqual(target, {"QQQ": 0.70, "BND": 0.225, "BIL": 0.075})
+
+    def test_vxus_replaces_only_the_blended_bnd_portion(self):
+        strategy = PensionBlendedVXUSSubstitutionStrategy()
+        strategy.state = AllocationState.RECOVERY
+        strategy.safe_asset_mix = {"BND": 0.75, "BIL": 0.25}
+
+        target = strategy._target_for_state()
+
+        self.assertEqual(
+            target,
+            {
+                "QQQ": 0.50,
+                "BND": 0.175,
+                "BIL": 0.125,
+                "VXUS": 0.20,
+            },
+        )
+        self.assertLessEqual(target["QQQ"] + target["VXUS"], 0.70)
 
 
 if __name__ == "__main__":

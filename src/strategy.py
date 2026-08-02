@@ -388,6 +388,132 @@ class PensionRiskAllocationStrategy(DynamicRiskAllocationStrategy):
         return target
 
 
+class _PensionSafeBlendMixin:
+    """Blend BND and BIL in 25-point steps without changing risk weights."""
+
+    SAFE_BLEND_INNER_THRESHOLD = 0.25
+    SAFE_BLEND_OUTER_THRESHOLD = 1.00
+
+    def __init__(self, *args, **kwargs):
+        self.safe_asset_mix = None
+        super().__init__(*args, **kwargs)
+
+    def _select_safe_asset(self, market):
+        """Set a 25-point BND/BIL blend from their 40-session momentum gap."""
+        roc_column = f"ROC{self.SAFE_MOMENTUM_PERIOD}"
+        bnd_roc = market[self.BOND_ASSET].get(roc_column)
+        bil_roc = market[self.CASH_ASSET].get(roc_column)
+        if not self._valid(bnd_roc, bil_roc):
+            if self.safe_asset_mix is None:
+                selected = self.safe_asset or self.BOND_ASSET
+                self.safe_asset_mix = {
+                    self.BOND_ASSET: float(selected == self.BOND_ASSET),
+                    self.CASH_ASSET: float(selected == self.CASH_ASSET),
+                }
+            return max(self.safe_asset_mix, key=self.safe_asset_mix.get)
+
+        spread = float(bnd_roc) - float(bil_roc)
+        if spread >= self.SAFE_BLEND_OUTER_THRESHOLD:
+            bond_share = 1.00
+        elif spread >= self.SAFE_BLEND_INNER_THRESHOLD:
+            bond_share = 0.75
+        elif spread >= -self.SAFE_BLEND_INNER_THRESHOLD:
+            bond_share = 0.50
+        elif spread > -self.SAFE_BLEND_OUTER_THRESHOLD:
+            bond_share = 0.25
+        else:
+            bond_share = 0.00
+        self.safe_asset_mix = {
+            self.BOND_ASSET: bond_share,
+            self.CASH_ASSET: 1.0 - bond_share,
+        }
+        return (
+            self.BOND_ASSET
+            if bond_share >= 0.50
+            else self.CASH_ASSET
+        )
+
+    def _target_for_state(self):
+        target = super()._target_for_state()
+        target.pop(None, None)
+        safe_weight = 1.0 - sum(
+            target.get(ticker, 0.0) for ticker in self.risk_assets
+        )
+        safe_mix = self.safe_asset_mix or {
+            self.BOND_ASSET: float(self.safe_asset == self.BOND_ASSET),
+            self.CASH_ASSET: float(self.safe_asset == self.CASH_ASSET),
+        }
+        if not any(safe_mix.values()):
+            safe_mix = {self.BOND_ASSET: 1.0, self.CASH_ASSET: 0.0}
+        bond_weight = round(safe_weight * safe_mix[self.BOND_ASSET], 10)
+        target[self.BOND_ASSET] = bond_weight
+        target[self.CASH_ASSET] = round(safe_weight - bond_weight, 10)
+        return target
+
+
+class PensionBlendedRiskAllocationStrategy(
+    _PensionSafeBlendMixin,
+    PensionRiskAllocationStrategy,
+):
+    """Pension strategy with a 25-point BND/BIL momentum ladder."""
+
+
+class _PensionVXUSSubstitutionMixin:
+    """Replace only the available BND sleeve with capped VXUS exposure."""
+
+    ALTERNATIVE_RISK_ASSET = "VXUS"
+
+    @property
+    def required_tickers(self):
+        return tuple(dict.fromkeys((
+            *super().required_tickers,
+            self.ALTERNATIVE_RISK_ASSET,
+        )))
+
+    @property
+    def risk_asset_tickers(self):
+        """All assets counted as risk assets in reports and charts."""
+        return (*self.risk_assets, self.ALTERNATIVE_RISK_ASSET)
+
+    def _target_for_state(self):
+        target = super()._target_for_state()
+        target[self.ALTERNATIVE_RISK_ASSET] = 0.0
+        risk_weight = sum(
+            target.get(ticker, 0.0) for ticker in self.risk_assets
+        )
+        if risk_weight < self.MAX_RISK_WEIGHT and target[self.BOND_ASSET] > 0.0:
+            available_risk_capacity = self.MAX_RISK_WEIGHT - risk_weight
+            vxus_weight = min(target[self.BOND_ASSET], available_risk_capacity)
+            target[self.ALTERNATIVE_RISK_ASSET] = round(vxus_weight, 10)
+            target[self.BOND_ASSET] = round(
+                target[self.BOND_ASSET] - vxus_weight, 10
+            )
+        combined_risk = risk_weight + target[self.ALTERNATIVE_RISK_ASSET]
+        if combined_risk > self.MAX_RISK_WEIGHT + 1e-9:
+            raise ValueError("combined QQQ and VXUS weight exceeds 70%")
+        return target
+
+
+class PensionVXUSSubstitutionStrategy(
+    _PensionVXUSSubstitutionMixin,
+    PensionRiskAllocationStrategy,
+):
+    """Use VXUS for spare risk capacity when BND is selected below 70% QQQ.
+
+    VXUS remains a risk asset. It replaces only enough BND to keep the
+    combined QQQ and VXUS target at or below the pension risk-asset cap.
+    BIL is never replaced.
+    """
+
+
+
+class PensionBlendedVXUSSubstitutionStrategy(
+    _PensionVXUSSubstitutionMixin,
+    PensionBlendedRiskAllocationStrategy,
+):
+    """VXUS substitution combined with the 25-point BND/BIL ladder."""
+
+
 class DownsideTrendOverlayStrategy(BaseStrategy):
     """Keep QQQ near 70% and reduce it continuously during negative trends."""
 

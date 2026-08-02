@@ -174,8 +174,15 @@ class Backtest:
     def run(self):
 
         first_signal = True
+        columns = self.data.columns
 
-        for date, row in self.data.iterrows():
+        # ``iterrows`` creates a pandas Series for every trading day and each
+        # lookup then pays pandas indexing overhead.  Strategies only need a
+        # mapping, so tuples plus one plain dict per row are substantially
+        # cheaper while preserving the exact input values.
+        for values in self.data.itertuples(index=True, name=None):
+            date = values[0]
+            row = dict(zip(columns, values[1:]))
             # A signal observed at yesterday's close is executed at today's open.
             open_prices = self.get_prices(row, field="Open")
             self._activate_delayed_rebalance(date)
