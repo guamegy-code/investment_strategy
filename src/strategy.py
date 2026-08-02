@@ -939,6 +939,12 @@ class ASYMMETRIC_TREND_BAND_ADD_DEFENSE2(BaseStrategy):
     SAFE_ASSET = "BND"
     MID_ASSET = "GLD"
 
+    @property
+    def required_tickers(self):
+        """이 전략을 실행하기 위해 필요한 종목 데이터 목록 반환"""
+        return [self.RISK_ASSET, self.SAFE_ASSET, self.MID_ASSET]
+  
+
     def __init__(self):
         # 기본 타겟 비중 (상승장 및 평시)
         self.target_weights = {
@@ -951,7 +957,7 @@ class ASYMMETRIC_TREND_BAND_ADD_DEFENSE2(BaseStrategy):
         self.defensive_weights = {
             self.RISK_ASSET: 0.30,  # 60% -> 30% 대폭 축소
             self.MID_ASSET: 0.10,
-            self.SAFE_ASSET: 0.90,  # 채권/현금 비중 30% -> 70% 확대
+            self.SAFE_ASSET: 0.60,  # 채권/현금 비중 30% -> 70% 확대
         }
         
         # 방어 모드 상태 플래그
