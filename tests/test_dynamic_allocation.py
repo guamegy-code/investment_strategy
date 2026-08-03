@@ -9,14 +9,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from strategy import (
     ASYMMETRIC_TREND_BAND,
+    ASYMMETRIC_TREND_BAND_ADD_DEFENSE,
+    ASYMMETRIC_TREND_BAND_ADD_DEFENSE2,
     AllocationState,
+    BaseStrategy,
     BASIC_BANG_DIV,
     DownsideTrendOverlayStrategy,
-    DynamicRiskAllocationStrategy,
-    PensionRiskAllocationStrategy,
+    RetirementAllocationStrategy,
     RETIREMENT_7030_BAND,
     STATIC_70_BND10_BIL10_GLD10,
-    STATIC_PENSION_7030,
+    STATIC_RETIREMENT_7030,
 )
 
 
@@ -59,9 +61,9 @@ STRUCTURAL_BEAR = market(
 RECOVERY = market(101, 100, 102, 98, 2, 1, 1, roc60=1)
 
 
-class DynamicAllocationTests(unittest.TestCase):
+class RetirementAllocationTests(unittest.TestCase):
     def setUp(self):
-        self.strategy = DynamicRiskAllocationStrategy()
+        self.strategy = RetirementAllocationStrategy()
         self.portfolio = StablePortfolio()
         self.date = pd.Timestamp("2024-01-02")
 
@@ -74,14 +76,14 @@ class DynamicAllocationTests(unittest.TestCase):
         self.assertEqual(self.strategy.SAFE_MOMENTUM_PERIOD, 40)
         self.assertEqual(self.strategy.SAFE_SWITCH_BUFFER, 0.25)
         self.assertEqual(
-            self.strategy.STATE_WEIGHTS[AllocationState.BEAR], (0.00, 0.20)
+            self.strategy.STATE_RISK_WEIGHTS[AllocationState.BEAR], 0.00
         )
         self.assertEqual(
-            self.strategy.STATE_WEIGHTS[AllocationState.RECOVERY], (0.50, 0.15)
+            self.strategy.STATE_RISK_WEIGHTS[AllocationState.RECOVERY], 0.50
         )
 
     def test_pension_strategy_uses_no_gold_and_caps_risk_asset(self):
-        strategy = PensionRiskAllocationStrategy()
+        strategy = RetirementAllocationStrategy()
         portfolio = StablePortfolio()
         date = pd.Timestamp("2024-01-02")
 
@@ -93,7 +95,7 @@ class DynamicAllocationTests(unittest.TestCase):
         self.assertLessEqual(signal["target"]["QQQ"], strategy.MAX_RISK_WEIGHT)
 
     def test_pension_strategy_preserves_dynamic_qqq_weights(self):
-        strategy = PensionRiskAllocationStrategy()
+        strategy = RetirementAllocationStrategy()
         expected = {
             AllocationState.BULL: 0.70,
             AllocationState.CAUTION: 0.70,
@@ -111,7 +113,7 @@ class DynamicAllocationTests(unittest.TestCase):
             self.assertLessEqual(risk_weight, strategy.MAX_RISK_WEIGHT)
 
     def test_pension_strategy_accepts_replaceable_product_identifiers(self):
-        strategy = PensionRiskAllocationStrategy(
+        strategy = RetirementAllocationStrategy(
             risk_asset="TIGER_NASDAQ100",
             bond_asset="PENSION_BOND",
             cash_asset="PENSION_CASH",
@@ -136,7 +138,7 @@ class DynamicAllocationTests(unittest.TestCase):
         )
 
     def test_pension_strategy_separates_signal_from_traded_risk_asset(self):
-        strategy = PensionRiskAllocationStrategy(
+        strategy = RetirementAllocationStrategy(
             signal_asset="QQQ_SIGNAL",
             risk_asset="KOREAN_NASDAQ_ETF",
             bond_asset="PENSION_BOND",
@@ -174,7 +176,7 @@ class DynamicAllocationTests(unittest.TestCase):
         )
 
     def test_pension_strategy_splits_total_risk_across_multiple_assets(self):
-        strategy = PensionRiskAllocationStrategy(
+        strategy = RetirementAllocationStrategy(
             signal_asset="QQQ",
             risk_assets={
                 "KODEX_NASDAQ": 0.50,
@@ -217,7 +219,7 @@ class DynamicAllocationTests(unittest.TestCase):
 
     def test_multiple_risk_asset_weights_must_sum_to_one(self):
         with self.assertRaises(ValueError):
-            PensionRiskAllocationStrategy(
+            RetirementAllocationStrategy(
                 risk_assets={"KODEX_NASDAQ": 0.50, "TIME_NASDAQ": 0.40}
             )
 
@@ -284,7 +286,7 @@ class DynamicAllocationTests(unittest.TestCase):
         )
         self.evaluate(weak_bonds)
         self.assertEqual(self.strategy.safe_asset, "BIL")
-        self.assertAlmostEqual(self.strategy.target["BIL"], 0.20)
+        self.assertAlmostEqual(self.strategy.target["BIL"], 0.30)
 
         strong_bonds = market(
             110, 105, 100, 95, 2, 5, 1,
@@ -294,20 +296,20 @@ class DynamicAllocationTests(unittest.TestCase):
         result = self.evaluate(strong_bonds)
         self.assertTrue(result["rebalance"])
         self.assertEqual(self.strategy.safe_asset, "BND")
-        self.assertAlmostEqual(self.strategy.target["BND"], 0.20)
+        self.assertAlmostEqual(self.strategy.target["BND"], 0.30)
         self.assertEqual(self.strategy.target["BIL"], 0.0)
 
     def test_retained_static_benchmarks_sum_to_one(self):
         for strategy_class in (
             STATIC_70_BND10_BIL10_GLD10,
-            STATIC_PENSION_7030,
+            STATIC_RETIREMENT_7030,
         ):
             target = strategy_class().target
             self.assertAlmostEqual(sum(target.values()), 1.0)
             self.assertEqual(target["QQQ"], 0.70)
 
     def test_pension_static_benchmark_is_replaceable_and_has_no_gold(self):
-        strategy = STATIC_PENSION_7030(
+        strategy = STATIC_RETIREMENT_7030(
             signal_asset="QQQ_SIGNAL",
             risk_asset="TIGER_NASDAQ100",
             bond_asset="PENSION_BOND",
@@ -334,7 +336,7 @@ class DynamicAllocationTests(unittest.TestCase):
         )
 
     def test_pension_static_supports_the_same_multiple_risk_assets(self):
-        strategy = STATIC_PENSION_7030(
+        strategy = STATIC_RETIREMENT_7030(
             signal_asset="QQQ",
             risk_assets={"KODEX_NASDAQ": 0.60, "TIME_NASDAQ": 0.40},
         )
@@ -384,6 +386,26 @@ class DynamicAllocationTests(unittest.TestCase):
         signal = strategy.evaluate(self.date, test_market, self.portfolio)
         self.assertTrue(signal["rebalance"])
         self.assertIn("UPTREND_BUY_DIP_QLD", signal["reason"])
+
+    def test_existing_strategies_use_the_new_base_contract(self):
+        strategy_types = (
+            BASIC_BANG_DIV,
+            RETIREMENT_7030_BAND,
+            ASYMMETRIC_TREND_BAND,
+            ASYMMETRIC_TREND_BAND_ADD_DEFENSE,
+            ASYMMETRIC_TREND_BAND_ADD_DEFENSE2,
+        )
+
+        for strategy_type in strategy_types:
+            self.assertIs(strategy_type._signal, BaseStrategy._signal)
+            self.assertIsNot(strategy_type.evaluate, BaseStrategy.evaluate)
+
+        signal = RETIREMENT_7030_BAND().evaluate(
+            self.date, BULL, self.portfolio
+        )
+        self.assertEqual(
+            set(signal), {"rebalance", "target", "days", "reason"}
+        )
 
 
 if __name__ == "__main__":

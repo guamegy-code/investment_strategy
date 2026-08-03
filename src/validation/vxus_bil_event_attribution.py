@@ -5,7 +5,7 @@ import pandas as pd
 
 from backtest import Backtest
 from config import DATA_DIR, END_DATE, RESULT_DIR, START_DATE
-from strategy import PensionVXUSSubstitutionStrategy
+from strategy import VXUSSubstitutionStrategy
 from .vxus_bil_walkforward import VXUSBILShareStrategy
 
 
@@ -191,7 +191,7 @@ def _summary(events):
 
 def run_vxus_bil_event_attribution():
     """Compare the BND-only baseline with BND-or-BIL VXUS substitution."""
-    baseline = _run(PensionVXUSSubstitutionStrategy())
+    baseline = _run(VXUSSubstitutionStrategy())
     candidate = _run(VXUSBILShareStrategy(1.0))
     events = _event_report(baseline, candidate)
     summary = _summary(events)

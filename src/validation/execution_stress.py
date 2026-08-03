@@ -7,7 +7,7 @@ from .extended_data import ASSETS
 from .extended_stress import _window_report
 from runner import Runner
 from strategy import (
-    DynamicRiskAllocationStrategy,
+    RetirementAllocationStrategy,
     STATIC_70_BND10_BIL10_GLD10,
 )
 
@@ -30,7 +30,7 @@ def _run_pair(cost_multiplier, delay, bear_delay=None):
         tickers=ASSETS,
         backtest_options=options,
     )
-    runner.add_strategy(DynamicRiskAllocationStrategy())
+    runner.add_strategy(RetirementAllocationStrategy())
     runner.add_strategy(STATIC_70_BND10_BIL10_GLD10())
     results = runner.run()
     return results, _window_report(results)
@@ -64,7 +64,7 @@ def _scenario_rows(results, windows, scenario, cost, delay, bear_delay):
 
 
 def _comparison(summary):
-    dynamic_name = "DynamicRiskAllocationStrategy"
+    dynamic_name = "RetirementAllocationStrategy"
     benchmark_name = "STATIC_70_BND10_BIL10_GLD10"
     keys = [
         "Scenario", "CostMultiplier", "AllSignalExtraDelayDays",

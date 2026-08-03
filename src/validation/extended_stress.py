@@ -7,7 +7,7 @@ from .extended_data import ASSETS, build_extended_data
 from performance import Performance
 from runner import Runner
 from strategy import (
-    DynamicRiskAllocationStrategy,
+    RetirementAllocationStrategy,
     STATIC_70_BND10_BIL10_GLD10,
 )
 
@@ -59,7 +59,7 @@ def _window_report(results):
 
 
 def _relative_report(windows):
-    dynamic_name = "DynamicRiskAllocationStrategy"
+    dynamic_name = "RetirementAllocationStrategy"
     benchmark_name = "STATIC_70_BND10_BIL10_GLD10"
     dynamic = windows.loc[windows["Strategy"] == dynamic_name].set_index("Window")
     benchmark = windows.loc[
@@ -90,7 +90,7 @@ def run_extended_stress(download=True):
         build_extended_data()
     runner = Runner(data_dir=EXTENDED_DATA_DIR, tickers=ASSETS)
     for strategy in (
-        DynamicRiskAllocationStrategy(),
+        RetirementAllocationStrategy(),
         STATIC_70_BND10_BIL10_GLD10(),
     ):
         runner.add_strategy(strategy)

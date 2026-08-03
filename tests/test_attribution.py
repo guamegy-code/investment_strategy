@@ -7,7 +7,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from attribution import DynamicAllocationAttribution
+from attribution import RetirementAllocationAttribution
 
 
 class AttributionTests(unittest.TestCase):
@@ -44,7 +44,7 @@ class AttributionTests(unittest.TestCase):
         ]
 
     def test_state_and_transition_reports(self):
-        attribution = DynamicAllocationAttribution(
+        attribution = RetirementAllocationAttribution(
             self.history,
             self.market,
             self.rebalances,
@@ -60,7 +60,7 @@ class AttributionTests(unittest.TestCase):
         self.assertLess(events.iloc[0]["QQQForwardReturn20D"], 0)
 
     def test_state_market_quality_uses_complete_forward_windows(self):
-        attribution = DynamicAllocationAttribution(
+        attribution = RetirementAllocationAttribution(
             self.history,
             self.market,
             self.rebalances,
@@ -82,7 +82,7 @@ class AttributionTests(unittest.TestCase):
         )
 
     def test_state_market_quality_is_included_in_all_reports(self):
-        attribution = DynamicAllocationAttribution(
+        attribution = RetirementAllocationAttribution(
             self.history,
             self.market,
             self.rebalances,
@@ -92,7 +92,7 @@ class AttributionTests(unittest.TestCase):
         self.assertIn("state_market_quality", attribution.all_reports())
 
     def test_transition_quality_measures_detection_delay_and_false_alarm(self):
-        attribution = DynamicAllocationAttribution(
+        attribution = RetirementAllocationAttribution(
             self.history,
             self.market,
             self.rebalances,
@@ -137,7 +137,7 @@ class AttributionTests(unittest.TestCase):
                 "Reason": "RECOVERY->BEAR(risk_off=6,recovery=0)",
             },
         ]
-        attribution = DynamicAllocationAttribution(
+        attribution = RetirementAllocationAttribution(
             history,
             self.market,
             rebalances,
@@ -160,7 +160,7 @@ class AttributionTests(unittest.TestCase):
             "Target": {"QQQ": 0.5, "BIL": 0.4, "GLD": 0.1},
             "Reason": "SAFE_ROTATION_BND->BIL",
         }]
-        attribution = DynamicAllocationAttribution(
+        attribution = RetirementAllocationAttribution(
             self.history,
             self.market,
             rebalances,
@@ -189,7 +189,7 @@ class AttributionTests(unittest.TestCase):
         ]
         flat_market = self.market.copy()
         flat_market["QQQ_Close"] = 100.0
-        attribution = DynamicAllocationAttribution(
+        attribution = RetirementAllocationAttribution(
             self.history,
             flat_market,
             rebalances,

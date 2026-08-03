@@ -8,7 +8,7 @@ from backtest import Backtest
 from config import EXTENDED_DATA_DIR, PROJECT_ROOT, RESULT_DIR
 from indicators import Indicator
 from performance import Performance
-from strategy import PensionRiskAllocationStrategy
+from strategy import RetirementAllocationStrategy
 
 
 RISK_ASSET_DATA_DIR = PROJECT_ROOT / "data_risk_assets"
@@ -70,7 +70,7 @@ class DiversificationBacktest(Backtest):
         return super().load_one(ticker)
 
 
-class FixedDiversifiedRiskStrategy(PensionRiskAllocationStrategy):
+class FixedDiversifiedRiskStrategy(RetirementAllocationStrategy):
     """Keep the risk sleeve at QQQ 60%, VTV 20%, and VXUS 20%."""
 
     MIX = {"QQQ": 0.60, "VTV": 0.20, "VXUS": 0.20}
@@ -79,7 +79,7 @@ class FixedDiversifiedRiskStrategy(PensionRiskAllocationStrategy):
         super().__init__(signal_asset="QQQ", risk_assets=self.MIX)
 
 
-class MomentumDiversifiedRiskStrategy(PensionRiskAllocationStrategy):
+class MomentumDiversifiedRiskStrategy(RetirementAllocationStrategy):
     """Rotate the risk sleeve when QQQ weakens on absolute momentum."""
 
     QQQ_CAP = 0.60
@@ -97,7 +97,7 @@ class MomentumDiversifiedRiskStrategy(PensionRiskAllocationStrategy):
     def _score(asset):
         roc60 = asset.get("ROC60")
         roc120 = asset.get("ROC120")
-        if not PensionRiskAllocationStrategy._valid(roc60, roc120):
+        if not RetirementAllocationStrategy._valid(roc60, roc120):
             return None
         return 0.60 * float(roc60) + 0.40 * float(roc120)
 
@@ -161,7 +161,7 @@ class MomentumDiversifiedRiskStrategy(PensionRiskAllocationStrategy):
 
 def _strategy_set():
     return (
-        ("QQQ_ONLY", PensionRiskAllocationStrategy()),
+        ("QQQ_ONLY", RetirementAllocationStrategy()),
         ("FIXED_QQQ60_VTV20_VXUS20", FixedDiversifiedRiskStrategy()),
         ("MOMENTUM_QQQ_VTV_VXUS_USMV", MomentumDiversifiedRiskStrategy()),
     )

@@ -6,7 +6,7 @@ import pandas as pd
 
 from config import EXTENDED_DATA_DIR, RESULT_DIR
 from performance import Performance
-from strategy import PensionRiskAllocationStrategy
+from strategy import RetirementAllocationStrategy
 from .risk_asset_diversification import (
     DiversificationBacktest,
     TEST_START,
@@ -34,7 +34,7 @@ PROFILES = (
 )
 
 
-class USMVDefensiveSubstitutionStrategy(PensionRiskAllocationStrategy):
+class USMVDefensiveSubstitutionStrategy(RetirementAllocationStrategy):
     """Replace selected safe assets with USMV only below 70% QQQ."""
 
     USMV_ASSET = "USMV"
@@ -69,7 +69,7 @@ class USMVDefensiveSubstitutionStrategy(PensionRiskAllocationStrategy):
 
 
 def _strategy_set():
-    strategies = [("QQQ_BASELINE", PensionRiskAllocationStrategy())]
+    strategies = [("QQQ_BASELINE", RetirementAllocationStrategy())]
     strategies.extend(
         (profile.name, USMVDefensiveSubstitutionStrategy(profile))
         for profile in PROFILES

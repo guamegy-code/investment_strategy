@@ -1,15 +1,15 @@
-"""Diagnostics for dynamic-allocation states and transition decisions."""
+"""퇴직연금 자산배분의 시장 상태와 전환 판단을 분석한다."""
 
 import numpy as np
 import pandas as pd
 
 
-class DynamicAllocationAttribution:
-    """Attribute returns and evaluate state-transition decisions.
+class RetirementAllocationAttribution:
+    """상태별 수익을 분해하고 상태 전환 판단을 평가한다.
 
-    States observed at day t's close are paired with returns from that close to
-    the next close. This matches the engine, which executes the signal no
-    earlier than the following session's open.
+    t일 종가에서 관찰한 상태는 해당 종가부터 다음 종가까지의 수익률과
+    연결한다. 다음 거래일 시가 이후에 주문을 실행하는 백테스트 엔진의
+    처리 순서와 일치하도록 구성한 것이다.
     """
 
     HORIZONS = (5, 20, 60)

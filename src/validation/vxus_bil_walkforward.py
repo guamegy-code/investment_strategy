@@ -5,7 +5,7 @@ import pandas as pd
 from backtest import Backtest
 from config import DATA_DIR, END_DATE, RESULT_DIR, START_DATE
 from performance import Performance
-from strategy import PensionRiskAllocationStrategy
+from strategy import RetirementAllocationStrategy
 from .walkforward import WalkForwardProfileComparison
 
 
@@ -17,7 +17,7 @@ def profile_name(share):
     return f"BIL_{int(round(share * 100)):03d}PCT"
 
 
-class VXUSBILShareStrategy(PensionRiskAllocationStrategy):
+class VXUSBILShareStrategy(RetirementAllocationStrategy):
     """Replace BND fully and a fixed share of selected BIL with VXUS."""
 
     ALTERNATIVE_RISK_ASSET = "VXUS"

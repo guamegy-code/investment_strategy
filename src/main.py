@@ -2,21 +2,21 @@
 
 import pandas as pd
 
-from attribution import DynamicAllocationAttribution
+from attribution import RetirementAllocationAttribution
 from chart import draw_chart
 from config import END_DATE, RESULT_DIR, START_DATE
 from pension_strategies import (
-    PensionKodexStrategy,
-    PensionKoActStrategy,
-    PensionNasdaqMixStrategy,
-    PensionTimeStrategy,
+    KodexNasdaqAllocationStrategy,
+    KoActNasdaqAllocationStrategy,
+    NasdaqProductMixAllocationStrategy,
+    TimeNasdaqAllocationStrategy,
 )
 from runner import Runner
 from strategy import (
-    PensionBlendedRiskAllocationStrategy,
-    PensionRiskAllocationStrategy,
-    PensionVXUSSubstitutionStrategy,
-    STATIC_PENSION_7030,
+    RetirementAllocationStrategy,
+    SafeBlendAllocationStrategy,
+    VXUSSubstitutionStrategy,
+    STATIC_RETIREMENT_7030,
     ASYMMETRIC_TREND_BAND_ADD_DEFENSE2,
 )
 
@@ -34,8 +34,8 @@ def save_results(results):
         result["trades"].to_csv(
             RESULT_DIR / f"{name}_trades.csv", index=False
         )
-        if name == "DynamicRiskAllocationStrategy":
-            attribution = DynamicAllocationAttribution(
+        if name == "RetirementAllocationStrategy":
+            attribution = RetirementAllocationAttribution(
                 history=result["history"],
                 market_data=result["market_data"],
                 rebalances=result["rebalances"],
@@ -58,14 +58,14 @@ def save_results(results):
 def build_runner():
     """Configure the active strategies shown in the application."""
     strategies = (
-        PensionRiskAllocationStrategy(),
-        PensionBlendedRiskAllocationStrategy(),
-        PensionVXUSSubstitutionStrategy(),
-        #STATIC_PENSION_7030(),
-        #PensionNasdaqMixStrategy(),
-        #PensionKodexStrategy(),
-        #PensionTimeStrategy(),
-        #PensionKoActStrategy(),
+        RetirementAllocationStrategy(),
+        SafeBlendAllocationStrategy(),
+        VXUSSubstitutionStrategy(),
+        #STATIC_RETIREMENT_7030(),
+        #NasdaqProductMixAllocationStrategy(),
+        #KodexNasdaqAllocationStrategy(),
+        #TimeNasdaqAllocationStrategy(),
+        #KoActNasdaqAllocationStrategy(),
         ASYMMETRIC_TREND_BAND_ADD_DEFENSE2(),
     )
     required_tickers = tuple(dict.fromkeys(

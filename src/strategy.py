@@ -1,13 +1,12 @@
-"""Production strategy and the static benchmarks used to evaluate it."""
+"""운용 전략과 성과 비교용 정적 벤치마크를 정의한다."""
 
-from abc import ABC, abstractmethod
 from collections.abc import Mapping
 from enum import Enum
 from math import exp
 
 
 def _validated_asset_mix(risk_asset, risk_assets):
-    """Return a positive risk-sleeve mix whose weights sum to one."""
+    """상품 비중이 모두 양수이고 합계가 1인지 검증한다."""
     if risk_assets is None:
         return {risk_asset: 1.0}
     if not isinstance(risk_assets, Mapping) or not risk_assets:
@@ -21,7 +20,7 @@ def _validated_asset_mix(risk_asset, risk_assets):
 
 
 def _allocate_sleeve(total_weight, asset_mix):
-    """Allocate a total weight while keeping the rounded result exact."""
+    """반올림 후에도 합계가 정확하도록 자산군 비중을 상품에 배분한다."""
     items = list(asset_mix.items())
     target = {}
     allocated = 0.0
@@ -36,10 +35,183 @@ def _allocate_sleeve(total_weight, asset_mix):
     return target
 
 
-class BaseStrategy(ABC):
-    @abstractmethod
+class BaseStrategy:
+    """공통 전략 실행 흐름과 지수-상품 매핑을 제공한다.
+
+    전략은 아래의 기준 지수로 목표 비중을 정의한다. 하위 클래스는 전략
+    로직을 복제하지 않고 ``ASSET_MAPPING``만 재정의하여 각 지수를 하나
+    이상의 실제 상품으로 변환할 수 있다::
+
+        class RetirementProducts(RetirementAllocationStrategy):
+            ASSET_MAPPING = {
+                "QQQ": {"379810.KS": 0.5, "426030.KS": 0.5},
+                "BND": {"PENSION_BOND": 1.0},
+            }
+    """
+
+    SIGNAL_ASSET = "QQQ"
+    RISK_ASSET = "QQQ"
+    BOND_ASSET = "BND"
+    CASH_ASSET = "BIL"
+    DIVERSIFIER_ASSET = "GLD"
+    ASSET_MAPPING = {}
+
+    def __init__(
+        self,
+        signal_asset=None,
+        risk_asset=None,
+        risk_assets=None,
+        bond_asset=None,
+        cash_asset=None,
+        diversifier_asset=None,
+        asset_mapping=None,
+    ):
+        self.SIGNAL_ASSET = signal_asset or self.SIGNAL_ASSET
+        self.RISK_ASSET = risk_asset or self.RISK_ASSET
+        self.BOND_ASSET = bond_asset or self.BOND_ASSET
+        self.CASH_ASSET = cash_asset or self.CASH_ASSET
+        self.DIVERSIFIER_ASSET = diversifier_asset or self.DIVERSIFIER_ASSET
+
+        mapping = dict(self.ASSET_MAPPING)
+        if asset_mapping:
+            mapping.update(asset_mapping)
+        if risk_assets is not None:
+            mapping[self.RISK_ASSET] = risk_assets
+        self.asset_mapping = {
+            index_asset: _validated_asset_mix(index_asset, product_mix)
+            for index_asset, product_mix in mapping.items()
+        }
+        self.risk_assets = self._products_for(self.RISK_ASSET)
+
+        trade_assets = tuple(
+            product
+            for index_asset in self.allocation_assets
+            for product in self._products_for(index_asset)
+        )
+        if len(set(trade_assets)) != len(trade_assets):
+            raise ValueError("each product may map from only one index asset")
+        if self.SIGNAL_ASSET in {self.BOND_ASSET, self.CASH_ASSET}:
+            raise ValueError("signal asset cannot be a bond or cash asset")
+
+        self.state = None
+        self.target = None
+        self.safe_asset = None
+        self.last_rebalance_month = None
+        self.last_safe_selection_month = None
+        self.risk_off_score = 0
+        self.recovery_score = 0
+        self._candidate = None
+        self._candidate_days = 0
+
+    @property
+    def allocation_assets(self):
+        """목표 비중에 포함될 수 있는 기준 지수를 반환한다."""
+        return (
+            self.RISK_ASSET,
+            self.BOND_ASSET,
+            self.CASH_ASSET,
+            self.DIVERSIFIER_ASSET,
+        )
+
+    def _products_for(self, index_asset):
+        return self.asset_mapping.get(index_asset, {index_asset: 1.0})
+
+    def _map_target(self, index_target):
+        """지수 비중을 상품 비중으로 펼치고 중복 상품은 합산한다."""
+        target = {}
+        for index_asset, total_weight in index_target.items():
+            for product, weight in _allocate_sleeve(
+                total_weight, self._products_for(index_asset)
+            ).items():
+                target[product] = round(target.get(product, 0.0) + weight, 10)
+        return target
+
+    @property
+    def required_tickers(self):
+        """전략 판단용 지수와 매매할 상품 목록을 반환한다."""
+        products = tuple(
+            product
+            for index_asset in self.allocation_assets
+            for product in self._products_for(index_asset)
+        )
+        signal_indexes = (self.SIGNAL_ASSET, self.BOND_ASSET, self.CASH_ASSET)
+        risk_products = tuple(self._products_for(self.RISK_ASSET))
+        other_products = tuple(
+            product for product in products if product not in risk_products
+        )
+        return tuple(dict.fromkeys((
+            self.SIGNAL_ASSET,
+            *risk_products,
+            *other_products,
+            *signal_indexes,
+        )))
+
+    @property
+    def risk_asset_tickers(self):
+        """위험자산 한도에 포함되는 실제 상품을 반환한다."""
+        return tuple(self.risk_assets)
+
+    @staticmethod
+    def _signal(rebalance, target, days=1, reason=None):
+        """백테스트 실행기가 사용하는 표준 시그널을 생성한다."""
+        return {
+            "rebalance": rebalance,
+            "target": target.copy(),
+            "days": days,
+            "reason": reason,
+        }
+
     def evaluate(self, date, market, portfolio):
-        """Return a rebalance decision, target weights, and execution days."""
+        """시장 상태에 따른 공통 자산배분 실행 흐름을 평가한다."""
+        month = date.to_period("M")
+        previous_safe_asset = self.safe_asset
+        if month != self.last_safe_selection_month:
+            self.safe_asset = self._select_safe_asset(market)
+            self.last_safe_selection_month = month
+        safe_changed = (
+            previous_safe_asset is not None
+            and self.safe_asset != previous_safe_asset
+        )
+
+        desired = self._desired_state(market[self.SIGNAL_ASSET])
+        if self.state is None:
+            self.state = desired
+            self.target = self._target_for_state()
+            self.last_rebalance_month = month
+            return self._signal(
+                True, self.target, self._execution_days(self.state), "INITIAL"
+            )
+
+        rebalance = False
+        reason = None
+        if self._confirm(desired):
+            previous_state = self.state
+            self.state = desired
+            self.last_rebalance_month = month
+            self._candidate = None
+            self._candidate_days = 0
+            rebalance = True
+            reason = (
+                f"{previous_state.value}->{self.state.value}"
+                f"(risk_off={self.risk_off_score},recovery={self.recovery_score})"
+            )
+        elif self._monthly_band_rebalance(date, market, portfolio):
+            rebalance = True
+            reason = "MONTHLY_5PCT_BAND"
+
+        desired_target = self._target_for_state()
+        target_changed = desired_target != self.target
+        self.target = desired_target
+        if safe_changed:
+            rotation = f"SAFE_ROTATION_{previous_safe_asset}->{self.safe_asset}"
+            reason = f"{reason}|{rotation}" if reason else rotation
+
+        if rebalance or target_changed:
+            days = self._execution_days(self.state) if rebalance else 1
+            return self._signal(True, self.target, days, reason)
+        return self._signal(
+            False, self.target, self._execution_days(self.state)
+        )
 
 
 class AllocationState(Enum):
@@ -49,20 +221,15 @@ class AllocationState(Enum):
     RECOVERY = "RECOVERY"
 
 
-class DynamicRiskAllocationStrategy(BaseStrategy):
-    """Final QQQ regime strategy with adaptive BND/BIL allocation."""
+class RetirementAllocationStrategy(BaseStrategy):
+    """퇴직연금 위험자산 한도를 지키는 동적 자산배분 전략이다."""
 
-    SIGNAL_ASSET = "QQQ"
-    RISK_ASSET = "QQQ"
-    BOND_ASSET = "BND"
-    CASH_ASSET = "BIL"
-    DIVERSIFIER_ASSET = "GLD"
-
-    STATE_WEIGHTS = {
-        AllocationState.BULL: (0.70, 0.10),
-        AllocationState.CAUTION: (0.70, 0.15),
-        AllocationState.BEAR: (0.00, 0.20),
-        AllocationState.RECOVERY: (0.50, 0.15),
+    MAX_RISK_WEIGHT = 0.70
+    STATE_RISK_WEIGHTS = {
+        AllocationState.BULL: 0.70,
+        AllocationState.CAUTION: 0.70,
+        AllocationState.BEAR: 0.00,
+        AllocationState.RECOVERY: 0.50,
     }
 
     BEAR_ENTRY_SCORE = 5
@@ -76,16 +243,9 @@ class DynamicRiskAllocationStrategy(BaseStrategy):
     SAFE_MOMENTUM_PERIOD = 40
     SAFE_SWITCH_BUFFER = 0.25
 
-    def __init__(self):
-        self.state = None
-        self.target = None
-        self.safe_asset = None
-        self.last_rebalance_month = None
-        self.last_safe_selection_month = None
-        self.risk_off_score = 0
-        self.recovery_score = 0
-        self._candidate = None
-        self._candidate_days = 0
+    @property
+    def allocation_assets(self):
+        return (self.RISK_ASSET, self.BOND_ASSET, self.CASH_ASSET)
 
     @staticmethod
     def _valid(*values):
@@ -250,16 +410,20 @@ class DynamicRiskAllocationStrategy(BaseStrategy):
             return self.BOND_ASSET
         return self.safe_asset
 
-    def _target_for_state(self):
-        qqq_weight, gold_weight = self.STATE_WEIGHTS[self.state]
+    def _index_target_for_state(self):
+        risk_weight = self.STATE_RISK_WEIGHTS[self.state]
+        if not 0.0 <= risk_weight <= self.MAX_RISK_WEIGHT:
+            raise ValueError("retirement risk-asset weight must be between 0% and 70%")
         target = {
-            self.RISK_ASSET: qqq_weight,
+            self.RISK_ASSET: risk_weight,
             self.BOND_ASSET: 0.0,
             self.CASH_ASSET: 0.0,
-            self.DIVERSIFIER_ASSET: gold_weight,
         }
-        target[self.safe_asset] = 1.0 - qqq_weight - gold_weight
+        target[self.safe_asset] = round(1.0 - risk_weight, 10)
         return target
+
+    def _target_for_state(self):
+        return self._map_target(self._index_target_for_state())
 
     def _monthly_band_rebalance(self, date, market, portfolio):
         month = date.to_period("M")
@@ -273,123 +437,32 @@ class DynamicRiskAllocationStrategy(BaseStrategy):
             for ticker, target_weight in self.target.items()
         )
 
-    def _signal(self, rebalance, reason, days=None):
-        return {
-            "rebalance": rebalance,
-            "target": self.target.copy(),
-            "days": days or self._execution_days(self.state),
-            "reason": reason,
-        }
-
-    def evaluate(self, date, market, portfolio):
-        month = date.to_period("M")
-        previous_safe_asset = self.safe_asset
-        if month != self.last_safe_selection_month:
-            self.safe_asset = self._select_safe_asset(market)
-            self.last_safe_selection_month = month
-        safe_changed = (
-            previous_safe_asset is not None
-            and self.safe_asset != previous_safe_asset
-        )
-
-        desired = self._desired_state(market[self.SIGNAL_ASSET])
-        if self.state is None:
-            self.state = desired
-            self.target = self._target_for_state()
-            self.last_rebalance_month = month
-            return self._signal(True, "INITIAL")
-
-        rebalance = False
-        reason = None
-        if self._confirm(desired):
-            previous_state = self.state
-            self.state = desired
-            self.last_rebalance_month = month
-            self._candidate = None
-            self._candidate_days = 0
-            rebalance = True
-            reason = (
-                f"{previous_state.value}->{self.state.value}"
-                f"(risk_off={self.risk_off_score},recovery={self.recovery_score})"
-            )
-        elif self._monthly_band_rebalance(date, market, portfolio):
-            rebalance = True
-            reason = "MONTHLY_5PCT_BAND"
-
-        desired_target = self._target_for_state()
-        target_changed = desired_target != self.target
-        self.target = desired_target
-        if safe_changed:
-            rotation = f"SAFE_ROTATION_{previous_safe_asset}->{self.safe_asset}"
-            reason = f"{reason}|{rotation}" if reason else rotation
-
-        if rebalance or target_changed:
-            days = None if rebalance else 1
-            return self._signal(True, reason, days)
-        return self._signal(False, None)
-
-
-class PensionRiskAllocationStrategy(DynamicRiskAllocationStrategy):
-    """Retirement strategy with configurable products and no gold allocation.
-
-    ``signal_asset`` drives regime detection but is never traded when it differs
-    from ``risk_asset``. This keeps QQQ signals while trading a pension ETF.
-    The combined ``risk_assets`` sleeve is capped at 70%; its mapping defines
-    how that sleeve is split. ``bond_asset`` and ``cash_asset`` must be replaced
-    with products classified as safe assets by the pension provider. The
-    default US ETFs are backtest proxies, not Korean pension products.
-    """
-
-    MAX_RISK_WEIGHT = 0.70
-    STATE_RISK_WEIGHTS = {
-        AllocationState.BULL: 0.70,
-        AllocationState.CAUTION: 0.70,
-        AllocationState.BEAR: 0.00,
-        AllocationState.RECOVERY: 0.50,
-    }
-
     def __init__(
         self,
         signal_asset=None,
-        risk_asset="QQQ",
+        risk_asset=None,
         risk_assets=None,
-        bond_asset="BND",
-        cash_asset="BIL",
+        bond_asset=None,
+        cash_asset=None,
+        diversifier_asset=None,
+        asset_mapping=None,
     ):
-        self.risk_assets = _validated_asset_mix(risk_asset, risk_assets)
-        trade_assets = (*self.risk_assets, bond_asset, cash_asset)
-        if len(set(trade_assets)) != len(trade_assets):
-            raise ValueError("risk, bond, and cash assets must be different")
-        self.RISK_ASSET = next(iter(self.risk_assets))
-        self.SIGNAL_ASSET = signal_asset or self.RISK_ASSET
-        if self.SIGNAL_ASSET in {bond_asset, cash_asset}:
-            raise ValueError("signal asset cannot be a bond or cash asset")
-        self.BOND_ASSET = bond_asset
-        self.CASH_ASSET = cash_asset
-        super().__init__()
-
-    @property
-    def required_tickers(self):
-        """Market-data identifiers needed to run this strategy."""
-        return tuple(dict.fromkeys((
-            self.SIGNAL_ASSET,
-            *self.risk_assets,
-            self.BOND_ASSET,
-            self.CASH_ASSET,
-        )))
-
-    def _target_for_state(self):
-        risk_weight = self.STATE_RISK_WEIGHTS[self.state]
-        if not 0.0 <= risk_weight <= self.MAX_RISK_WEIGHT:
-            raise ValueError("retirement risk-asset weight must be between 0% and 70%")
-        target = _allocate_sleeve(risk_weight, self.risk_assets)
-        target.update({self.BOND_ASSET: 0.0, self.CASH_ASSET: 0.0})
-        target[self.safe_asset] = round(1.0 - risk_weight, 10)
-        return target
+        # 기존 생성자 호환을 위해 risk_asset을 판단 지수와 상품으로 함께
+        # 취급한다. 새 상품 클래스에서는 ASSET_MAPPING 사용을 권장한다.
+        selected_risk = risk_asset or self.RISK_ASSET
+        super().__init__(
+            signal_asset=signal_asset or selected_risk,
+            risk_asset=selected_risk,
+            risk_assets=risk_assets,
+            bond_asset=bond_asset,
+            cash_asset=cash_asset,
+            diversifier_asset=diversifier_asset,
+            asset_mapping=asset_mapping,
+        )
 
 
-class _PensionSafeBlendMixin:
-    """Blend BND and BIL in 25-point steps without changing risk weights."""
+class _SafeBlendMixin:
+    """위험자산 비중을 유지하며 BND와 BIL을 25% 단위로 혼합한다."""
 
     SAFE_BLEND_INNER_THRESHOLD = 0.25
     SAFE_BLEND_OUTER_THRESHOLD = 1.00
@@ -399,7 +472,7 @@ class _PensionSafeBlendMixin:
         super().__init__(*args, **kwargs)
 
     def _select_safe_asset(self, market):
-        """Set a 25-point BND/BIL blend from their 40-session momentum gap."""
+        """40거래일 모멘텀 차이로 BND/BIL 혼합 비중을 결정한다."""
         roc_column = f"ROC{self.SAFE_MOMENTUM_PERIOD}"
         bnd_roc = market[self.BOND_ASSET].get(roc_column)
         bil_roc = market[self.CASH_ASSET].get(roc_column)
@@ -433,12 +506,10 @@ class _PensionSafeBlendMixin:
             else self.CASH_ASSET
         )
 
-    def _target_for_state(self):
-        target = super()._target_for_state()
+    def _index_target_for_state(self):
+        target = super()._index_target_for_state()
         target.pop(None, None)
-        safe_weight = 1.0 - sum(
-            target.get(ticker, 0.0) for ticker in self.risk_assets
-        )
+        safe_weight = 1.0 - target.get(self.RISK_ASSET, 0.0)
         safe_mix = self.safe_asset_mix or {
             self.BOND_ASSET: float(self.safe_asset == self.BOND_ASSET),
             self.CASH_ASSET: float(self.safe_asset == self.CASH_ASSET),
@@ -451,36 +522,34 @@ class _PensionSafeBlendMixin:
         return target
 
 
-class PensionBlendedRiskAllocationStrategy(
-    _PensionSafeBlendMixin,
-    PensionRiskAllocationStrategy,
+class SafeBlendAllocationStrategy(
+    _SafeBlendMixin,
+    RetirementAllocationStrategy,
 ):
-    """Pension strategy with a 25-point BND/BIL momentum ladder."""
+    """BND/BIL 모멘텀을 25% 단위로 반영하는 자산배분 전략이다."""
 
 
-class _PensionVXUSSubstitutionMixin:
-    """Replace only the available BND sleeve with capped VXUS exposure."""
+class _VXUSSubstitutionMixin:
+    """위험자산 한도 안에서 선택된 BND 비중 일부를 VXUS로 대체한다."""
 
     ALTERNATIVE_RISK_ASSET = "VXUS"
 
     @property
-    def required_tickers(self):
-        return tuple(dict.fromkeys((
-            *super().required_tickers,
-            self.ALTERNATIVE_RISK_ASSET,
-        )))
+    def allocation_assets(self):
+        return (*super().allocation_assets, self.ALTERNATIVE_RISK_ASSET)
 
     @property
     def risk_asset_tickers(self):
-        """All assets counted as risk assets in reports and charts."""
-        return (*self.risk_assets, self.ALTERNATIVE_RISK_ASSET)
-
-    def _target_for_state(self):
-        target = super()._target_for_state()
-        target[self.ALTERNATIVE_RISK_ASSET] = 0.0
-        risk_weight = sum(
-            target.get(ticker, 0.0) for ticker in self.risk_assets
+        """보고서와 차트에서 위험자산으로 집계할 상품을 반환한다."""
+        return (
+            *self.risk_assets,
+            *self._products_for(self.ALTERNATIVE_RISK_ASSET),
         )
+
+    def _index_target_for_state(self):
+        target = super()._index_target_for_state()
+        target[self.ALTERNATIVE_RISK_ASSET] = 0.0
+        risk_weight = target.get(self.RISK_ASSET, 0.0)
         if risk_weight < self.MAX_RISK_WEIGHT and target[self.BOND_ASSET] > 0.0:
             available_risk_capacity = self.MAX_RISK_WEIGHT - risk_weight
             vxus_weight = min(
@@ -496,20 +565,19 @@ class _PensionVXUSSubstitutionMixin:
         return target
 
 
-class PensionVXUSSubstitutionStrategy(
-    _PensionVXUSSubstitutionMixin,
-    PensionRiskAllocationStrategy,
+class VXUSSubstitutionStrategy(
+    _VXUSSubstitutionMixin,
+    RetirementAllocationStrategy,
 ):
-    """Use VXUS for spare risk capacity when BND is selected below 70% QQQ.
+    """위험자산 여유 한도만큼 선택된 BND 비중을 VXUS로 대체한다.
 
-    VXUS remains a risk asset. It replaces only enough BND to keep the
-    combined QQQ and VXUS target at or below the pension risk-asset cap.
-    BIL is never replaced.
+    VXUS는 위험자산으로 분류되며 QQQ와 합산한 목표 비중이 70%를 넘지
+    않도록 BND만 대체한다. BIL은 대체하지 않는다.
     """
 
 
 class DownsideTrendOverlayStrategy(BaseStrategy):
-    """Keep QQQ near 70% and reduce it continuously during negative trends."""
+    """QQQ를 최대 70%로 유지하고 하락 추세에서 연속적으로 축소한다."""
 
     MIN_QQQ_WEIGHT = 0.20
     MAX_QQQ_WEIGHT = 0.70
@@ -611,22 +679,17 @@ class DownsideTrendOverlayStrategy(BaseStrategy):
         target.update(self._safe_weights(market, 1.0 - qqq_weight))
         return target
 
-    def _signal(self, rebalance, reason):
-        return {
-            "rebalance": rebalance,
-            "target": self.target.copy(),
-            "days": self.EXECUTION_DAYS,
-            "reason": reason,
-        }
-
     def evaluate(self, date, market, portfolio):
         month = date.to_period("M")
         if self.target is None:
             self.target = self._desired_target(market)
             self.last_signal_month = month
-            return self._signal(True, "INITIAL_DOWNSIDE_OVERLAY")
+            return self._signal(
+                True, self.target, self.EXECUTION_DAYS,
+                "INITIAL_DOWNSIDE_OVERLAY",
+            )
         if month == self.last_signal_month:
-            return self._signal(False, None)
+            return self._signal(False, self.target, self.EXECUTION_DAYS)
 
         self.last_signal_month = month
         desired = self._desired_target(market)
@@ -639,15 +702,17 @@ class DownsideTrendOverlayStrategy(BaseStrategy):
         )
         return self._signal(
             rebalance,
+            self.target,
+            self.EXECUTION_DAYS,
             "MONTHLY_DOWNSIDE_OVERLAY_5PCT_BAND" if rebalance else None,
         )
 
 
 class _MarketRegimeObserver:
-    """Observe DynamicRiskAllocationStrategy states without changing weights."""
+    """목표 비중을 바꾸지 않고 퇴직연금 전략의 시장 상태만 추적한다."""
 
     def __init__(self):
-        self.classifier = DynamicRiskAllocationStrategy()
+        self.classifier = RetirementAllocationStrategy()
 
     def update(self, qqq):
         desired = self.classifier._desired_state(qqq)
@@ -661,7 +726,7 @@ class _MarketRegimeObserver:
 
 
 class _StaticRegimeBandStrategy(BaseStrategy):
-    """Fixed allocation with a 5% band and read-only market-regime tracking."""
+    """고정 비중과 5% 밴드를 유지하면서 시장 상태를 관찰한다."""
 
     SIGNAL_ASSET = "QQQ"
     RISK_ASSET = "QQQ"
@@ -697,16 +762,11 @@ class _StaticRegimeBandStrategy(BaseStrategy):
             if rebalance:
                 reason = "MONTHLY_5PCT_BAND"
         self.last_rebalance_month = month
-        return {
-            "rebalance": rebalance,
-            "target": self.target.copy(),
-            "days": 1,
-            "reason": reason,
-        }
+        return self._signal(rebalance, self.target, 1, reason)
 
 
 class STATIC_70_BND10_BIL10_GLD10(_StaticRegimeBandStrategy):
-    """Selected benchmark splitting defensive assets between BND and BIL."""
+    """안전자산을 BND와 BIL로 나누는 비교 기준 전략이다."""
 
     TARGET = {
         "QQQ": 0.70,
@@ -716,8 +776,8 @@ class STATIC_70_BND10_BIL10_GLD10(_StaticRegimeBandStrategy):
     }
 
 
-class STATIC_PENSION_7030(_StaticRegimeBandStrategy):
-    """Configurable 70/30 benchmark with a separate regime signal asset."""
+class STATIC_RETIREMENT_7030(_StaticRegimeBandStrategy):
+    """시장 판단 지수와 매매 상품을 분리할 수 있는 70/30 벤치마크다."""
 
     def __init__(
         self,
@@ -743,7 +803,7 @@ class STATIC_PENSION_7030(_StaticRegimeBandStrategy):
 
     @property
     def required_tickers(self):
-        """Market-data identifiers needed to run this benchmark."""
+        """벤치마크 실행에 필요한 시장 데이터 종목을 반환한다."""
         return tuple(dict.fromkeys((
             self.SIGNAL_ASSET,
             *self.risk_assets,
@@ -753,7 +813,7 @@ class STATIC_PENSION_7030(_StaticRegimeBandStrategy):
 
 
 class BASIC_BANG_DIV(BaseStrategy):
-    """RSI regime strategy with monthly asymmetric-band rebalancing."""
+    """RSI 시장 상태와 월별 비대칭 밴드를 사용하는 전략이다."""
 
     RISK_ASSET = "QQQ"
     SAFE_ASSET = "BND"
@@ -776,15 +836,6 @@ class BASIC_BANG_DIV(BaseStrategy):
         self.last_checked_month = None
         self.lower_threshold = -0.05
         self.upper_threshold = 0.05
-
-    @staticmethod
-    def _signal(rebalance, target, days, reason=None):
-        return {
-            "rebalance": rebalance,
-            "target": target.copy(),
-            "days": days,
-            "reason": reason,
-        }
 
     def evaluate(self, date, market, portfolio):
         current_month = date.to_period("M")
@@ -836,21 +887,12 @@ class BASIC_BANG_DIV(BaseStrategy):
 
 
 class RETIREMENT_7030_BAND(BaseStrategy):
-    """Daily 5% band strategy targeting QQQ 70 / BND 30."""
+    """QQQ 70%와 BND 30%를 목표로 매일 5% 이탈 여부를 확인한다."""
 
     def __init__(self):
         self.target_weights = {"QQQ": 0.70, "BND": 0.30}
         self.lower_threshold = -0.05
         self.upper_threshold = 0.05
-
-    @staticmethod
-    def _signal(rebalance, target, days, reason=None):
-        return {
-            "rebalance": rebalance,
-            "target": target.copy(),
-            "days": days,
-            "reason": reason,
-        }
 
     def evaluate(self, date, market, portfolio):
         prices = {
@@ -878,19 +920,10 @@ class RETIREMENT_7030_BAND(BaseStrategy):
 
 
 class ASYMMETRIC_TREND_BAND(BaseStrategy):
-    """QLD 40 / GLD 30 / QQQ 30 with an EMA55 asymmetric band."""
+    """QLD 40%, GLD 30%, QQQ 30%에 EMA55 비대칭 밴드를 적용한다."""
 
     def __init__(self):
         self.target_weights = {"QLD": 0.40, "GLD": 0.30, "QQQ": 0.30}
-
-    @staticmethod
-    def _signal(rebalance, target, days, reason=None):
-        return {
-            "rebalance": rebalance,
-            "target": target.copy(),
-            "days": days,
-            "reason": reason,
-        }
 
     def evaluate(self, date, market, portfolio):
         prices = {}
@@ -971,14 +1004,6 @@ class ASYMMETRIC_TREND_BAND_ADD_DEFENSE(BaseStrategy):
         
         # 장기 추세 변곡점 판단용 플래그
         self.was_uptrend = True
-
-    def _signal(self, rebalance, target, days, reason=None):
-        return {
-            "rebalance": rebalance,
-            "target": target.copy(),
-            "days": days,
-            "reason": reason,
-        }
 
     def evaluate(self, date, market, portfolio):
         # 1. 무결성 검증
@@ -1140,15 +1165,6 @@ class ASYMMETRIC_TREND_BAND_ADD_DEFENSE2(BaseStrategy):
         # 트레일링 스탑/익절용 최고/최저가 추적 변수
         self.highest_price = 0.0
         self.lowest_price = float('inf')
-
-    def _signal(self, rebalance, target, days, reason=None):
-        """매매 시그널을 생성하여 백테스트 엔진에 전달하는 포맷"""
-        return {
-            "rebalance": rebalance,
-            "target": target.copy(),
-            "days": days,
-            "reason": reason,
-        }
 
     def evaluate(self, date, market, portfolio):
         """

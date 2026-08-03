@@ -3,8 +3,8 @@
   "locked_on": "2026-08-01",
   "historical_data_cutoff": "2026-07-31",
   "oos_start": "2026-08-03",
-  "code_hash_note": "2026-08-02: hash refreshed after merging the upstream asymmetric-band strategy variants while retaining the existing compatible strategy classes. DynamicRiskAllocationStrategy defaults, parameters, state transitions, target weights, and execution ordering remain unchanged.",
-  "strategy": "DynamicRiskAllocationStrategy",
+  "code_hash_note": "2026-08-03: RetirementAllocationStrategy로 이름을 변경하고 퇴직연금 위험자산 70% 한도와 지수-상품 매핑 책임을 명확히 했다. 이전 OOS 결과와 직접 비교할 수 없는 중대한 전략 변경이다.",
+  "strategy": "RetirementAllocationStrategy",
   "benchmark": "STATIC_70_BND10_BIL10_GLD10",
   "parameters": {
     "safe_momentum_period": 40,
@@ -16,11 +16,11 @@
     "caution_confirmation_days": 3,
     "bear_recovery_score": 3,
     "recovery_confirmation_days": 2,
-    "state_weights_qqq_gold": {
-      "BULL": [0.7, 0.1],
-      "CAUTION": [0.7, 0.15],
-      "BEAR": [0.0, 0.2],
-      "RECOVERY": [0.5, 0.15]
+    "state_weights_risk_safe": {
+      "BULL": [0.7, 0.3],
+      "CAUTION": [0.7, 0.3],
+      "BEAR": [0.0, 1.0],
+      "RECOVERY": [0.5, 0.5]
     },
     "commission": 0.00015,
     "slippage": 0.0002,
@@ -28,7 +28,7 @@
     "extra_signal_delay_days": 0
   },
   "code_sha256": {
-    "strategy.py": "e32a830f6cb6afa11073b09abe106deabc410c1584c87ddc9b01789d7133dbd9",
+    "strategy.py": "6c32072c44ff9cbe0eb8adb2751e92a3f29a032513d6fe1ab5302867161ba316",
     "backtest.py": "3c2be7836468057abc08de09f65d76593eb8c16475a7a0db11ba41e0795e0d59",
     "portfolio.py": "2f436efa7a61effaded31adf8ef04522c79d7665cb7bcca67656eace47173c12",
     "indicators.py": "f81e6c7d8d9f36ae812ebcc2c5f63eb3833b3362b7811928b9042e61ac6dfee0"

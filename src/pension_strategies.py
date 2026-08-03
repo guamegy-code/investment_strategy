@@ -1,17 +1,17 @@
-"""Pension strategies for individual Nasdaq products and their mixture."""
+"""기준 지수를 실제 퇴직연금 상품으로 변환하는 전략을 정의한다."""
 
-from strategy import PensionRiskAllocationStrategy
+from strategy import RetirementAllocationStrategy
 
 
-DEFAULT_PENSION_PRODUCTS = {
+DEFAULT_RETIREMENT_PRODUCTS = {
     "KODEX": "379810.KS",
     "TIME": "426030.KS",
     "KOACT": "0015B0.KS",
 }
 
 
-class PensionProductStrategy(PensionRiskAllocationStrategy):
-    """Base strategy that uses QQQ signals to trade one pension product."""
+class SingleProductAllocationStrategy(RetirementAllocationStrategy):
+    """QQQ 위험자산군을 하나의 실제 상품으로 변환한다."""
 
     DEFAULT_RISK_ASSET = None
 
@@ -24,35 +24,45 @@ class PensionProductStrategy(PensionRiskAllocationStrategy):
     ):
         selected_risk_asset = risk_asset or self.DEFAULT_RISK_ASSET
         if selected_risk_asset is None:
-            raise ValueError("a pension risk asset is required")
+            raise ValueError("퇴직연금 위험자산 상품이 필요합니다")
         super().__init__(
             signal_asset=signal_asset,
-            risk_asset=selected_risk_asset,
-            bond_asset=bond_asset,
-            cash_asset=cash_asset,
+            asset_mapping={
+                "QQQ": {selected_risk_asset: 1.0},
+                "BND": {bond_asset: 1.0},
+                "BIL": {cash_asset: 1.0},
+            },
         )
 
 
-class PensionKodexStrategy(PensionProductStrategy):
-    """Trade KODEX US Nasdaq 100 while using QQQ regime signals."""
+class KodexNasdaqAllocationStrategy(
+    SingleProductAllocationStrategy
+):
+    """QQQ로 시장을 판단하고 KODEX 미국나스닥100을 매매한다."""
 
-    DEFAULT_RISK_ASSET = DEFAULT_PENSION_PRODUCTS["KODEX"]
-
-
-class PensionTimeStrategy(PensionProductStrategy):
-    """Trade TIME US Nasdaq 100 Active while using QQQ regime signals."""
-
-    DEFAULT_RISK_ASSET = DEFAULT_PENSION_PRODUCTS["TIME"]
+    DEFAULT_RISK_ASSET = DEFAULT_RETIREMENT_PRODUCTS["KODEX"]
 
 
-class PensionKoActStrategy(PensionProductStrategy):
-    """Trade KoAct US Nasdaq Growth Active while using QQQ regime signals."""
+class TimeNasdaqAllocationStrategy(
+    SingleProductAllocationStrategy
+):
+    """QQQ로 시장을 판단하고 TIME 미국나스닥100액티브를 매매한다."""
 
-    DEFAULT_RISK_ASSET = DEFAULT_PENSION_PRODUCTS["KOACT"]
+    DEFAULT_RISK_ASSET = DEFAULT_RETIREMENT_PRODUCTS["TIME"]
 
 
-class PensionNasdaqMixStrategy(PensionRiskAllocationStrategy):
-    """Blend KODEX 50%, TIME 30%, and KoAct 20% in the risk sleeve."""
+class KoActNasdaqAllocationStrategy(
+    SingleProductAllocationStrategy
+):
+    """QQQ로 시장을 판단하고 KoAct 미국나스닥성장액티브를 매매한다."""
+
+    DEFAULT_RISK_ASSET = DEFAULT_RETIREMENT_PRODUCTS["KOACT"]
+
+
+class NasdaqProductMixAllocationStrategy(
+    RetirementAllocationStrategy
+):
+    """위험자산군을 KODEX 50%, TIME 30%, KoAct 20%로 구성한다."""
 
     PRODUCT_WEIGHTS = {"KODEX": 0.50, "TIME": 0.30, "KOACT": 0.20}
 
@@ -63,14 +73,16 @@ class PensionNasdaqMixStrategy(PensionRiskAllocationStrategy):
         cash_asset="BIL",
         product_assets=None,
     ):
-        assets = {**DEFAULT_PENSION_PRODUCTS, **(product_assets or {})}
+        assets = {**DEFAULT_RETIREMENT_PRODUCTS, **(product_assets or {})}
         risk_assets = {
             assets[name]: weight
             for name, weight in self.PRODUCT_WEIGHTS.items()
         }
         super().__init__(
             signal_asset=signal_asset,
-            risk_assets=risk_assets,
-            bond_asset=bond_asset,
-            cash_asset=cash_asset,
+            asset_mapping={
+                "QQQ": risk_assets,
+                "BND": {bond_asset: 1.0},
+                "BIL": {cash_asset: 1.0},
+            },
         )

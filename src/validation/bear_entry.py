@@ -9,12 +9,12 @@ from dataclasses import dataclass
 
 import pandas as pd
 
-from attribution import DynamicAllocationAttribution
+from attribution import RetirementAllocationAttribution
 from backtest import Backtest
 from config import EXTENDED_DATA_DIR, RESULT_DIR
 from .extended_data import ASSETS
 from performance import Performance
-from strategy import DynamicRiskAllocationStrategy
+from strategy import RetirementAllocationStrategy
 
 
 @dataclass(frozen=True)
@@ -118,7 +118,7 @@ WINDOWS = {
 }
 
 
-class BearEntryCandidateStrategy(DynamicRiskAllocationStrategy):
+class BearEntryCandidateStrategy(RetirementAllocationStrategy):
     """Parameterized experimental strategy used only by this validation."""
 
     def __init__(self, profile):
@@ -129,7 +129,7 @@ class BearEntryCandidateStrategy(DynamicRiskAllocationStrategy):
         self._baseline_bear_active = False
 
     def _is_structural_bear(self, qqq):
-        baseline_bear = DynamicRiskAllocationStrategy._is_structural_bear(
+        baseline_bear = RetirementAllocationStrategy._is_structural_bear(
             self, qqq
         )
         if baseline_bear:
@@ -217,14 +217,12 @@ class BearEntryCandidateStrategy(DynamicRiskAllocationStrategy):
             and staged_weight is not None
             and not self._baseline_bear_active
         ):
-            gold_weight = self.STATE_WEIGHTS[self.state][1]
             target = {
                 "QQQ": staged_weight,
                 "BND": 0.0,
                 "BIL": 0.0,
-                "GLD": gold_weight,
             }
-            target[self.safe_asset] = 1.0 - staged_weight - gold_weight
+            target[self.safe_asset] = 1.0 - staged_weight
             return target
         return super()._target_for_state()
 
@@ -312,7 +310,7 @@ def _transition_reports(results):
     event_frames = []
     quality_frames = []
     for result in results:
-        attribution = DynamicAllocationAttribution(
+        attribution = RetirementAllocationAttribution(
             result["history"],
             result["market_data"],
             result["rebalances"],

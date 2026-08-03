@@ -301,19 +301,19 @@ class ChartValuePopupTests(unittest.TestCase):
     def test_popup_aligns_strategy_and_relative_price_levels(self):
         popup = format_chart_value_popup(
             pd.Timestamp("2024-01-08"),
-            {"PensionRiskAllocationStrategy": 1.23456},
+            {"RetirementAllocationStrategy": 1.23456},
             {"379810.KS": 1.08765},
         )
 
         self.assertIn("날짜: 2024-01-08", popup)
         self.assertIn("전략", popup)
-        self.assertIn("PensionRiskAllocationStrategy  1.2346", popup)
+        self.assertIn("RetirementAllocationStrategy  1.2346", popup)
         self.assertIn("가격(시작일=1)", popup)
         self.assertIn("379810.KS", popup)
         self.assertIn("1.0877", popup)
         value_rows = [
             row for row in popup.splitlines()
-            if row.startswith(("PensionRisk", "379810.KS"))
+            if row.startswith(("Retirement", "379810.KS"))
         ]
         number_columns = [row.index(row.split()[-1]) for row in value_rows]
         self.assertEqual(len(set(number_columns)), 1)

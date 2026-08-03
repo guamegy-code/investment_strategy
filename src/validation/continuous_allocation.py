@@ -11,7 +11,7 @@ from .extended_data import ASSETS
 from performance import Performance
 from strategy import (
     BaseStrategy,
-    DynamicRiskAllocationStrategy,
+    RetirementAllocationStrategy,
     STATIC_70_BND10_BIL10_GLD10,
 )
 
@@ -326,7 +326,7 @@ def _relative_report(windows):
 
 def run_continuous_allocation_validation():
     results = [
-        _run_strategy("DYNAMIC_BASELINE", DynamicRiskAllocationStrategy()),
+        _run_strategy("DYNAMIC_BASELINE", RetirementAllocationStrategy()),
         _run_strategy("STATIC_70_10_10_10", STATIC_70_BND10_BIL10_GLD10()),
     ]
     results.extend(

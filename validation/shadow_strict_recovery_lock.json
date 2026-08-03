@@ -8,17 +8,17 @@
   "production_lock_dependency": "validation/oos_strategy_lock.json",
   "selection_note": "Selected retrospectively after comparing BEAR and RECOVERY variants on all data through the cutoff. Only observations on or after the OOS start are forward evidence.",
   "parameters": {
-    "base_strategy": "DynamicRiskAllocationStrategy",
+    "base_strategy": "RetirementAllocationStrategy",
     "bear_entry_rule": "UNCHANGED_FROM_PRODUCTION",
     "recovery_entry_score": 4,
     "recovery_close_above_ema20": true,
     "recovery_roc20_positive": true,
     "recovery_confirmation_days": 2,
-    "state_weights_qqq_safe_gold": {
-      "BULL": [0.7, 0.2, 0.1],
-      "CAUTION": [0.7, 0.15, 0.15],
-      "BEAR": [0.0, 0.8, 0.2],
-      "RECOVERY": [0.5, 0.35, 0.15]
+    "state_weights_risk_safe": {
+      "BULL": [0.7, 0.3],
+      "CAUTION": [0.7, 0.3],
+      "BEAR": [0.0, 1.0],
+      "RECOVERY": [0.5, 0.5]
     },
     "commission": 0.00015,
     "slippage": 0.0002,
@@ -26,6 +26,6 @@
     "extra_signal_delay_days": 0
   },
   "code_sha256": {
-    "validation/shadow_oos.py": "7e859dd8f03df7f9fc2b2f5448be0f6efd02d616ff26543b23a9d2b81e4d9775"
+    "validation/shadow_oos.py": "58f1c0f2da6a9a5ac6362289be91f3666c6907287e726d314b99499f7b6016ac"
   }
 }

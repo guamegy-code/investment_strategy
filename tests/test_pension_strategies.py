@@ -8,47 +8,49 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from main import build_runner
 from config import END_DATE, START_DATE
 from pension_strategies import (
-    PensionKodexStrategy,
-    PensionKoActStrategy,
-    PensionNasdaqMixStrategy,
-    PensionTimeStrategy,
+    KodexNasdaqAllocationStrategy,
+    KoActNasdaqAllocationStrategy,
+    NasdaqProductMixAllocationStrategy,
+    TimeNasdaqAllocationStrategy,
 )
 from strategy import (
     AllocationState,
-    PensionBlendedRiskAllocationStrategy,
-    PensionRiskAllocationStrategy,
-    PensionVXUSSubstitutionStrategy,
+    SafeBlendAllocationStrategy,
+    VXUSSubstitutionStrategy,
 )
 
 
-class PensionStrategyTests(unittest.TestCase):
+class RetirementStrategyTests(unittest.TestCase):
     def test_product_strategies_have_unique_korean_risk_assets(self):
         expected = {
-            PensionKodexStrategy: "379810.KS",
-            PensionTimeStrategy: "426030.KS",
-            PensionKoActStrategy: "0015B0.KS",
+            KodexNasdaqAllocationStrategy: "379810.KS",
+            TimeNasdaqAllocationStrategy: "426030.KS",
+            KoActNasdaqAllocationStrategy: "0015B0.KS",
         }
 
         for strategy_type, risk_asset in expected.items():
             strategy = strategy_type()
             self.assertEqual(strategy.SIGNAL_ASSET, "QQQ")
-            self.assertEqual(strategy.RISK_ASSET, risk_asset)
+            self.assertEqual(strategy.RISK_ASSET, "QQQ")
+            self.assertEqual(strategy.risk_asset_tickers, (risk_asset,))
             self.assertIn("QQQ", strategy.required_tickers)
             self.assertIn(risk_asset, strategy.required_tickers)
 
     def test_product_tickers_can_be_overridden_for_another_data_provider(self):
-        time_strategy = PensionTimeStrategy(risk_asset="426030")
-        mix_strategy = PensionNasdaqMixStrategy(
+        time_strategy = TimeNasdaqAllocationStrategy(
+            risk_asset="426030"
+        )
+        mix_strategy = NasdaqProductMixAllocationStrategy(
             product_assets={"TIME": "426030", "KOACT": "0015B0"}
         )
 
-        self.assertEqual(time_strategy.RISK_ASSET, "426030")
+        self.assertEqual(time_strategy.risk_asset_tickers, ("426030",))
         self.assertIn("426030", mix_strategy.required_tickers)
         self.assertIn("0015B0", mix_strategy.required_tickers)
         self.assertNotIn("426030.KS", mix_strategy.required_tickers)
 
     def test_nasdaq_mix_uses_the_selected_product_weights(self):
-        strategy = PensionNasdaqMixStrategy()
+        strategy = NasdaqProductMixAllocationStrategy()
         strategy.state = AllocationState.BULL
         strategy.safe_asset = strategy.BOND_ASSET
 
@@ -74,9 +76,9 @@ class PensionStrategyTests(unittest.TestCase):
         self.assertEqual(
             tuple(strategy.__class__.__name__ for strategy in runner.strategies),
             (
-                "PensionRiskAllocationStrategy",
-                "PensionBlendedRiskAllocationStrategy",
-                "PensionVXUSSubstitutionStrategy",
+                "RetirementAllocationStrategy",
+                "SafeBlendAllocationStrategy",
+                "VXUSSubstitutionStrategy",
                 "ASYMMETRIC_TREND_BAND_ADD_DEFENSE2",
             ),
         )
@@ -97,7 +99,7 @@ class PensionStrategyTests(unittest.TestCase):
         )
 
     def test_vxus_substitution_respects_combined_risk_cap(self):
-        strategy = PensionVXUSSubstitutionStrategy()
+        strategy = VXUSSubstitutionStrategy()
         strategy.state = AllocationState.RECOVERY
         strategy.safe_asset = "BND"
 
@@ -110,7 +112,7 @@ class PensionStrategyTests(unittest.TestCase):
         self.assertAlmostEqual(sum(target.values()), 1.0)
 
     def test_vxus_substitution_never_replaces_bil(self):
-        strategy = PensionVXUSSubstitutionStrategy()
+        strategy = VXUSSubstitutionStrategy()
         strategy.state = AllocationState.BEAR
         strategy.safe_asset = "BIL"
 
@@ -121,10 +123,39 @@ class PensionStrategyTests(unittest.TestCase):
         self.assertEqual(target["BIL"], 1.0)
 
     def test_vxus_is_reported_as_a_risk_asset(self):
-        strategy = PensionVXUSSubstitutionStrategy()
+        strategy = VXUSSubstitutionStrategy()
 
         self.assertEqual(strategy.risk_asset_tickers, ("QQQ", "VXUS"))
         self.assertIn("VXUS", strategy.required_tickers)
+
+    def test_index_assets_can_each_map_to_multiple_products(self):
+        class ProductMappedStrategy(VXUSSubstitutionStrategy):
+            ASSET_MAPPING = {
+                "QQQ": {"NASDAQ_A": 0.60, "NASDAQ_B": 0.40},
+                "VXUS": {"GLOBAL_A": 0.75, "GLOBAL_B": 0.25},
+                "BND": {"PENSION_BOND": 1.0},
+                "BIL": {"PENSION_CASH": 1.0},
+            }
+
+        strategy = ProductMappedStrategy()
+        strategy.state = AllocationState.RECOVERY
+        strategy.safe_asset = "BND"
+
+        self.assertEqual(
+            strategy._target_for_state(),
+            {
+                "NASDAQ_A": 0.30,
+                "NASDAQ_B": 0.20,
+                "PENSION_BOND": 0.30,
+                "PENSION_CASH": 0.0,
+                "GLOBAL_A": 0.15,
+                "GLOBAL_B": 0.05,
+            },
+        )
+        self.assertEqual(
+            strategy.risk_asset_tickers,
+            ("NASDAQ_A", "NASDAQ_B", "GLOBAL_A", "GLOBAL_B"),
+        )
 
     def test_pension_strategy_uses_25_point_safe_asset_ladder(self):
         cases = (
@@ -137,7 +168,7 @@ class PensionStrategyTests(unittest.TestCase):
             (-1.00, 0.00),
         )
         for spread, expected_bnd_share in cases:
-            strategy = PensionBlendedRiskAllocationStrategy()
+            strategy = SafeBlendAllocationStrategy()
             strategy._select_safe_asset({
                 "BND": {"ROC40": 2.0 + spread},
                 "BIL": {"ROC40": 2.0},
@@ -150,7 +181,7 @@ class PensionStrategyTests(unittest.TestCase):
             )
 
     def test_safe_asset_ladder_scales_the_state_safe_sleeve(self):
-        strategy = PensionBlendedRiskAllocationStrategy()
+        strategy = SafeBlendAllocationStrategy()
         strategy.state = AllocationState.BULL
         strategy.safe_asset_mix = {"BND": 0.75, "BIL": 0.25}
 
