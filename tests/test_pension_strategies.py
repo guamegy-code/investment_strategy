@@ -35,6 +35,7 @@ class RetirementStrategyTests(unittest.TestCase):
             self.assertEqual(strategy.risk_asset_tickers, (risk_asset,))
             self.assertIn("QQQ", strategy.required_tickers)
             self.assertIn(risk_asset, strategy.required_tickers)
+            self.assertEqual(strategy.FX_RATE_TICKER, "KRW=X")
 
     def test_product_tickers_can_be_overridden_for_another_data_provider(self):
         time_strategy = TimeNasdaqAllocationStrategy(
@@ -77,8 +78,10 @@ class RetirementStrategyTests(unittest.TestCase):
             tuple(strategy.__class__.__name__ for strategy in runner.strategies),
             (
                 "RetirementAllocationStrategy",
-                "SafeBlendAllocationStrategy",
                 "VXUSSubstitutionStrategy",
+                "NasdaqProductMixAllocationStrategy",
+                "KodexNasdaqAllocationStrategy",
+                "KoActNasdaqAllocationStrategy",
                 "ASYMMETRIC_TREND_BAND_ADD_DEFENSE2",
             ),
         )
@@ -89,6 +92,9 @@ class RetirementStrategyTests(unittest.TestCase):
                 "BND",
                 "BIL",
                 "VXUS",
+                "379810.KS",
+                "426030.KS",
+                "0015B0.KS",
                 "GLD",
             ),
         )

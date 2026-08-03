@@ -12,6 +12,7 @@ for directory in (DATA_DIR, EXTENDED_DATA_DIR, RESULT_DIR):
     directory.mkdir(exist_ok=True)
 
 TICKERS = ["QQQ", "BND", "GLD", "BIL", "QLD"]
+FX_RATE_TICKERS = ["KRW=X"]
 START_DATE = "2012-01-01"
 EXTENDED_START_DATE = "1999-03-10"
 END_DATE = None

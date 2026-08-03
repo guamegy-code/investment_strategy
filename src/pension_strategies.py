@@ -14,6 +14,7 @@ class SingleProductAllocationStrategy(RetirementAllocationStrategy):
     """QQQ 위험자산군을 하나의 실제 상품으로 변환한다."""
 
     DEFAULT_RISK_ASSET = None
+    FX_RATE_TICKER = "KRW=X"
 
     def __init__(
         self,
@@ -65,6 +66,7 @@ class NasdaqProductMixAllocationStrategy(
     """위험자산군을 KODEX 50%, TIME 30%, KoAct 20%로 구성한다."""
 
     PRODUCT_WEIGHTS = {"KODEX": 0.50, "TIME": 0.30, "KOACT": 0.20}
+    FX_RATE_TICKER = "KRW=X"
 
     def __init__(
         self,

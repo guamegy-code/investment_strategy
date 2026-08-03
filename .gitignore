@@ -5,6 +5,7 @@ __pycache__/
 
 # Data
 data/*.csv
+!data/KRW=X.csv
 data_extended/*.csv
 data_multimarket/*.csv
 data_risk_assets/*.csv

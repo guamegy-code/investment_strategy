@@ -17,6 +17,9 @@ from chart import (
     format_chart_value_popup,
     format_rebalance_table,
     fit_annotation_inside_axis,
+    fx_neutralize_portfolio,
+    fx_neutralize_series,
+    load_fx_rate_series,
     nearest_chart_date,
     rebalance_directions,
     rebalance_marker_events,
@@ -24,12 +27,44 @@ from chart import (
     series_from_start,
     state_line_segments,
     strategy_risk_assets,
+    strategy_control_label,
     strategy_state_series,
     ticker_chart_color,
 )
 
 
 class ChartTickerSelectionTests(unittest.TestCase):
+    def test_strategy_control_label_omits_redundant_suffix(self):
+        self.assertEqual(
+            strategy_control_label("KoActNasdaqAllocationStrategy"),
+            "KoActNasdaqAllocation",
+        )
+
+    def test_fx_neutral_selection_is_restored(self):
+        class KoreanProductStrategy:
+            FX_RATE_TICKER = "KRW=X"
+
+        selection = build_selection(
+            [{"strategy": KoreanProductStrategy()}],
+            {"0015B0.KS": pd.DataFrame({"Close": [1.0]})},
+            saved={"fx_neutral": {"KoreanProductStrategy": True}},
+        )
+
+        self.assertTrue(selection.fx_neutral["KoreanProductStrategy"])
+
+    def test_fx_rate_data_is_loaded_only_for_eligible_strategies(self):
+        class KoreanProductStrategy:
+            FX_RATE_TICKER = "KRW=X"
+
+        dates = pd.bdate_range("2024-01-02", periods=2)
+        supplied = {"KRW=X": pd.DataFrame({"Close": [1300, 1320]}, index=dates)}
+
+        rates = load_fx_rate_series(
+            [{"strategy": KoreanProductStrategy()}], supplied=supplied
+        )
+
+        self.assertEqual(rates["KRW=X"].to_list(), [1300, 1320])
+
     def test_new_selection_enables_qqq_disparity_by_default(self):
         class Strategy:
             pass
@@ -272,6 +307,51 @@ class ChartValuePopupTests(unittest.TestCase):
         )
 
         self.assertEqual(relative.to_dict(), {dates[1]: 1.0, dates[2]: 1.1})
+
+    def test_fx_neutral_value_uses_the_start_date_exchange_rate(self):
+        dates = pd.bdate_range("2024-01-02", periods=3)
+        won_values = pd.Series([100.0, 120.0, 132.0], index=dates)
+        exchange_rates = pd.Series(
+            [1000.0, 1100.0], index=[dates[0], dates[2]]
+        )
+
+        adjusted = fx_neutralize_series(
+            won_values, exchange_rates, start_date=dates[1]
+        )
+        relative = series_from_start(
+            adjusted, start_date=dates[1], normalize=True
+        )
+
+        self.assertEqual(relative.to_dict(), {dates[1]: 1.0, dates[2]: 1.0})
+
+    def test_fx_neutral_portfolio_revalues_only_exposed_products(self):
+        class KoreanProductStrategy:
+            risk_asset_tickers = ("0015B0.KS",)
+
+        dates = pd.bdate_range("2024-01-02", periods=2)
+        result = {
+            "strategy": KoreanProductStrategy(),
+            "history": pd.DataFrame(
+                {
+                    "Portfolio": [1500.0, 1700.0],
+                    "Positions": [
+                        {"0015B0.KS": 10.0},
+                        {"0015B0.KS": 10.0},
+                    ],
+                },
+                index=dates,
+            ),
+            "market_data": pd.DataFrame(
+                {"0015B0.KS_Close": [100.0, 120.0]}, index=dates
+            ),
+        }
+        exchange_rates = pd.Series([1000.0, 1200.0], index=dates)
+
+        adjusted = fx_neutralize_portfolio(
+            result, exchange_rates, start_date=dates[0]
+        )
+
+        self.assertEqual(adjusted.to_list(), [1500.0, 1500.0])
 
     def test_click_date_uses_nearest_visible_trading_date(self):
         dates = pd.to_datetime(["2024-01-05", "2024-01-08"])

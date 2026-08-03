@@ -98,6 +98,7 @@ DETAIL_ROWS = {"MA", "EMA", "Bollinger", "MACD", "Stochastic", "ATR"}
 class ChartSelection:
     strategies: dict
     state_colors: dict
+    fx_neutral: dict
     matrix: dict
     visible_rows: list
     visible_tickers: list
@@ -160,6 +161,7 @@ def save_selection(selection):
             {
                 "strategies": selection.strategies,
                 "state_colors": selection.state_colors,
+                "fx_neutral": selection.fx_neutral,
                 "matrix": selection.matrix,
                 "visible_rows": selection.visible_rows,
                 "visible_tickers": selection.visible_tickers,
@@ -172,6 +174,11 @@ def save_selection(selection):
 
 def strategy_color(index):
     return APPLE_COLORS[index % len(APPLE_COLORS)]
+
+
+def strategy_control_label(name):
+    """오른쪽 제어판에서는 중복되는 Strategy 접미사를 생략한다."""
+    return name[:-len("Strategy")] if name.endswith("Strategy") else name
 
 
 def ticker_color(index, strategy_count):
@@ -213,6 +220,7 @@ def displayed_indicator_line_style(row, selection):
 def build_selection(results, market_data, saved):
     saved_strategies = saved.get("strategies", {}) if isinstance(saved.get("strategies"), dict) else {}
     saved_state_colors = saved.get("state_colors", {}) if isinstance(saved.get("state_colors"), dict) else {}
+    saved_fx_neutral = saved.get("fx_neutral", {}) if isinstance(saved.get("fx_neutral"), dict) else {}
     saved_matrix = saved.get("matrix", {}) if isinstance(saved.get("matrix"), dict) else {}
     saved_tickers = saved.get("tickers", {}) if isinstance(saved.get("tickers"), dict) else {}
     saved_indicators = saved.get("indicators", {}) if isinstance(saved.get("indicators"), dict) else {}
@@ -233,6 +241,12 @@ def build_selection(results, market_data, saved):
     state_colors = {
         result["strategy"].__class__.__name__: bool(
             saved_state_colors.get(result["strategy"].__class__.__name__, False)
+        )
+        for result in results
+    }
+    fx_neutral = {
+        result["strategy"].__class__.__name__: bool(
+            saved_fx_neutral.get(result["strategy"].__class__.__name__, False)
         )
         for result in results
     }
@@ -270,6 +284,7 @@ def build_selection(results, market_data, saved):
     return ChartSelection(
         strategies,
         state_colors,
+        fx_neutral,
         matrix,
         visible_rows,
         visible_tickers,
@@ -335,6 +350,26 @@ def load_market_data(tickers=None):
     return market_data
 
 
+def load_fx_rate_series(results, supplied=None):
+    """전략별 환율 제거 계산에 사용할 환율 종가 시계열을 반환한다."""
+    rate_tickers = tuple(dict.fromkeys(
+        ticker
+        for result in results
+        if (ticker := getattr(result.get("strategy"), "FX_RATE_TICKER", None))
+    ))
+    source = supplied
+    if source is None:
+        source = load_market_data(rate_tickers) if rate_tickers else {}
+    rates = {}
+    for ticker in rate_tickers:
+        data = source.get(ticker) if isinstance(source, dict) else None
+        if isinstance(data, pd.DataFrame) and "Close" in data:
+            rates[ticker] = data["Close"]
+        elif isinstance(data, pd.Series):
+            rates[ticker] = data
+    return rates
+
+
 def index_to_start(series):
     valid = series.dropna()
     return series if valid.empty else series / valid.iloc[0]
@@ -349,6 +384,76 @@ def series_from_start(series, start_date, normalize=False, base_series=None):
         valid_base = base_series.dropna()
         return series if valid_base.empty else series / valid_base.iloc[0]
     return index_to_start(series) if normalize else series
+
+
+def fx_neutralize_series(series, fx_rates, start_date=None):
+    """현재 환율을 시작 시점 환율로 고정한 가격 또는 자산가치를 계산한다.
+
+    ``fx_rates``는 1달러당 원화처럼 원화/외화 형식이어야 한다. 따라서
+    원화 표시 값에 ``시작 환율 / 현재 환율``을 곱하면 환율 변동분이
+    제거된다. 서로 다른 휴장일은 직전 환율을 사용한다.
+    """
+    if series.empty or fx_rates is None or fx_rates.empty:
+        return series.copy()
+    combined_index = series.index.union(fx_rates.index).sort_values()
+    aligned_rates = (
+        fx_rates.reindex(combined_index).ffill().reindex(series.index)
+    )
+    eligible = pd.concat(
+        [series.rename("value"), aligned_rates.rename("fx")], axis=1
+    )
+    if start_date is not None:
+        eligible = eligible.loc[eligible.index >= start_date]
+    eligible = eligible.dropna()
+    if eligible.empty or eligible["fx"].iloc[0] <= 0:
+        return series.copy()
+    start_rate = eligible["fx"].iloc[0]
+    valid_rates = aligned_rates.where(aligned_rates > 0)
+    return series * start_rate / valid_rates
+
+
+def fx_neutralize_portfolio(result, fx_rates, start_date=None):
+    """환노출 상품의 평가액만 시작 시점 환율로 다시 계산한다."""
+    history = result.get("history")
+    market_data = result.get("market_data")
+    strategy = result.get("strategy")
+    if history is None or history.empty or "Portfolio" not in history:
+        return pd.Series(dtype=float)
+    portfolio = history["Portfolio"].copy()
+    if (
+        "Positions" not in history
+        or market_data is None
+        or market_data.empty
+    ):
+        return portfolio
+
+    combined_index = portfolio.index.union(fx_rates.index).sort_values()
+    aligned_rates = (
+        fx_rates.reindex(combined_index).ffill().reindex(portfolio.index)
+    )
+    eligible_rates = aligned_rates
+    if start_date is not None:
+        eligible_rates = eligible_rates.loc[eligible_rates.index >= start_date]
+    eligible_rates = eligible_rates.dropna()
+    if eligible_rates.empty or eligible_rates.iloc[0] <= 0:
+        return portfolio
+    start_rate = eligible_rates.iloc[0]
+    rate_multiplier = start_rate / aligned_rates.where(aligned_rates > 0) - 1.0
+
+    exposed_tickers = getattr(strategy, "fx_exposed_tickers", None)
+    if exposed_tickers is None:
+        exposed_tickers = strategy_risk_assets(strategy)
+    exposed_value = pd.Series(0.0, index=portfolio.index)
+    for ticker in exposed_tickers:
+        price_column = f"{ticker}_Close"
+        if price_column not in market_data:
+            continue
+        shares = history["Positions"].map(
+            lambda positions: float((positions or {}).get(ticker, 0.0))
+        )
+        prices = market_data[price_column].reindex(portfolio.index)
+        exposed_value = exposed_value.add(shares * prices, fill_value=0.0)
+    return portfolio + exposed_value * rate_multiplier
 
 
 def strategy_risk_assets(strategy):
@@ -808,7 +913,12 @@ def draw_timeframe_candles(price_axis, market_data, chart_start):
 
 
 
-def draw_chart(results, price_data=None, show_chart=SHOW_CHART):
+def draw_chart(
+    results,
+    price_data=None,
+    show_chart=SHOW_CHART,
+    fx_rate_data=None,
+):
     """Draw strategy performance and a ticker-by-indicator selection matrix."""
     market_data = (
         price_data
@@ -816,6 +926,13 @@ def draw_chart(results, price_data=None, show_chart=SHOW_CHART):
         else load_market_data(chart_tickers(results))
     )
     selection = build_selection(results, market_data, load_selection())
+    fx_rates = load_fx_rate_series(results, supplied=fx_rate_data)
+    results_by_name = {
+        result["strategy"].__class__.__name__: result for result in results
+    }
+    strategies_by_name = {
+        name: result["strategy"] for name, result in results_by_name.items()
+    }
     strategy_names = list(selection.strategies)
     matrix_rows = list(MATRIX_ROWS)
     figure_height = 9
@@ -982,6 +1099,17 @@ def draw_chart(results, price_data=None, show_chart=SHOW_CHART):
         selection.strategies = {name: line.get_visible() for name, line in strategy_lines.items()}
         save_selection(selection)
 
+    def displayed_strategy_series(name):
+        """현재 시작일과 환율 제거 선택을 반영한 전략 수익곡선을 반환한다."""
+        series = strategy_series[name]
+        strategy = strategies_by_name[name]
+        rate_ticker = getattr(strategy, "FX_RATE_TICKER", None)
+        if selection.fx_neutral[name] and rate_ticker in fx_rates:
+            series = fx_neutralize_portfolio(
+                results_by_name[name], fx_rates[rate_ticker], active_start_date
+            )
+        return series_from_start(series, active_start_date, normalize=True)
+
     def refresh_state_legend():
         state_legend.set_visible(any(
             strategy_lines[name].get_visible()
@@ -995,7 +1123,7 @@ def draw_chart(results, price_data=None, show_chart=SHOW_CHART):
         value_annotation.set_visible(False)
         set_date_guide(value_date_guide)
         for name, line in strategy_lines.items():
-            values = series_from_start(strategy_series[name], active_start_date, normalize=True)
+            values = displayed_strategy_series(name)
             line.set_data(values.index, values)
             state_enabled = state_color_available[name] and selection.state_colors[name]
             line.set_alpha(0.0 if state_enabled else 1.0)
@@ -1120,9 +1248,7 @@ def draw_chart(results, price_data=None, show_chart=SHOW_CHART):
             return
 
         displayed_strategies = {
-            name: series_from_start(
-                strategy_series[name], active_start_date, normalize=True
-            )
+            name: displayed_strategy_series(name)
             for name, line in strategy_lines.items()
             if line.get_visible()
         }
@@ -1398,13 +1524,24 @@ def draw_chart(results, price_data=None, show_chart=SHOW_CHART):
     ))
     style_control_axis(strategy_axis, "전략")
     strategy_controls = []
+    fx_neutral_controls = []
     state_color_controls = []
     for index, name in enumerate(strategy_names):
         y = 1 - (CONTROL_BOX_PADDING_INCHES + index * CONTROL_ROW_SPACING_INCHES) / strategy_panel_height()
         box, mark = add_checkbox(strategy_axis, 0.08, y)
-        strategy_axis.text(0.13, y, name, transform=strategy_axis.transAxes, va="center", fontsize=CONTROL_FONT_SIZE,
+        strategy_axis.text(0.13, y, strategy_control_label(name), transform=strategy_axis.transAxes, va="center", fontsize=CONTROL_FONT_SIZE,
                            color=strategy_lines[name].get_color())
         strategy_controls.append((name, box, mark))
+        rate_ticker = getattr(strategies_by_name[name], "FX_RATE_TICKER", None)
+        if rate_ticker in fx_rates:
+            fx_box, fx_mark = add_checkbox(strategy_axis, 0.78, y)
+            fx_neutral_controls.append((name, fx_box, fx_mark))
+        else:
+            strategy_axis.text(
+                0.78, y, "-", transform=strategy_axis.transAxes,
+                ha="center", va="center", fontsize=CONTROL_FONT_SIZE,
+                color="#AEAEB2",
+            )
         if state_color_available[name]:
             state_box, state_mark = add_checkbox(strategy_axis, 0.94, y)
             state_color_controls.append((name, state_box, state_mark))
@@ -1415,6 +1552,11 @@ def draw_chart(results, price_data=None, show_chart=SHOW_CHART):
                 color="#AEAEB2",
             )
     strategy_axis.text(
+        0.78, 1.01, "환율제거", transform=strategy_axis.transAxes,
+        ha="center", va="bottom", fontsize=CONTROL_FONT_SIZE - 2,
+        color="#6E6E73",
+    )
+    strategy_axis.text(
         0.94, 1.01, "상태색", transform=strategy_axis.transAxes,
         ha="center", va="bottom", fontsize=CONTROL_FONT_SIZE - 2,
         color="#6E6E73",
@@ -1423,6 +1565,8 @@ def draw_chart(results, price_data=None, show_chart=SHOW_CHART):
     def refresh_strategy_controls():
         for name, _, mark in strategy_controls:
             mark.set_visible(strategy_lines[name].get_visible())
+        for name, _, mark in fx_neutral_controls:
+            mark.set_visible(selection.fx_neutral[name])
         for name, _, mark in state_color_controls:
             mark.set_visible(selection.state_colors[name])
 
@@ -1444,6 +1588,14 @@ def draw_chart(results, price_data=None, show_chart=SHOW_CHART):
                 update_panels()
                 rescale()
                 refresh_state_legend()
+                persist()
+                fig.canvas.draw_idle()
+                return
+        for name, box, _ in fx_neutral_controls:
+            if box.contains(event)[0]:
+                selection.fx_neutral[name] = not selection.fx_neutral[name]
+                refresh_strategy_controls()
+                refresh_lines()
                 persist()
                 fig.canvas.draw_idle()
                 return

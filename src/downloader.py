@@ -10,6 +10,7 @@ import yfinance as yf
 
 from config import (
     DATA_DIR,
+    FX_RATE_TICKERS,
     TICKERS,
     START_DATE,
     END_DATE,
@@ -58,7 +59,8 @@ def main():
     print("ETF 데이터 다운로드")
     print("=" * 60)
 
-    for ticker in TICKERS:
+    # 백테스트 종목과 차트의 환율 제거 표시에 필요한 환율을 함께 갱신한다.
+    for ticker in (*TICKERS, *FX_RATE_TICKERS):
         try:
             df = download_one(ticker)
 

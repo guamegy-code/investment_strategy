@@ -59,13 +59,13 @@ def build_runner():
     """Configure the active strategies shown in the application."""
     strategies = (
         RetirementAllocationStrategy(),
-        SafeBlendAllocationStrategy(),
+        #SafeBlendAllocationStrategy(),
         VXUSSubstitutionStrategy(),
         #STATIC_RETIREMENT_7030(),
-        #NasdaqProductMixAllocationStrategy(),
-        #KodexNasdaqAllocationStrategy(),
+        NasdaqProductMixAllocationStrategy(),
+        KodexNasdaqAllocationStrategy(),
         #TimeNasdaqAllocationStrategy(),
-        #KoActNasdaqAllocationStrategy(),
+        KoActNasdaqAllocationStrategy(),
         ASYMMETRIC_TREND_BAND_ADD_DEFENSE2(),
     )
     required_tickers = tuple(dict.fromkeys(
