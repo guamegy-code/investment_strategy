@@ -20,6 +20,10 @@ from strategy import (
     ASYMMETRIC_TREND_BAND_ADD_DEFENSE2,
 )
 
+from experimental_strategies import (
+    ASYMMETRIC_TREND_BAND_ADD_DEFENSE2_TUNED,
+)
+
 
 def save_results(results):
     histories = {
@@ -67,6 +71,7 @@ def build_runner():
         #TimeNasdaqAllocationStrategy(),
         KoActNasdaqAllocationStrategy(),
         ASYMMETRIC_TREND_BAND_ADD_DEFENSE2(),
+        ASYMMETRIC_TREND_BAND_ADD_DEFENSE2_TUNED(),
     )
     required_tickers = tuple(dict.fromkeys(
         ticker

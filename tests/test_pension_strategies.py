@@ -83,6 +83,7 @@ class RetirementStrategyTests(unittest.TestCase):
                 "KodexNasdaqAllocationStrategy",
                 "KoActNasdaqAllocationStrategy",
                 "ASYMMETRIC_TREND_BAND_ADD_DEFENSE2",
+                "ASYMMETRIC_TREND_BAND_ADD_DEFENSE2_TUNED",
             ),
         )
         self.assertEqual(

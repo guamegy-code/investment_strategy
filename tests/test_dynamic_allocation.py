@@ -7,6 +7,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from experimental_strategies import ASYMMETRIC_TREND_BAND_ADD_DEFENSE2_TUNED
 from strategy import (
     ASYMMETRIC_TREND_BAND,
     ASYMMETRIC_TREND_BAND_ADD_DEFENSE,
@@ -387,6 +388,37 @@ class RetirementAllocationTests(unittest.TestCase):
         self.assertTrue(signal["rebalance"])
         self.assertIn("UPTREND_BUY_DIP_QLD", signal["reason"])
 
+    def test_defense2_tuned_preserves_pension_safe_asset_floor(self):
+        strategy = ASYMMETRIC_TREND_BAND_ADD_DEFENSE2_TUNED()
+
+        self.assertEqual(
+            strategy.target_weights,
+            {"QQQ": 0.65, "GLD": 0.05, "BND": 0.30},
+        )
+        self.assertEqual(
+            strategy.defensive_weights,
+            {"QQQ": 0.30, "GLD": 0.10, "BND": 0.60},
+        )
+        self.assertGreaterEqual(strategy.target_weights["BND"], 0.30)
+        self.assertGreaterEqual(strategy.defensive_weights["BND"], 0.30)
+        self.assertEqual(strategy.defensive_drawdown, -0.155)
+
+    def test_defense2_tuned_enters_defense_at_15_5pct_drawdown(self):
+        strategy = ASYMMETRIC_TREND_BAND_ADD_DEFENSE2_TUNED()
+        strategy.highest_price = 100.0
+        falling_market = market(
+            84.4, 90.0, 95.0, 100.0, -5.0, -10.0, -2.0,
+            roc60=-12.0,
+        )
+
+        signal = strategy.evaluate(
+            self.date, falling_market, self.portfolio
+        )
+
+        self.assertTrue(strategy.is_defensive_mode)
+        self.assertTrue(signal["rebalance"])
+        self.assertEqual(signal["target"]["BND"], 0.60)
+
     def test_existing_strategies_use_the_new_base_contract(self):
         strategy_types = (
             BASIC_BANG_DIV,
@@ -394,6 +426,7 @@ class RetirementAllocationTests(unittest.TestCase):
             ASYMMETRIC_TREND_BAND,
             ASYMMETRIC_TREND_BAND_ADD_DEFENSE,
             ASYMMETRIC_TREND_BAND_ADD_DEFENSE2,
+            ASYMMETRIC_TREND_BAND_ADD_DEFENSE2_TUNED,
         )
 
         for strategy_type in strategy_types:
