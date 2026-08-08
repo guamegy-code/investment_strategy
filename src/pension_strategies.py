@@ -1,6 +1,6 @@
 """기준 지수를 실제 퇴직연금 상품으로 변환하는 전략을 정의한다."""
 
-from strategy import RetirementAllocationStrategy
+from strategy import RetirementAllocationStrategy, VXUSSubstitutionStrategy
 
 
 DEFAULT_RETIREMENT_PRODUCTS = {
@@ -42,6 +42,8 @@ class KodexNasdaqAllocationStrategy(
     """QQQ로 시장을 판단하고 KODEX 미국나스닥100을 매매한다."""
 
     DEFAULT_RISK_ASSET = DEFAULT_RETIREMENT_PRODUCTS["KODEX"]
+    bond_asset = "437080.KS"
+    cash_asset = "0046A0.KS"
 
 
 class TimeNasdaqAllocationStrategy(

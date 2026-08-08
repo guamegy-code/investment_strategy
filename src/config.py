@@ -11,7 +11,7 @@ RESULT_DIR = PROJECT_ROOT / "results"
 for directory in (DATA_DIR, EXTENDED_DATA_DIR, RESULT_DIR):
     directory.mkdir(exist_ok=True)
 
-TICKERS = ["QQQ", "BND", "GLD", "BIL", "QLD"]
+TICKERS = ["QQQ", "BND", "GLD", "BIL", "QLD", "SPY"]
 FX_RATE_TICKERS = ["KRW=X"]
 START_DATE = "2012-01-01"
 EXTENDED_START_DATE = "1999-03-10"

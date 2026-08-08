@@ -1,6 +1,7 @@
 # Python
 __pycache__/
 *.pyc
+*.log
 .yf-cache/
 
 # Data
@@ -9,6 +10,7 @@ data/*.csv
 data_extended/*.csv
 data_multimarket/*.csv
 data_risk_assets/*.csv
+data_probability_signals/*.csv
 
 # Results
 results/*

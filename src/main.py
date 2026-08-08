@@ -13,9 +13,12 @@ from pension_strategies import (
 )
 from runner import Runner
 from strategy import (
+    RetirementAllocationSelectiveRebalanceStrategy,
+    RetirementAllocationSelectiveVXUSStrategy,
     RetirementAllocationStrategy,
     SafeBlendAllocationStrategy,
     VXUSSubstitutionStrategy,
+    EXPANDING_RISK_FORECAST_30_70,
     STATIC_RETIREMENT_7030,
     ASYMMETRIC_TREND_BAND_ADD_DEFENSE2,
 )
@@ -63,15 +66,18 @@ def build_runner():
     """Configure the active strategies shown in the application."""
     strategies = (
         RetirementAllocationStrategy(),
+        RetirementAllocationSelectiveRebalanceStrategy(),
+        RetirementAllocationSelectiveVXUSStrategy(),
         #SafeBlendAllocationStrategy(),
         VXUSSubstitutionStrategy(),
-        #STATIC_RETIREMENT_7030(),
-        NasdaqProductMixAllocationStrategy(),
-        KodexNasdaqAllocationStrategy(),
+        #EXPANDING_RISK_FORECAST_30_70(),
+        STATIC_RETIREMENT_7030(),
+        #NasdaqProductMixAllocationStrategy(),
+        #KodexNasdaqAllocationStrategy(),
         #TimeNasdaqAllocationStrategy(),
-        KoActNasdaqAllocationStrategy(),
+        #KoActNasdaqAllocationStrategy(),
         ASYMMETRIC_TREND_BAND_ADD_DEFENSE2(),
-        ASYMMETRIC_TREND_BAND_ADD_DEFENSE2_TUNED(),
+        #ASYMMETRIC_TREND_BAND_ADD_DEFENSE2_TUNED(),
     )
     required_tickers = tuple(dict.fromkeys(
         ticker

@@ -15,12 +15,75 @@ from pension_strategies import (
 )
 from strategy import (
     AllocationState,
+    RetirementAllocationSelectiveRebalanceStrategy,
+    RetirementAllocationSelectiveSafeBlendStrategy,
+    RetirementAllocationSelectiveSPYStrategy,
+    RetirementAllocationSelectiveVXUSStrategy,
     SafeBlendAllocationStrategy,
     VXUSSubstitutionStrategy,
 )
 
 
 class RetirementStrategyTests(unittest.TestCase):
+    def test_selective_extensions_inherit_the_validated_rebalance_parent(self):
+        self.assertTrue(issubclass(
+            RetirementAllocationSelectiveSafeBlendStrategy,
+            RetirementAllocationSelectiveRebalanceStrategy,
+        ))
+        self.assertTrue(issubclass(
+            RetirementAllocationSelectiveVXUSStrategy,
+            RetirementAllocationSelectiveRebalanceStrategy,
+        ))
+
+    def test_selective_safe_blend_preserves_risk_and_safe_mix(self):
+        strategy = RetirementAllocationSelectiveSafeBlendStrategy()
+        strategy.state = AllocationState.BULL
+        strategy.safe_asset = "BND"
+        strategy.safe_asset_mix = {"BND": 0.50, "BIL": 0.50}
+
+        target = strategy._target_for_state()
+
+        self.assertEqual(target, {"QQQ": 0.70, "BND": 0.15, "BIL": 0.15})
+
+    def test_selective_vxus_counts_vxus_inside_risk_cap(self):
+        strategy = RetirementAllocationSelectiveVXUSStrategy()
+        strategy.state = AllocationState.RECOVERY
+        strategy.safe_asset = "BND"
+
+        target = strategy._target_for_state()
+
+        self.assertEqual(target["QQQ"], 0.50)
+        self.assertEqual(target["VXUS"], 0.20)
+        self.assertEqual(target["BND"], 0.30)
+        self.assertLessEqual(target["QQQ"] + target["VXUS"], 0.70)
+
+    def test_selective_spy_replaces_vxus_as_the_alternative_risk_asset(self):
+        strategy = RetirementAllocationSelectiveSPYStrategy()
+        strategy.state = AllocationState.RECOVERY
+        strategy.safe_asset = "BND"
+
+        target = strategy._target_for_state()
+
+        self.assertEqual(target["QQQ"], 0.50)
+        self.assertEqual(target["SPY"], 0.20)
+        self.assertEqual(target["BND"], 0.30)
+        self.assertNotIn("VXUS", target)
+        self.assertEqual(strategy.risk_asset_tickers, ("QQQ", "SPY"))
+        self.assertIn("SPY", strategy.required_tickers)
+        self.assertNotIn("VXUS", strategy.required_tickers)
+        self.assertLessEqual(target["QQQ"] + target["SPY"], 0.70)
+
+    def test_selective_spy_never_replaces_bil(self):
+        strategy = RetirementAllocationSelectiveSPYStrategy()
+        strategy.state = AllocationState.BEAR
+        strategy.safe_asset = "BIL"
+
+        target = strategy._target_for_state()
+
+        self.assertEqual(target["QQQ"], 0.0)
+        self.assertEqual(target["SPY"], 0.0)
+        self.assertEqual(target["BIL"], 1.0)
+
     def test_product_strategies_have_unique_korean_risk_assets(self):
         expected = {
             KodexNasdaqAllocationStrategy: "379810.KS",
@@ -78,12 +141,11 @@ class RetirementStrategyTests(unittest.TestCase):
             tuple(strategy.__class__.__name__ for strategy in runner.strategies),
             (
                 "RetirementAllocationStrategy",
+                "RetirementAllocationSelectiveRebalanceStrategy",
+                "RetirementAllocationSelectiveVXUSStrategy",
                 "VXUSSubstitutionStrategy",
-                "NasdaqProductMixAllocationStrategy",
-                "KodexNasdaqAllocationStrategy",
-                "KoActNasdaqAllocationStrategy",
+                "STATIC_RETIREMENT_7030",
                 "ASYMMETRIC_TREND_BAND_ADD_DEFENSE2",
-                "ASYMMETRIC_TREND_BAND_ADD_DEFENSE2_TUNED",
             ),
         )
         self.assertEqual(
@@ -93,9 +155,6 @@ class RetirementStrategyTests(unittest.TestCase):
                 "BND",
                 "BIL",
                 "VXUS",
-                "379810.KS",
-                "426030.KS",
-                "0015B0.KS",
                 "GLD",
             ),
         )

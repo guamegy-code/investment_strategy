@@ -2,7 +2,131 @@
 
 import math
 
-from strategy import ASYMMETRIC_TREND_BAND_ADD_DEFENSE2
+from strategy import (
+    ASYMMETRIC_TREND_BAND_ADD_DEFENSE2,
+    AllocationState,
+    RetirementAllocationStrategy,
+)
+
+
+class StagedBearRetirementStrategy(RetirementAllocationStrategy):
+    """Experimental 70% -> 30% -> 0% risk-off implementation.
+
+    The first confirmed BEAR transition retains 30% in the risk asset.  It
+    moves to 0% only when the parent's structural-bear condition remains true
+    for an additional configurable number of trading days.  ``None`` keeps
+    the 30% floor throughout BEAR.
+    """
+
+    STAGE1_RISK_WEIGHT = 0.30
+
+    def __init__(self, full_exit_confirmation_days=5, *args, **kwargs):
+        if (
+            full_exit_confirmation_days is not None
+            and full_exit_confirmation_days < 1
+        ):
+            raise ValueError("full_exit_confirmation_days must be positive or None")
+        self.full_exit_confirmation_days = full_exit_confirmation_days
+        self._continued_bear_days = 0
+        self._full_bear_defense = False
+        self._stage2_activated_today = False
+        super().__init__(*args, **kwargs)
+
+    def _desired_state(self, qqq):
+        desired = super()._desired_state(qqq)
+        self._stage2_activated_today = False
+        if self.state != AllocationState.BEAR:
+            self._continued_bear_days = 0
+            self._full_bear_defense = False
+            return desired
+
+        if (
+            not self._full_bear_defense
+            and self.full_exit_confirmation_days is not None
+            and self._is_structural_bear(qqq)
+        ):
+            self._continued_bear_days += 1
+            if self._continued_bear_days >= self.full_exit_confirmation_days:
+                self._full_bear_defense = True
+                self._stage2_activated_today = True
+        return desired
+
+    def _index_target_for_state(self):
+        target = super()._index_target_for_state()
+        if self.state != AllocationState.BEAR or self._full_bear_defense:
+            return target
+        target[self.RISK_ASSET] = self.STAGE1_RISK_WEIGHT
+        target[self.BOND_ASSET] = 0.0
+        target[self.CASH_ASSET] = 0.0
+        target[self.safe_asset] = 1.0 - self.STAGE1_RISK_WEIGHT
+        return target
+
+    def evaluate(self, date, market, portfolio):
+        previous_state = self.state
+        signal = super().evaluate(date, market, portfolio)
+        if previous_state != AllocationState.BEAR and self.state == AllocationState.BEAR:
+            suffix = "BEAR_STAGE1_30"
+            signal["reason"] = (
+                f"{signal['reason']}|{suffix}" if signal["reason"] else suffix
+            )
+        if self._stage2_activated_today:
+            signal["reason"] = (
+                f"BEAR_STAGE2_0(continued={self._continued_bear_days})"
+            )
+        return signal
+
+
+class StateOnlyTransitionRetirementStrategy(RetirementAllocationStrategy):
+    """Update equal-target BULL/CAUTION states without forcing a trade."""
+
+    def __init__(
+        self,
+        suppress_bull_to_caution=True,
+        suppress_caution_to_bull=True,
+        *args,
+        **kwargs,
+    ):
+        self.suppressed_transitions = set()
+        if suppress_bull_to_caution:
+            self.suppressed_transitions.add(
+                (AllocationState.BULL, AllocationState.CAUTION)
+            )
+        if suppress_caution_to_bull:
+            self.suppressed_transitions.add(
+                (AllocationState.CAUTION, AllocationState.BULL)
+            )
+        super().__init__(*args, **kwargs)
+
+    def _is_suppressed_transition(self, previous_state, current_state):
+        return (previous_state, current_state) in self.suppressed_transitions
+
+    def _outside_band(self, market, portfolio):
+        prices = {ticker: market[ticker]["Close"] for ticker in self.target}
+        weights = portfolio.weights(prices)
+        return any(
+            abs(weights.get(ticker, 0.0) - target_weight) >= 0.05
+            for ticker, target_weight in self.target.items()
+        )
+
+    def evaluate(self, date, market, portfolio):
+        previous_state = self.state
+        previous_target = self.target.copy() if self.target is not None else None
+        signal = super().evaluate(date, market, portfolio)
+        if not self._is_suppressed_transition(previous_state, self.state):
+            return signal
+        if previous_target != signal["target"]:
+            return signal
+        if signal["reason"] and "SAFE_ROTATION" in signal["reason"]:
+            return signal
+        if self._outside_band(market, portfolio):
+            signal["reason"] = f"{signal['reason']}|MONTHLY_5PCT_BAND"
+            return signal
+        return self._signal(
+            False,
+            signal["target"],
+            self._execution_days(self.state),
+            f"STATE_ONLY_{previous_state.value}->{self.state.value}",
+        )
 
 
 class ASYMMETRIC_TREND_BAND_ADD_DEFENSE2_TUNED(

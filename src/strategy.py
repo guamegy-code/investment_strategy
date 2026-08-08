@@ -4,6 +4,8 @@ from collections.abc import Mapping
 from enum import Enum
 from math import exp
 
+import numpy as np
+
 
 def _validated_asset_mix(risk_asset, risk_assets):
     """상품 비중이 모두 양수이고 합계가 1인지 검증한다."""
@@ -461,6 +463,48 @@ class RetirementAllocationStrategy(BaseStrategy):
         )
 
 
+class RetirementAllocationSelectiveRebalanceStrategy(
+    RetirementAllocationStrategy
+):
+    """회복 상태 전환과 불필요한 동일 목표 주문을 분리한 전략이다.
+
+    CAUTION에서 BULL로 전환할 때 목표 비중과 안전자산이 그대로이고 실제
+    비중이 5% 밴드 안이면 상태만 갱신한다. 밴드 이탈 또는 안전자산 교체가
+    있으면 부모 전략과 동일하게 주문한다.
+    """
+
+    def _outside_target_band(self, market, portfolio):
+        prices = {ticker: market[ticker]["Close"] for ticker in self.target}
+        weights = portfolio.weights(prices)
+        return any(
+            abs(weights.get(ticker, 0.0) - target_weight) >= 0.05
+            for ticker, target_weight in self.target.items()
+        )
+
+    def evaluate(self, date, market, portfolio):
+        previous_state = self.state
+        previous_target = self.target.copy() if self.target is not None else None
+        signal = super().evaluate(date, market, portfolio)
+        if not (
+            previous_state == AllocationState.CAUTION
+            and self.state == AllocationState.BULL
+        ):
+            return signal
+        if previous_target != signal["target"]:
+            return signal
+        if signal["reason"] and "SAFE_ROTATION" in signal["reason"]:
+            return signal
+        if self._outside_target_band(market, portfolio):
+            signal["reason"] = f"{signal['reason']}|MONTHLY_5PCT_BAND"
+            return signal
+        return self._signal(
+            False,
+            signal["target"],
+            self._execution_days(self.state),
+            "STATE_ONLY_CAUTION->BULL",
+        )
+
+
 class _SafeBlendMixin:
     """위험자산 비중을 유지하며 BND와 BIL을 25% 단위로 혼합한다."""
 
@@ -529,6 +573,13 @@ class SafeBlendAllocationStrategy(
     """BND/BIL 모멘텀을 25% 단위로 반영하는 자산배분 전략이다."""
 
 
+class RetirementAllocationSelectiveSafeBlendStrategy(
+    _SafeBlendMixin,
+    RetirementAllocationSelectiveRebalanceStrategy,
+):
+    """선택적 상태 주문 생략과 BND/BIL 혼합을 결합한 전략이다."""
+
+
 class _VXUSSubstitutionMixin:
     """위험자산 한도 안에서 선택된 BND 비중 일부를 VXUS로 대체한다."""
 
@@ -561,7 +612,10 @@ class _VXUSSubstitutionMixin:
             )
         combined_risk = risk_weight + target[self.ALTERNATIVE_RISK_ASSET]
         if combined_risk > self.MAX_RISK_WEIGHT + 1e-9:
-            raise ValueError("combined QQQ and VXUS weight exceeds 70%")
+            raise ValueError(
+                f"combined {self.RISK_ASSET} and "
+                f"{self.ALTERNATIVE_RISK_ASSET} weight exceeds 70%"
+            )
         return target
 
 
@@ -574,6 +628,29 @@ class VXUSSubstitutionStrategy(
     VXUS는 위험자산으로 분류되며 QQQ와 합산한 목표 비중이 70%를 넘지
     않도록 BND만 대체한다. BIL은 대체하지 않는다.
     """
+
+
+class RetirementAllocationSelectiveVXUSStrategy(
+    _VXUSSubstitutionMixin,
+    RetirementAllocationSelectiveRebalanceStrategy,
+):
+    """선택적 상태 주문 생략과 VXUS 위험자산 대체를 결합한다.
+
+    VXUS는 QQQ와 합산해 최대 70%인 위험자산이며 BND만 대체한다.
+    BIL이 선택된 경우에는 VXUS를 편입하지 않는다.
+    """
+
+
+class RetirementAllocationSelectiveSPYStrategy(
+    RetirementAllocationSelectiveVXUSStrategy
+):
+    """선택적 VXUS 전략의 대체 위험자산을 SPY로 변경한다.
+
+    SPY는 QQQ와 합산해 최대 70%인 위험자산이며 BND만 대체한다.
+    BIL이 선택된 경우에는 SPY를 편입하지 않는다.
+    """
+
+    ALTERNATIVE_RISK_ASSET = "SPY"
 
 
 class DownsideTrendOverlayStrategy(BaseStrategy):
@@ -705,6 +782,219 @@ class DownsideTrendOverlayStrategy(BaseStrategy):
             self.target,
             self.EXECUTION_DAYS,
             "MONTHLY_DOWNSIDE_OVERLAY_5PCT_BAND" if rebalance else None,
+        )
+
+
+class EXPANDING_RISK_FORECAST_30_70(BaseStrategy):
+    """확장학습 위험 예측으로 QQQ 목표 비중을 30~70%에서 조절한다.
+
+    매월 첫 거래일에 과거 월별 특징과 완전히 확정된 향후 21거래일의
+    하방변동성·최대 경로손실만 사용한다. 예측치는 과거 평균으로 축소하며,
+    평균 위험보다 10% 이상 높을 때부터 QQQ 비중을 연속적으로 낮춘다.
+
+    이 클래스는 실행 중 관측치를 온라인으로 축적한다. 최소 60개월의 학습
+    표본이 쌓이기 전에는 정적 70/30 목표를 유지한다.
+    """
+
+    HORIZON_DAYS = 21
+    MINIMUM_MODEL_SAMPLES = 60
+    FULL_RELIABILITY_SAMPLES = 120
+    RIDGE_PENALTY = 5.0
+    MIN_QQQ_WEIGHT = 0.30
+    MAX_QQQ_WEIGHT = 0.70
+    STRESS_DEADBAND = 1.10
+    FULL_DEFENSE_STRESS = 1.50
+    REBALANCE_BAND = 0.05
+    EXECUTION_DAYS = 3
+
+    def __init__(self):
+        self.risk_assets = {"QQQ": 1.0}
+        self.target = None
+        self.last_signal_month = None
+        self.forecast_stress_ratio = 1.0
+        self.predicted_downside_volatility = None
+        self.predicted_maximum_loss = None
+        self.base_downside_volatility = None
+        self.base_maximum_loss = None
+        self.model_samples = 0
+        self._closes = []
+        self._pending_observations = []
+        self._training_features = []
+        self._training_downside_volatility = []
+        self._training_maximum_loss = []
+
+    @property
+    def required_tickers(self):
+        return ("QQQ", "BND", "BIL")
+
+    @staticmethod
+    def _valid(*values):
+        return all(value is not None and np.isfinite(value) for value in values)
+
+    def _feature_vector(self, qqq):
+        if len(self._closes) < 21:
+            return None
+        returns = np.diff(np.asarray(self._closes[-21:], dtype=float)) / np.asarray(
+            self._closes[-21:-1], dtype=float
+        )
+        volatility20 = float(np.std(returns, ddof=1) * np.sqrt(252.0))
+        close = qqq.get("Close")
+        ema200 = qqq.get("EMA200")
+        volatility60 = qqq.get("VOL60")
+        values = (
+            qqq.get("ROC20"),
+            qqq.get("ROC60"),
+            qqq.get("ROC120"),
+            close / ema200 - 1.0 if self._valid(close, ema200) else None,
+            volatility60,
+            qqq.get("DRAWDOWN120"),
+            (
+                volatility20 / volatility60 - 1.0
+                if self._valid(volatility60) and volatility60 > 0.0
+                else None
+            ),
+        )
+        if not self._valid(*values):
+            return None
+        return np.asarray(values, dtype=float)
+
+    def _resolve_observations(self, current_position):
+        unresolved = []
+        close = np.asarray(self._closes, dtype=float)
+        for observation in self._pending_observations:
+            origin = observation["position"]
+            if origin + self.HORIZON_DAYS > current_position:
+                unresolved.append(observation)
+                continue
+            prices = close[origin:origin + self.HORIZON_DAYS + 1]
+            returns = prices[1:] / prices[:-1] - 1.0
+            downside_volatility = float(np.sqrt(
+                np.mean(np.minimum(returns, 0.0) ** 2) * 252.0
+            ))
+            maximum_loss = float(max(0.0, 1.0 - prices[1:].min() / prices[0]))
+            self._training_features.append(observation["features"])
+            self._training_downside_volatility.append(downside_volatility)
+            self._training_maximum_loss.append(maximum_loss)
+        self._pending_observations = unresolved
+        self.model_samples = len(self._training_features)
+
+    @classmethod
+    def _ridge_forecast(cls, train_x, train_y, predict_x):
+        mean = train_x.mean(axis=0)
+        scale = train_x.std(axis=0)
+        scale[scale < 1e-8] = 1.0
+        standardized = np.clip((train_x - mean) / scale, -5.0, 5.0)
+        point = np.clip((predict_x - mean) / scale, -5.0, 5.0)
+        design = np.column_stack((np.ones(len(standardized)), standardized))
+        prediction_design = np.concatenate(([1.0], point))
+        penalty = np.eye(design.shape[1]) * cls.RIDGE_PENALTY
+        penalty[0, 0] = 0.0
+        beta = np.linalg.solve(
+            design.T @ design + penalty,
+            design.T @ train_y,
+        )
+        prediction = float(max(0.0, prediction_design @ beta))
+        return prediction, float(np.mean(train_y))
+
+    def _update_forecast(self, features):
+        self.model_samples = len(self._training_features)
+        if features is None or self.model_samples < self.MINIMUM_MODEL_SAMPLES:
+            self.forecast_stress_ratio = 1.0
+            return
+        train_x = np.asarray(self._training_features, dtype=float)
+        downside = np.asarray(self._training_downside_volatility, dtype=float)
+        maximum_loss = np.asarray(self._training_maximum_loss, dtype=float)
+        predicted_volatility, base_volatility = self._ridge_forecast(
+            train_x, downside, features
+        )
+        predicted_loss, base_loss = self._ridge_forecast(
+            train_x, maximum_loss, features
+        )
+        reliability = min(
+            1.0, self.model_samples / self.FULL_RELIABILITY_SAMPLES
+        )
+        predicted_volatility = base_volatility + reliability * (
+            predicted_volatility - base_volatility
+        )
+        predicted_loss = base_loss + reliability * (predicted_loss - base_loss)
+        volatility_ratio = predicted_volatility / max(base_volatility, 1e-4)
+        loss_ratio = predicted_loss / max(base_loss, 1e-4)
+        self.forecast_stress_ratio = float(np.clip(
+            (volatility_ratio + loss_ratio) / 2.0,
+            0.5,
+            3.0,
+        ))
+        self.predicted_downside_volatility = predicted_volatility
+        self.predicted_maximum_loss = predicted_loss
+        self.base_downside_volatility = base_volatility
+        self.base_maximum_loss = base_loss
+
+    def _qqq_weight(self):
+        reduction = np.clip(
+            (self.forecast_stress_ratio - self.STRESS_DEADBAND)
+            / (self.FULL_DEFENSE_STRESS - self.STRESS_DEADBAND),
+            0.0,
+            1.0,
+        )
+        capacity = self.MAX_QQQ_WEIGHT - self.MIN_QQQ_WEIGHT
+        return float(self.MAX_QQQ_WEIGHT - capacity * reduction)
+
+    def _desired_target(self):
+        qqq_weight = self._qqq_weight()
+        safe_weight = 1.0 - qqq_weight
+        return {
+            "QQQ": qqq_weight,
+            "BND": safe_weight / 2.0,
+            "BIL": safe_weight / 2.0,
+        }
+
+    def evaluate(self, date, market, portfolio):
+        qqq = market["QQQ"]
+        self._closes.append(float(qqq["Close"]))
+        position = len(self._closes) - 1
+        self._resolve_observations(position)
+        month = date.to_period("M")
+
+        if self.target is not None and month == self.last_signal_month:
+            return self._signal(False, self.target, self.EXECUTION_DAYS)
+
+        # 월별 현재 특징으로 먼저 예측한 뒤, 현재 관측치는 21거래일 후에만
+        # 학습 집합으로 이동시켜 미래 정보 누수를 막는다.
+        features = self._feature_vector(qqq)
+        self._update_forecast(features)
+        if features is not None:
+            self._pending_observations.append({
+                "position": position,
+                "features": features,
+            })
+
+        self.last_signal_month = month
+        desired = self._desired_target()
+        if self.target is None:
+            self.target = desired
+            return self._signal(
+                True,
+                self.target,
+                self.EXECUTION_DAYS,
+                "INITIAL_EXPANDING_RISK_FORECAST",
+            )
+
+        prices = {ticker: market[ticker]["Close"] for ticker in desired}
+        current = portfolio.weights(prices)
+        self.target = desired
+        rebalance = any(
+            abs(current.get(ticker, 0.0) - weight) >= self.REBALANCE_BAND
+            for ticker, weight in desired.items()
+        )
+        reason = (
+            f"MONTHLY_EXPANDING_RISK_FORECAST(stress={self.forecast_stress_ratio:.3f})"
+            if rebalance else None
+        )
+        return self._signal(
+            rebalance,
+            self.target,
+            self.EXECUTION_DAYS,
+            reason,
         )
 
 
