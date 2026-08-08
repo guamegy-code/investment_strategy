@@ -44,6 +44,14 @@ investment_strategy/
 └── README.md
 ```
 
+## 실행
+
+```powershell
+uv run python src/main.py
+```
+
+`main.py`는 실행할 전략에 필요한 티커와 `FX_RATE_TICKERS`를 확인하고 `data/{ticker}.csv`가 없을 때만 Yahoo Finance에서 자동으로 내려받습니다. 이미 있는 CSV 파일은 그대로 유지합니다. 전체 데이터를 새로 받고 싶다면 `uv run python src/downloader.py`를 별도로 실행하세요.
+
 ## 개발 방법
 
 이 프로젝트에서 개발의 기본 단위는 자산배분 전략입니다. 전략은 시장을 어떤

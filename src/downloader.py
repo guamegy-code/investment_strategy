@@ -5,6 +5,8 @@ ETF 데이터를 다운로드하고
 보조지표를 계산한 후 CSV로 저장한다.
 """
 
+from pathlib import Path
+
 import pandas as pd
 import yfinance as yf
 
@@ -19,7 +21,7 @@ from config import (
 from indicators import Indicator
 
 
-def download_one(ticker: str) -> pd.DataFrame:
+def download_one(ticker: str, output_dir=DATA_DIR) -> pd.DataFrame:
     """
     ETF 하나 다운로드
     """
@@ -47,10 +49,40 @@ def download_one(ticker: str) -> pd.DataFrame:
 
     # 보조지표 추가
     df = Indicator.add_indicators(df)    
-    filename = DATA_DIR / f"{ticker}.csv"
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    filename = output_dir / f"{ticker}.csv"
     df.to_csv(filename)
     print(f"저장 완료 : {filename}")
     return df
+
+
+def ensure_data_files(tickers, data_dir=DATA_DIR):
+    """Download only ticker CSV files that do not already exist."""
+    data_dir = Path(data_dir)
+    ordered_tickers = tuple(dict.fromkeys(tickers or ()))
+    missing = tuple(
+        ticker
+        for ticker in ordered_tickers
+        if not (data_dir / f"{ticker}.csv").is_file()
+    )
+    if not missing:
+        return ()
+
+    print(f"누락된 시장 데이터 자동 다운로드: {', '.join(missing)}")
+    failures = []
+    for ticker in missing:
+        try:
+            download_one(ticker, output_dir=data_dir)
+        except Exception as error:
+            failures.append((ticker, error))
+
+    if failures:
+        detail = "; ".join(
+            f"{ticker}: {error}" for ticker, error in failures
+        )
+        raise RuntimeError(f"시장 데이터 자동 다운로드 실패: {detail}")
+    return missing
 
 
 def main():

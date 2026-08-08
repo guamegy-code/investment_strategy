@@ -71,7 +71,7 @@ assert target.get("BND", 0.0) + target.get("BIL", 0.0) >= 0.30
 기본 다운로드 대상과 기간은 `src/config.py`에서 관리합니다.
 
 ```python
-TICKERS = ["QQQ", "BND", "GLD", "BIL", "QLD"]
+TICKERS = ["QQQ", "BND", "GLD", "BIL", "QLD", "SPY"]
 FX_RATE_TICKERS = ["KRW=X"]
 START_DATE = "2012-01-01"
 ```
@@ -182,6 +182,12 @@ class MyPensionProductStrategy(RetirementAllocationStrategy):
 
 ```powershell
 uv run python src/main.py
+```
+
+`main.py`는 활성 전략의 `required_tickers`와 `FX_RATE_TICKERS`를 모아 필요한 CSV 파일을 먼저 확인합니다. `data/{ticker}.csv`가 없으면 해당 티커만 Yahoo Finance에서 자동 다운로드하며, 이미 존재하는 CSV는 갱신하거나 덮어쓰지 않습니다. 누락 자료를 받을 때는 인터넷 연결이 필요합니다. 전체 CSV를 강제로 갱신하려면 다음 명령을 사용합니다.
+
+```powershell
+uv run python src/downloader.py
 ```
 
 기본 실행 조건은 `src/config.py`에서 관리합니다.

@@ -4,7 +4,8 @@ import pandas as pd
 
 from attribution import RetirementAllocationAttribution
 from chart import draw_chart
-from config import END_DATE, RESULT_DIR, START_DATE
+from config import END_DATE, FX_RATE_TICKERS, RESULT_DIR, START_DATE
+from downloader import ensure_data_files
 from pension_strategies import (
     KodexNasdaqAllocationStrategy,
     KoActNasdaqAllocationStrategy,
@@ -97,8 +98,17 @@ def build_runner():
     return runner
 
 
+def ensure_runner_data(runner):
+    """Download missing strategy and exchange-rate CSV files."""
+    required_tickers = tuple(dict.fromkeys(
+        (*(runner.tickers or ()), *FX_RATE_TICKERS)
+    ))
+    return ensure_data_files(required_tickers, data_dir=runner.data_dir)
+
+
 def main():
     runner = build_runner()
+    ensure_runner_data(runner)
     results = runner.run()
     summary = runner.summary()
     displayed_period = runner.backtest_period()

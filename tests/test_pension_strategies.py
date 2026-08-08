@@ -1,12 +1,13 @@
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from main import build_runner
-from config import END_DATE, START_DATE
+from main import build_runner, ensure_runner_data
+from config import END_DATE, FX_RATE_TICKERS, START_DATE
 from pension_strategies import (
     KodexNasdaqAllocationStrategy,
     KoActNasdaqAllocationStrategy,
@@ -162,6 +163,21 @@ class RetirementStrategyTests(unittest.TestCase):
         self.assertEqual(
             runner.backtest_options,
             {"start_date": START_DATE, "end_date": END_DATE},
+        )
+
+    def test_main_downloads_only_through_the_runner_data_preparation(self):
+        runner = build_runner()
+        with patch(
+            "main.ensure_data_files", return_value=("QQQ",)
+        ) as ensure:
+            downloaded = ensure_runner_data(runner)
+
+        self.assertEqual(downloaded, ("QQQ",))
+        expected_tickers = tuple(dict.fromkeys(
+            (*runner.tickers, *FX_RATE_TICKERS)
+        ))
+        ensure.assert_called_once_with(
+            expected_tickers, data_dir=runner.data_dir
         )
 
     def test_vxus_substitution_respects_combined_risk_cap(self):
