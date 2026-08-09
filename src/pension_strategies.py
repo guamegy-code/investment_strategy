@@ -1,6 +1,8 @@
 """기준 지수를 실제 퇴직연금 상품으로 변환하는 전략을 정의한다."""
 
-from strategy import RetirementAllocationStrategy, VXUSSubstitutionStrategy
+from experimental_strategies import (
+    RetirementAllocationProfitBandVXUSStrategy,
+)
 
 
 DEFAULT_RETIREMENT_PRODUCTS = {
@@ -10,8 +12,10 @@ DEFAULT_RETIREMENT_PRODUCTS = {
 }
 
 
-class SingleProductAllocationStrategy(RetirementAllocationStrategy):
-    """QQQ 위험자산군을 하나의 실제 상품으로 변환한다."""
+class SingleProductAllocationStrategy(
+    RetirementAllocationProfitBandVXUSStrategy
+):
+    """QQQ 상품 매핑에 ProfitBand와 VXUS 대체를 적용한다."""
 
     DEFAULT_RISK_ASSET = None
     FX_RATE_TICKER = "KRW=X"
@@ -63,9 +67,9 @@ class KoActNasdaqAllocationStrategy(
 
 
 class NasdaqProductMixAllocationStrategy(
-    RetirementAllocationStrategy
+    RetirementAllocationProfitBandVXUSStrategy
 ):
-    """위험자산군을 KODEX 50%, TIME 30%, KoAct 20%로 구성한다."""
+    """나스닥 상품 혼합에 ProfitBand와 VXUS 대체를 적용한다."""
 
     PRODUCT_WEIGHTS = {"KODEX": 0.50, "TIME": 0.30, "KOACT": 0.20}
     FX_RATE_TICKER = "KRW=X"

@@ -19,7 +19,7 @@ from performance import Performance
 from runner import Runner
 from strategy import (
     AllocationState,
-    RetirementAllocationStrategy,
+    RetirementAllocationLegacyStrategy,
     STATIC_70_BND10_BIL10_GLD10,
 )
 
@@ -44,7 +44,7 @@ def _file_sha256(path):
 
 
 def current_parameters():
-    strategy = RetirementAllocationStrategy()
+    strategy = RetirementAllocationLegacyStrategy()
     state_weights = {
         state.value: [
             strategy.STATE_RISK_WEIGHTS[state],
@@ -86,7 +86,7 @@ def verify_lock():
 
 def _run_locked_pair():
     runner = Runner(data_dir=EXTENDED_DATA_DIR, tickers=ASSETS)
-    runner.add_strategy(RetirementAllocationStrategy())
+    runner.add_strategy(RetirementAllocationLegacyStrategy())
     runner.add_strategy(STATIC_70_BND10_BIL10_GLD10())
     return runner.run()
 
@@ -134,7 +134,7 @@ def annual_retrospective_validation(results):
         name = result["strategy"].__class__.__name__
         returns = result["history"]["Portfolio"].pct_change().dropna()
         annual[name] = (1.0 + returns).groupby(returns.index.year).prod() - 1.0
-    dynamic_name = "RetirementAllocationStrategy"
+    dynamic_name = "RetirementAllocationLegacyStrategy"
     benchmark_name = "STATIC_70_BND10_BIL10_GLD10"
     frame = pd.concat([
         annual[dynamic_name].rename("DynamicReturn"),

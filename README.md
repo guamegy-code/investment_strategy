@@ -75,46 +75,8 @@ uv run python src/main.py
 
 구체적인 인터페이스, 데이터 준비, 상품 매핑, 테스트와 실행 방법은
 [개발 방법 문서](docs/development.md)를 참고하세요. 전체 클래스 관계와 현재 성과는
-[전략 클래스 문서](docs/strategy.md)에서 확인할 수 있습니다.
-
-## 선택적 리밸런싱 퇴직연금 전략
-
-`RetirementAllocationSelectiveRebalanceStrategy`는 기존
-`RetirementAllocationStrategy`의 상태 판단과 목표 비중을 그대로 사용합니다.
-`CAUTION→BULL` 전환에서 목표와 안전자산이 같고 실제 비중이 5%p 밴드 안이면
-상태만 갱신하고 주문을 생략합니다. 밴드 이탈, 안전자산 교체 및
-`BULL→CAUTION` 전환 주문은 기존대로 실행합니다.
-
-2012-01-03~2026-07-31 검증에서 부모 전략 대비 거래 수는 711건에서 371건으로
-줄었고 CAGR은 14.47%에서 14.55%, MDD는 -23.29%에서 -23.26%로 변했습니다.
-상세 규칙과 롤링 검증은
-[퇴직연금 전략 문서](docs/strategies/retirement-allocation.md#retirementallocationselectiverebalancestrategy)에
+[전략 클래스 문서](docs/strategy.md)에서 확인할 수 있습니다. 퇴직연금 전략의 상태,
+전이, 배분과 리밸런싱 규칙은
+[퇴직연금 전략 문서](docs/strategies/retirement-allocation.md), 확장학습 전략의 계산식과
+실행 규칙은 [확장학습 전략 문서](docs/strategies/expanding-risk-forecast.md)에
 정리되어 있습니다.
-
-같은 주문 생략 규칙을 안전자산 혼합과 VXUS 대체에 각각 결합한
-`RetirementAllocationSelectiveSafeBlendStrategy`와
-`RetirementAllocationSelectiveVXUSStrategy`도 제공합니다. 2026-07-31까지의
-동일 조건에서 두 전략 모두 각 직접 부모보다 CAGR, MDD와 Sharpe가 개선됐으며,
-선택적 VXUS 전략은 CAGR 14.98%, MDD -23.14%, Sharpe 0.861을 기록했습니다.
-
-VXUS 대신 SPY를 위험자산 여유분에 편입하는
-`RetirementAllocationSelectiveSPYStrategy`도 제공합니다. SPY는 안전자산이
-아니며 QQQ와 합산해 목표 위험비중 70%를 넘지 않습니다. 동일 기간 성과는 CAGR
-14.81%, MDD -23.62%, Sharpe 0.850으로 선택적 VXUS 전략보다 낮았습니다.
-
-## 확장학습 연속위험 전략
-
-`EXPANDING_RISK_FORECAST_30_70`은 향후 21거래일의 하방변동성과 최대 경로손실을
-월 1회 예측하여 QQQ 목표 비중을 30~70% 사이에서 연속적으로 조절합니다. 나머지
-비중은 BND와 BIL에 절반씩 배분합니다.
-
-- 완전히 확정된 과거 21거래일 경로만 학습하므로 미래 정보 누수를 사용하지 않습니다.
-- 최소 60개의 월별 학습 표본이 쌓이기 전에는 정적 70/30 목표를 유지합니다.
-- 목표에서 5%p 이상 벗어난 경우에만 3거래일에 걸쳐 리밸런싱합니다.
-- 목표 위험자산 비중의 상한은 70%입니다. 가격 변동에 따른 실제 평가비중의 일시적
-  초과까지 강제로 해소하는 일별 캡 전략은 아닙니다.
-- 개발 구간에서는 static 7:3보다 개선됐지만 후속 검증 구간의 CAGR과 Sharpe가
-  낮아졌습니다. 활성 목록에 포함된 연구 전략이며 투자 권유나 검증 완료 전략이 아닙니다.
-
-계산식과 실행 규칙은
-[확장학습 연속위험 전략 문서](docs/strategies/expanding-risk-forecast.md)에 정리되어 있습니다.

@@ -223,7 +223,7 @@ class AllocationState(Enum):
     RECOVERY = "RECOVERY"
 
 
-class RetirementAllocationStrategy(BaseStrategy):
+class RetirementAllocationLegacyStrategy(BaseStrategy):
     """퇴직연금 위험자산 한도를 지키는 동적 자산배분 전략이다."""
 
     MAX_RISK_WEIGHT = 0.70
@@ -463,10 +463,10 @@ class RetirementAllocationStrategy(BaseStrategy):
         )
 
 
-class RetirementAllocationSelectiveRebalanceStrategy(
-    RetirementAllocationStrategy
+class RetirementAllocationStrategy(
+    RetirementAllocationLegacyStrategy
 ):
-    """회복 상태 전환과 불필요한 동일 목표 주문을 분리한 전략이다.
+    """불필요한 동일 목표 주문을 생략하는 기본 퇴직연금 전략이다.
 
     CAUTION에서 BULL로 전환할 때 목표 비중과 안전자산이 그대로이고 실제
     비중이 5% 밴드 안이면 상태만 갱신한다. 밴드 이탈 또는 안전자산 교체가
@@ -503,6 +503,12 @@ class RetirementAllocationSelectiveRebalanceStrategy(
             self._execution_days(self.state),
             "STATE_ONLY_CAUTION->BULL",
         )
+
+
+class RetirementAllocationSelectiveRebalanceStrategy(
+    RetirementAllocationStrategy
+):
+    """이전 선택적 리밸런싱 클래스명을 위한 호환 래퍼다."""
 
 
 class _SafeBlendMixin:
@@ -566,18 +572,39 @@ class _SafeBlendMixin:
         return target
 
 
+class _DefensiveSafeBlendMixin(_SafeBlendMixin):
+    """BND/BIL 혼합을 BEAR와 RECOVERY 목표에만 적용한다."""
+
+    def _select_safe_asset(self, market):
+        # 혼합 비중은 월별로 계산하되, 상승 국면의 단일 안전자산 선택은
+        # 기존 버퍼 규칙을 그대로 사용한다.
+        _SafeBlendMixin._select_safe_asset(self, market)
+        return super(_SafeBlendMixin, self)._select_safe_asset(market)
+
+    def _index_target_for_state(self):
+        if self.state in (AllocationState.BEAR, AllocationState.RECOVERY):
+            return super()._index_target_for_state()
+        return super(_SafeBlendMixin, self)._index_target_for_state()
+
+
 class SafeBlendAllocationStrategy(
+    _DefensiveSafeBlendMixin,
+    RetirementAllocationLegacyStrategy,
+):
+    """BEAR/RECOVERY에서 BND/BIL 모멘텀을 25% 단위로 반영한다."""
+
+
+class RetirementAllocationSafeBlendStrategy(
     _SafeBlendMixin,
     RetirementAllocationStrategy,
 ):
-    """BND/BIL 모멘텀을 25% 단위로 반영하는 자산배분 전략이다."""
+    """선택적 상태 주문 생략과 BND/BIL 혼합을 결합한 전략이다."""
 
 
 class RetirementAllocationSelectiveSafeBlendStrategy(
-    _SafeBlendMixin,
-    RetirementAllocationSelectiveRebalanceStrategy,
+    RetirementAllocationSafeBlendStrategy
 ):
-    """선택적 상태 주문 생략과 BND/BIL 혼합을 결합한 전략이다."""
+    """이전 선택적 SafeBlend 클래스명을 위한 호환 래퍼다."""
 
 
 class _VXUSSubstitutionMixin:
@@ -621,7 +648,7 @@ class _VXUSSubstitutionMixin:
 
 class VXUSSubstitutionStrategy(
     _VXUSSubstitutionMixin,
-    RetirementAllocationStrategy,
+    RetirementAllocationLegacyStrategy,
 ):
     """위험자산 여유 한도만큼 선택된 BND 비중을 VXUS로 대체한다.
 
@@ -630,19 +657,20 @@ class VXUSSubstitutionStrategy(
     """
 
 
-class RetirementAllocationSelectiveVXUSStrategy(
+class RetirementAllocationVXUSStrategy(
     _VXUSSubstitutionMixin,
-    RetirementAllocationSelectiveRebalanceStrategy,
+    _DefensiveSafeBlendMixin,
+    RetirementAllocationStrategy,
 ):
-    """선택적 상태 주문 생략과 VXUS 위험자산 대체를 결합한다.
+    """선택적 주문 생략, 방어 국면 SafeBlend와 VXUS 대체를 결합한다.
 
     VXUS는 QQQ와 합산해 최대 70%인 위험자산이며 BND만 대체한다.
     BIL이 선택된 경우에는 VXUS를 편입하지 않는다.
     """
 
 
-class RetirementAllocationSelectiveSPYStrategy(
-    RetirementAllocationSelectiveVXUSStrategy
+class RetirementAllocationSPYStrategy(
+    RetirementAllocationVXUSStrategy
 ):
     """선택적 VXUS 전략의 대체 위험자산을 SPY로 변경한다.
 
@@ -651,6 +679,19 @@ class RetirementAllocationSelectiveSPYStrategy(
     """
 
     ALTERNATIVE_RISK_ASSET = "SPY"
+
+
+class RetirementAllocationSelectiveVXUSStrategy(
+    RetirementAllocationVXUSStrategy
+):
+    """이전 선택적 VXUS 클래스명을 위한 호환 래퍼다."""
+
+
+class RetirementAllocationSelectiveSPYStrategy(
+    RetirementAllocationSPYStrategy,
+    RetirementAllocationSelectiveVXUSStrategy,
+):
+    """이전 선택적 SPY 클래스명을 위한 호환 래퍼다."""
 
 
 class DownsideTrendOverlayStrategy(BaseStrategy):
@@ -1002,7 +1043,7 @@ class _MarketRegimeObserver:
     """목표 비중을 바꾸지 않고 퇴직연금 전략의 시장 상태만 추적한다."""
 
     def __init__(self):
-        self.classifier = RetirementAllocationStrategy()
+        self.classifier = RetirementAllocationLegacyStrategy()
 
     def update(self, qqq):
         desired = self.classifier._desired_state(qqq)

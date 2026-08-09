@@ -5,11 +5,14 @@ import math
 from strategy import (
     ASYMMETRIC_TREND_BAND_ADD_DEFENSE2,
     AllocationState,
+    RetirementAllocationLegacyStrategy,
     RetirementAllocationStrategy,
+    _DefensiveSafeBlendMixin,
+    _VXUSSubstitutionMixin,
 )
 
 
-class StagedBearRetirementStrategy(RetirementAllocationStrategy):
+class StagedBearRetirementStrategy(RetirementAllocationLegacyStrategy):
     """Experimental 70% -> 30% -> 0% risk-off implementation.
 
     The first confirmed BEAR transition retains 30% in the risk asset.  It
@@ -76,7 +79,7 @@ class StagedBearRetirementStrategy(RetirementAllocationStrategy):
         return signal
 
 
-class StateOnlyTransitionRetirementStrategy(RetirementAllocationStrategy):
+class StateOnlyTransitionRetirementStrategy(RetirementAllocationLegacyStrategy):
     """Update equal-target BULL/CAUTION states without forcing a trade."""
 
     def __init__(
@@ -127,6 +130,151 @@ class StateOnlyTransitionRetirementStrategy(RetirementAllocationStrategy):
             self._execution_days(self.state),
             f"STATE_ONLY_{previous_state.value}->{self.state.value}",
         )
+
+
+class _UpperRiskBandMixin:
+    """BULL/CAUTION의 QQQ 수익을 설정된 상단까지 방치한다.
+
+    QQQ가 70%를 초과하고 상단 밴드 미만이면 동일 목표 상태 전환과 월간 밴드
+    주문은 생략한다. BND/BIL 교체는 QQQ 초과분을 유지한 채 안전자산 슬리브만
+    이동한다. QQQ가 70% 이하이면 부모의 복원 매수를 유지하고, 80% 이상이나
+    BEAR/RECOVERY 목표 변경에서는 전체 목표 비중을 적용한다.
+    """
+
+    DEFAULT_UPPER_RISK_WEIGHT = 0.80
+
+    def __init__(self, upper_risk_weight=None, *args, **kwargs):
+        self.upper_risk_weight = float(
+            self.DEFAULT_UPPER_RISK_WEIGHT
+            if upper_risk_weight is None
+            else upper_risk_weight
+        )
+        if not self.MAX_RISK_WEIGHT < self.upper_risk_weight < 1.0:
+            raise ValueError(
+                "upper_risk_weight must be above 70% and below 100%"
+            )
+        super().__init__(*args, **kwargs)
+
+    def _current_qqq_weight(self, market, portfolio, target):
+        prices = {ticker: market[ticker]["Close"] for ticker in target}
+        weights = portfolio.weights(prices)
+        return sum(weights.get(ticker, 0.0) for ticker in self.risk_assets)
+
+    def _preserve_profit_target(self, market, portfolio, target):
+        prices = {ticker: market[ticker]["Close"] for ticker in target}
+        weights = portfolio.weights(prices)
+        preserved = target.copy()
+        for ticker in self.risk_assets:
+            preserved[ticker] = weights.get(ticker, 0.0)
+        canonical_safe_weight = (
+            target.get(self.BOND_ASSET, 0.0)
+            + target.get(self.CASH_ASSET, 0.0)
+        )
+        preserved[self.BOND_ASSET] = 0.0
+        preserved[self.CASH_ASSET] = 0.0
+        non_safe_weight = sum(
+            weight
+            for ticker, weight in preserved.items()
+            if ticker not in (self.BOND_ASSET, self.CASH_ASSET)
+        )
+        safe_weight = round(1.0 - non_safe_weight, 10)
+        if canonical_safe_weight > 0.0:
+            bond_share = (
+                target.get(self.BOND_ASSET, 0.0) / canonical_safe_weight
+            )
+            preserved[self.BOND_ASSET] = round(
+                safe_weight * bond_share, 10
+            )
+            preserved[self.CASH_ASSET] = round(
+                safe_weight - preserved[self.BOND_ASSET], 10
+            )
+        else:
+            preserved[self.safe_asset] = safe_weight
+        return preserved
+
+    def evaluate(self, date, market, portfolio):
+        signal = super().evaluate(date, market, portfolio)
+        if self.state not in (AllocationState.BULL, AllocationState.CAUTION):
+            return signal
+
+        canonical_target = signal["target"]
+        qqq_weight = self._current_qqq_weight(
+            market, portfolio, canonical_target
+        )
+        canonical_qqq = sum(
+            canonical_target.get(ticker, 0.0) for ticker in self.risk_assets
+        )
+
+        if qqq_weight >= self.upper_risk_weight:
+            return self._signal(
+                True,
+                canonical_target,
+                self._execution_days(self.state),
+                f"UPPER_QQQ_BAND_{self.upper_risk_weight:.1%}",
+            )
+        if qqq_weight <= canonical_qqq:
+            return signal
+
+        preserved_target = self._preserve_profit_target(
+            market, portfolio, canonical_target
+        )
+        reason = signal.get("reason") or ""
+        if signal["rebalance"] and "SAFE_ROTATION" in reason:
+            return self._signal(
+                True,
+                preserved_target,
+                1,
+                f"{reason}|SAFE_SLEEVE_ONLY_PRESERVE_QQQ",
+            )
+        if signal["rebalance"]:
+            return self._signal(
+                False,
+                preserved_target,
+                self._execution_days(self.state),
+                "STATE_ONLY_PRESERVE_QQQ_PROFIT",
+            )
+        return self._signal(
+            False,
+            preserved_target,
+            self._execution_days(self.state),
+        )
+
+
+class RetirementAllocationProfitBandStrategy(
+    _UpperRiskBandMixin,
+    _DefensiveSafeBlendMixin,
+    RetirementAllocationStrategy,
+):
+    """80% QQQ 상단 밴드와 방어 국면 BND/BIL 혼합을 적용한다."""
+
+
+class RetirementAllocationProfitBandVXUSStrategy(
+    _VXUSSubstitutionMixin,
+    RetirementAllocationProfitBandStrategy,
+):
+    """ProfitBand와 방어 국면 혼합 후 VXUS 대체를 결합한다.
+
+    BULL/CAUTION에서는 부모의 QQQ 상단 밴드를 적용한다. BEAR/RECOVERY에서는
+    BND/BIL을 혼합한 뒤 남은 BND만 VXUS로 대체한다.
+    """
+
+
+class RetirementAllocationSafeSleeveOnlyStrategy(
+    RetirementAllocationProfitBandStrategy
+):
+    """이전 ProfitBand 클래스명을 위한 호환 래퍼다."""
+
+
+class RetirementAllocationSafeSleeveOnlyVXUSStrategy(
+    RetirementAllocationProfitBandVXUSStrategy
+):
+    """이전 ProfitBand VXUS 클래스명을 위한 호환 래퍼다."""
+
+
+class RetirementAllocationAsymmetricProfitBandStrategy(
+    RetirementAllocationProfitBandStrategy
+):
+    """Backward-compatible name for the validated 80% profit band."""
 
 
 class ASYMMETRIC_TREND_BAND_ADD_DEFENSE2_TUNED(

@@ -14,11 +14,8 @@ from pension_strategies import (
 )
 from runner import Runner
 from strategy import (
-    RetirementAllocationSelectiveRebalanceStrategy,
-    RetirementAllocationSelectiveVXUSStrategy,
+    RetirementAllocationVXUSStrategy,
     RetirementAllocationStrategy,
-    SafeBlendAllocationStrategy,
-    VXUSSubstitutionStrategy,
     EXPANDING_RISK_FORECAST_30_70,
     STATIC_RETIREMENT_7030,
     ASYMMETRIC_TREND_BAND_ADD_DEFENSE2,
@@ -26,6 +23,8 @@ from strategy import (
 
 from experimental_strategies import (
     ASYMMETRIC_TREND_BAND_ADD_DEFENSE2_TUNED,
+    RetirementAllocationProfitBandStrategy,
+    RetirementAllocationProfitBandVXUSStrategy,
 )
 
 
@@ -67,10 +66,9 @@ def build_runner():
     """Configure the active strategies shown in the application."""
     strategies = (
         RetirementAllocationStrategy(),
-        RetirementAllocationSelectiveRebalanceStrategy(),
-        RetirementAllocationSelectiveVXUSStrategy(),
-        #SafeBlendAllocationStrategy(),
-        VXUSSubstitutionStrategy(),
+        RetirementAllocationVXUSStrategy(),
+        RetirementAllocationProfitBandStrategy(),
+        RetirementAllocationProfitBandVXUSStrategy(),
         #EXPANDING_RISK_FORECAST_30_70(),
         STATIC_RETIREMENT_7030(),
         #NasdaqProductMixAllocationStrategy(),

@@ -8,7 +8,7 @@
   "production_lock_dependency": "validation/oos_strategy_lock.json",
   "selection_note": "Selected retrospectively after comparing BEAR and RECOVERY variants on all data through the cutoff. Only observations on or after the OOS start are forward evidence.",
   "parameters": {
-    "base_strategy": "RetirementAllocationStrategy",
+    "base_strategy": "RetirementAllocationLegacyStrategy",
     "bear_entry_rule": "UNCHANGED_FROM_PRODUCTION",
     "recovery_entry_score": 4,
     "recovery_close_above_ema20": true,
@@ -26,6 +26,6 @@
     "extra_signal_delay_days": 0
   },
   "code_sha256": {
-    "validation/shadow_oos.py": "58f1c0f2da6a9a5ac6362289be91f3666c6907287e726d314b99499f7b6016ac"
+    "validation/shadow_oos.py": "e0cd9fca6ac198a6dcea3a41500eaf769fb1fc365c6555d1f30712c20b1fdb3c"
   }
 }

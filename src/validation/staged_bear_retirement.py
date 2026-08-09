@@ -11,7 +11,7 @@ from backtest import Backtest
 from config import DATA_DIR, END_DATE, RESULT_DIR, START_DATE
 from experimental_strategies import StagedBearRetirementStrategy
 from performance import Performance
-from strategy import RetirementAllocationStrategy, STATIC_RETIREMENT_7030
+from strategy import RetirementAllocationLegacyStrategy, STATIC_RETIREMENT_7030
 
 
 FIXED_WINDOWS = (
@@ -23,7 +23,7 @@ FIXED_WINDOWS = (
     ("POST_COVID", "2020-01-01", END_DATE),
 )
 VARIANTS = (
-    ("RETIREMENT_BASELINE", RetirementAllocationStrategy),
+    ("RETIREMENT_BASELINE", RetirementAllocationLegacyStrategy),
     ("STATIC_7030", STATIC_RETIREMENT_7030),
     ("STAGED_1D", lambda: StagedBearRetirementStrategy(1)),
     ("STAGED_2D", lambda: StagedBearRetirementStrategy(2)),

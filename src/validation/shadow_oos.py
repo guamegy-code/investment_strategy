@@ -18,7 +18,7 @@ from .extended_data import ASSETS, build_extended_data
 from .oos import _future_with_anchor, verify_lock as verify_production_lock
 from performance import Performance
 from runner import Runner
-from strategy import AllocationState, RetirementAllocationStrategy
+from strategy import AllocationState, RetirementAllocationLegacyStrategy
 
 
 LOCK_PATH = PROJECT_ROOT / "validation" / "shadow_strict_recovery_lock.json"
@@ -26,7 +26,7 @@ BASELINE_NAME = "PRODUCTION_BASELINE"
 SHADOW_NAME = "STRICT_RECOVERY_SHADOW"
 
 
-class StrictRecoveryShadowStrategy(RetirementAllocationStrategy):
+class StrictRecoveryShadowStrategy(RetirementAllocationLegacyStrategy):
     """Production strategy with a stricter BEAR-to-RECOVERY transition only."""
 
     RECOVERY_ENTRY_SCORE = 4
@@ -70,7 +70,7 @@ def current_shadow_parameters():
             round(1.0 - risk_weight, 10),
         ]
     return {
-        "base_strategy": "RetirementAllocationStrategy",
+        "base_strategy": "RetirementAllocationLegacyStrategy",
         "bear_entry_rule": "UNCHANGED_FROM_PRODUCTION",
         "recovery_entry_score": strategy.RECOVERY_ENTRY_SCORE,
         "recovery_close_above_ema20": True,
@@ -101,7 +101,7 @@ def verify_shadow_lock():
 
 def _run_locked_pair():
     runner = Runner(data_dir=EXTENDED_DATA_DIR, tickers=ASSETS)
-    runner.add_strategy(RetirementAllocationStrategy())
+    runner.add_strategy(RetirementAllocationLegacyStrategy())
     runner.add_strategy(StrictRecoveryShadowStrategy())
     results = runner.run()
     return {

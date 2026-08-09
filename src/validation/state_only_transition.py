@@ -12,7 +12,7 @@ from config import DATA_DIR, END_DATE, RESULT_DIR, START_DATE
 from experimental_strategies import StateOnlyTransitionRetirementStrategy
 from performance import Performance
 from strategy import (
-    RetirementAllocationSelectiveRebalanceStrategy,
+    RetirementAllocationLegacyStrategy,
     RetirementAllocationStrategy,
     STATIC_RETIREMENT_7030,
 )
@@ -27,7 +27,7 @@ FIXED_WINDOWS = (
     ("POST_COVID", "2020-01-01", END_DATE),
 )
 VARIANTS = (
-    ("RETIREMENT_BASELINE", RetirementAllocationStrategy),
+    ("RETIREMENT_BASELINE", RetirementAllocationLegacyStrategy),
     (
         "SUPPRESS_BULL_TO_CAUTION",
         lambda: StateOnlyTransitionRetirementStrategy(
@@ -37,7 +37,7 @@ VARIANTS = (
     ),
     (
         "SUPPRESS_CAUTION_TO_BULL",
-        RetirementAllocationSelectiveRebalanceStrategy,
+        RetirementAllocationStrategy,
     ),
     ("SUPPRESS_BOTH", StateOnlyTransitionRetirementStrategy),
     ("STATIC_7030", STATIC_RETIREMENT_7030),

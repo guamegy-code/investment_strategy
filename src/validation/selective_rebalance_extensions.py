@@ -11,10 +11,10 @@ from backtest import Backtest
 from config import DATA_DIR, RESULT_DIR, START_DATE
 from performance import Performance
 from strategy import (
-    RetirementAllocationSelectiveRebalanceStrategy,
-    RetirementAllocationSelectiveSafeBlendStrategy,
-    RetirementAllocationSelectiveSPYStrategy,
-    RetirementAllocationSelectiveVXUSStrategy,
+    RetirementAllocationLegacyStrategy,
+    RetirementAllocationSafeBlendStrategy,
+    RetirementAllocationSPYStrategy,
+    RetirementAllocationVXUSStrategy,
     RetirementAllocationStrategy,
     SafeBlendAllocationStrategy,
     STATIC_RETIREMENT_7030,
@@ -32,13 +32,13 @@ FIXED_WINDOWS = (
     ("POST_COVID", "2020-01-01", COMMON_END_DATE),
 )
 VARIANTS = (
-    ("RETIREMENT", RetirementAllocationStrategy),
-    ("SELECTIVE_RETIREMENT", RetirementAllocationSelectiveRebalanceStrategy),
+    ("RETIREMENT", RetirementAllocationLegacyStrategy),
+    ("SELECTIVE_RETIREMENT", RetirementAllocationStrategy),
     ("SAFE_BLEND", SafeBlendAllocationStrategy),
-    ("SELECTIVE_SAFE_BLEND", RetirementAllocationSelectiveSafeBlendStrategy),
+    ("SELECTIVE_SAFE_BLEND", RetirementAllocationSafeBlendStrategy),
     ("VXUS", VXUSSubstitutionStrategy),
-    ("SELECTIVE_VXUS", RetirementAllocationSelectiveVXUSStrategy),
-    ("SELECTIVE_SPY", RetirementAllocationSelectiveSPYStrategy),
+    ("SELECTIVE_VXUS", RetirementAllocationVXUSStrategy),
+    ("SELECTIVE_SPY", RetirementAllocationSPYStrategy),
     ("STATIC_7030", STATIC_RETIREMENT_7030),
 )
 PAIRS = (
