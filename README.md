@@ -75,8 +75,4 @@ uv run python src/main.py
 
 구체적인 인터페이스, 데이터 준비, 상품 매핑, 테스트와 실행 방법은
 [개발 방법 문서](docs/development.md)를 참고하세요. 전체 클래스 관계와 현재 성과는
-[전략 클래스 문서](docs/strategy.md)에서 확인할 수 있습니다. 퇴직연금 전략의 상태,
-전이, 배분과 리밸런싱 규칙은
-[퇴직연금 전략 문서](docs/strategies/retirement-allocation.md), 확장학습 전략의 계산식과
-실행 규칙은 [확장학습 전략 문서](docs/strategies/expanding-risk-forecast.md)에
-정리되어 있습니다.
+[전략 클래스 문서](docs/strategy.md)에서 확인할 수 있습니다.

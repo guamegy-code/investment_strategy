@@ -7,6 +7,7 @@ from unicodedata import east_asian_width
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from matplotlib.collections import LineCollection, PolyCollection
+from matplotlib.path import Path
 from matplotlib.patches import Patch, Rectangle
 from matplotlib.ticker import NullFormatter, NullLocator
 from matplotlib.widgets import CheckButtons, TextBox
@@ -23,6 +24,11 @@ CONTROL_TITLE_X = 0.0
 CONTROL_TITLE_Y = 1.0
 CONTROL_TITLE_BOX_GAP_INCHES = 0.1
 CHECKBOX_INCHES = 0.13
+CHECKBOX_SELECTED_MARK = "✓"
+CHECKBOX_CHECK_PATH = Path(
+    [(-0.50, -0.05), (-0.10, -0.45), (0.55, 0.50)],
+    [Path.MOVETO, Path.LINETO, Path.LINETO],
+)
 CONTROL_WIDTH_INCHES = 4.2
 CONTROL_RIGHT_MARGIN_INCHES = 0.3
 STRATEGY_SECTION_TOP_INCHES = 0.63
@@ -1450,8 +1456,17 @@ def draw_chart(
         box = Rectangle((x - box_width / 2, y - box_height / 2), box_width, box_height, transform=axis.transAxes,
                         facecolor="#FFFFFF", edgecolor="#1D1D1F", linewidth=1.0)
         axis.add_patch(box)
-        mark = axis.text(x, y, "×", transform=axis.transAxes, ha="center", va="center",
-                         fontsize=CONTROL_FONT_SIZE, color="#1D1D1F")
+        mark = axis.text(
+            x,
+            y,
+            CHECKBOX_SELECTED_MARK,
+            transform=axis.transAxes,
+            ha="center",
+            va="center",
+            fontsize=CONTROL_FONT_SIZE + 1,
+            fontweight="bold",
+            color="#1D1D1F",
+        )
         return box, mark
 
     def control_position(bottom, height, width=CONTROL_WIDTH_INCHES):
@@ -1820,7 +1835,12 @@ def draw_chart(
                         if panel == "tickers"
                         else row in selection.visible_rows
                     )
-                    widget = CheckButtons(checkbox_axis, [row], [selected])
+                    widget = CheckButtons(
+                        checkbox_axis,
+                        [row],
+                        [selected],
+                        check_props={"paths": [CHECKBOX_CHECK_PATH]},
+                    )
                     for label in widget.labels:
                         label.set_fontsize(CONTROL_FONT_SIZE)
                     widget.on_clicked(lambda item, group=panel: toggle_selector_selection(group, item))

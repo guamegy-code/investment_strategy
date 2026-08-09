@@ -127,8 +127,8 @@ RECOVERY
 
 | 전략 | CAGR | MDD | Sharpe | 거래 수 | 리밸런싱 수 |
 |---|---:|---:|---:|---:|---:|
-| 부모 전략 | 14.47% | -23.29% | 0.832 | 711 | 129 |
-| 선택적 리밸런싱 | 14.55% | -23.26% | 0.836 | 371 | 95 |
+| `RetirementAllocationLegacyStrategy` | 14.47% | -23.29% | 0.832 | 711 | 129 |
+| `RetirementAllocationStrategy` | 14.55% | -23.26% | 0.836 | 371 | 95 |
 
 3년 롤링 13개 구간에서 CAGR은 12개, MDD는 5개, Sharpe는 9개 구간에서 부모보다
 높았습니다. CAGR과 MDD가 동시에 개선된 구간은 5개였습니다. 전체기간 개선 폭은
@@ -238,13 +238,20 @@ RetirementAllocationStrategy가 상태별 기본 목표 계산
   BND/BIL 비중을 0/25/50/75/100% 단위로 나눕니다. BULL/CAUTION의 안전자산
   선택에는 기존 버퍼 규칙을 유지합니다.
 
-2012-01-03~2026-07-31 동일 조건의 회고적 결과는 CAGR 15.15%, MDD -23.64%,
-Sharpe 0.846, 거래 271건, 리밸런싱 67회입니다. 방어 혼합을 넣기 전의 단순
-ProfitBand 결과보다 CAGR은 약 0.03%p, MDD는 약 0.39%p, Sharpe는 약 0.0015
-개선됐고 거래는 6건, 리밸런싱은 2회 늘었습니다. 기본
-`RetirementAllocationStrategy`보다 CAGR은 약 0.61%p 높고 MDD는 약 0.38%p
-악화됐습니다. 2024년 이후에는 방어 상태가 발생하지 않아 단순 ProfitBand와
-같은 CAGR 18.79%, MDD -17.39%입니다.
+### 성과 비교
+
+2012-01-03~2026-07-31 동일 조건의 회고적 결과입니다.
+
+| 비교 전략 | CAGR | MDD | Sharpe | 거래 수 | 리밸런싱 수 |
+|---|---:|---:|---:|---:|---:|
+| `RetirementAllocationStrategy` | 14.55% | -23.26% | 0.836 | 371 | 95 |
+| 상단 밴드만 적용한 이전 후보 | 15.12% | -24.02% | 0.845 | 265 | 65 |
+| `RetirementAllocationProfitBandStrategy` | 15.15% | -23.64% | 0.846 | 271 | 67 |
+
+기본 전략보다 CAGR은 약 0.61%p 높지만 MDD는 약 0.38%p 확대됐습니다. 방어 혼합은
+상단 밴드만 적용한 후보보다 CAGR과 MDD를 모두 개선한 대신 거래 6건과 리밸런싱
+2회를 추가했습니다. 2024년 이후에는 방어 상태가 발생하지 않아 이전 후보와 같은
+CAGR 18.79%, MDD -17.39%입니다.
 
 ## RetirementAllocationProfitBandVXUSStrategy
 
@@ -262,12 +269,19 @@ BEAR/RECOVERY에서는 먼저 BND/BIL을 혼합하고, 그중 남은 BND 일부�
 - BEAR/RECOVERY에서는 방어 혼합 후 남아 있는 BND에만 기존 상태의 VXUS 목표를
   적용하며 BIL은 대체하지 않습니다.
 
-2012-01-03~2026-07-31 동일 조건의 회고적 결과는 CAGR 15.63%, MDD -23.20%,
-Sharpe 0.872, 거래 297건, 리밸런싱 67회입니다. 방어 혼합을 넣기 전의 단순
-ProfitBand+VXUS 결과보다 CAGR은 약 0.06%p, MDD는 약 0.71%p, Sharpe는 약
-0.0030 개선됐고 거래는 7건, 리밸런싱은 2회 늘었습니다. 직접 비교 대상인
-`RetirementAllocationVXUSStrategy`보다 CAGR은 약 0.58%p 높고 MDD는
-약 0.78%p 악화됐습니다.
+### 성과 비교
+
+2012-01-03~2026-07-31 동일 조건의 회고적 결과입니다.
+
+| 비교 전략 | CAGR | MDD | Sharpe | 거래 수 | 리밸런싱 수 |
+|---|---:|---:|---:|---:|---:|
+| `RetirementAllocationVXUSStrategy` | 15.05% | -22.42% | 0.864 | 403 | 97 |
+| 상단 밴드+VXUS 이전 후보 | 15.56% | -23.91% | 0.869 | 290 | 65 |
+| `RetirementAllocationProfitBandVXUSStrategy` | 15.63% | -23.20% | 0.872 | 297 | 67 |
+
+VXUS 전략보다 CAGR은 약 0.58%p 높지만 MDD는 약 0.78%p 확대됐습니다. 방어 혼합은
+이전 상단 밴드+VXUS 후보보다 CAGR, MDD와 Sharpe를 모두 개선한 대신 거래 7건과
+리밸런싱 2회를 추가했습니다.
 
 이전 이름인 `RetirementAllocationSafeSleeveOnlyStrategy`와
 `RetirementAllocationSafeSleeveOnlyVXUSStrategy`는 외부 import 호환을 위한
@@ -282,12 +296,17 @@ BND/BIL 혼합 비중 산정은 `SafeBlendAllocationStrategy`와 같고, 혼합 
 위험을 줄이는 것이 목적이지만 모든 상태에서 혼합을 다시 계산하므로 리밸런싱 횟수가
 늘 수 있습니다.
 
-2012-01-03~2026-07-31 결과는 CAGR 14.53%, MDD -22.76%, Sharpe 0.837,
-거래 574건, 리밸런싱 157회입니다. 직접 비교 대상인 `SafeBlendAllocationStrategy`
-대비 CAGR은 약 0.03%p, MDD는 0.13%p, Sharpe는 0.0031 개선됐고 거래는
-143건 감소했지만 리밸런싱은 26회 증가했습니다. 3년 롤링 13개 구간 중 CAGR
-4개, MDD 7개, Sharpe 7개 구간에서 부모보다 높았습니다. 이 전략에도 혼합을
-방어 국면으로 제한할지는 별도 후보로 검증합니다.
+### 성과 비교
+
+| 비교 전략 | CAGR | MDD | Sharpe | 거래 수 | 리밸런싱 수 |
+|---|---:|---:|---:|---:|---:|
+| `SafeBlendAllocationStrategy` | 14.50% | -22.90% | 0.834 | 717 | 131 |
+| `RetirementAllocationSafeBlendStrategy` | 14.53% | -22.76% | 0.837 | 574 | 157 |
+
+직접 비교 전략보다 CAGR, MDD와 Sharpe가 소폭 개선되고 거래는 143건 감소했지만,
+혼합 목표 변경 때문에 리밸런싱은 26회 증가했습니다. 3년 롤링 13개 구간에서는
+CAGR 4개, MDD 7개, Sharpe 7개 구간에서 더 높았습니다. 혼합을 방어 국면으로
+제한할지는 별도 후보로 검증합니다.
 
 ## RetirementAllocationVXUSStrategy
 
@@ -300,12 +319,17 @@ BND/BIL 혼합 비중 산정은 `SafeBlendAllocationStrategy`와 같고, 혼합 
 훼손하지 않는 것이 변경 목적입니다. 기대수익과 분산 기회가 늘지만 주식시장 동반
 하락 위험과 추가 거래가 발생합니다.
 
-2012-01-03~2026-07-31 결과는 CAGR 15.05%, MDD -22.42%, Sharpe 0.864,
-거래 403건, 리밸런싱 97회입니다. 방어 국면 혼합 전의 동일 전략보다 CAGR은
-약 0.06%p, MDD는 약 0.72%p, Sharpe는 약 0.0030 개선됐고 거래는 7건,
-리밸런싱은 2회 증가했습니다. 차이가 발생한 3년 롤링 6개 구간에서는 CAGR이
-3개 구간에서 높고 3개에서 낮았지만 전체 평균 CAGR, MDD와 Sharpe는 모두
-개선됐습니다. 2024년 이후 결과는 이전 방식과 동일합니다.
+### 성과 비교
+
+| 비교 전략 | CAGR | MDD | Sharpe | 거래 수 | 리밸런싱 수 |
+|---|---:|---:|---:|---:|---:|
+| 방어 혼합 전 VXUS 후보 | 14.98% | -23.14% | 0.861 | 396 | 95 |
+| `RetirementAllocationVXUSStrategy` | 15.05% | -22.42% | 0.864 | 403 | 97 |
+
+방어 혼합으로 CAGR은 약 0.06%p, MDD는 약 0.72%p, Sharpe는 약 0.003 개선됐고
+거래 7건과 리밸런싱 2회가 늘었습니다. 차이가 발생한 3년 롤링 6개 구간에서는
+CAGR이 3개 구간에서 높고 3개에서 낮았지만 전체 평균 세 지표는 개선됐습니다.
+2024년 이후 결과는 이전 방식과 동일합니다.
 
 ## RetirementAllocationSPYStrategy
 
@@ -316,10 +340,15 @@ QQQ와 합산해 최대 70%인 위험자산이며 혼합 후 남은 BND만 대�
 지역 분산 대신 미국 대형주 노출을 사용했을 때의 효과를 비교하는 것이 변경
 목적이며, QQQ와의 상관이 더 높아 분산 효과가 약해질 수 있습니다.
 
-2012-01-03~2026-07-31 결과는 CAGR 14.90%, MDD -22.60%, Sharpe 0.854,
-거래 402건, 리밸런싱 97회입니다. 같은 방어 혼합과 선택적 주문 규칙을 사용하는
-VXUS 버전보다 CAGR은 약 0.14%p, MDD는 약 0.18%p, Sharpe는 약 0.0100
-낮으므로 SPY는 대체 연구 후보로 유지하고 우선 전략으로 선택하지 않습니다.
+### 부모 대비 성과
+
+| 전략 | 대체 위험자산 | CAGR | MDD | Sharpe | 거래 수 | 리밸런싱 수 |
+|---|---|---:|---:|---:|---:|---:|
+| `RetirementAllocationVXUSStrategy` | VXUS | 15.05% | -22.42% | 0.864 | 403 | 97 |
+| `RetirementAllocationSPYStrategy` | SPY | 14.90% | -22.60% | 0.854 | 402 | 97 |
+
+부모보다 CAGR은 약 0.14%p, MDD는 약 0.18%p, Sharpe는 약 0.010 낮았습니다.
+따라서 SPY는 대체 연구 후보로 유지하고 우선 전략으로 선택하지 않습니다.
 
 이전 이름인 `RetirementAllocationSelectiveSafeBlendStrategy`,
 `RetirementAllocationSelectiveVXUSStrategy`,
@@ -337,12 +366,18 @@ VXUS 버전보다 CAGR은 약 0.14%p, MDD는 약 0.18%p, Sharpe는 약 0.0100
 사용합니다. `BEAR`와 `RECOVERY`에서만 BND와 BIL의 ROC40 차이에 따라
 안전자산 슬리브를 [공통 Mixin](#공통-mixin)의 25% 단위 비율로 나눕니다.
 
-2012-01-03~2026-07-31 결과는 CAGR 14.50%, MDD -22.90%, Sharpe 0.834,
-거래 717건, 리밸런싱 131회입니다. 모든 상태에 혼합을 적용했던 이전 방식보다
-CAGR은 약 0.03%p 높고 거래는 240건, 리밸런싱은 61회 감소했습니다. MDD는 약
-0.10%p 확대됐지만 직접 부모인 `RetirementAllocationLegacyStrategy`보다는 약 0.39%p
-낮습니다. 3년 롤링 13개 구간 중 이전 방식보다 CAGR은 10개, Sharpe는 9개
-구간에서 높았습니다.
+### 부모·이전 방식 대비 성과
+
+| 비교 전략 | CAGR | MDD | 거래 수 | 리밸런싱 수 |
+|---|---:|---:|---:|---:|
+| `RetirementAllocationLegacyStrategy` | 14.47% | -23.29% | 711 | 129 |
+| 모든 상태 SafeBlend 이전 방식 | 14.47% | -22.80% | 957 | 192 |
+| `SafeBlendAllocationStrategy` | 14.50% | -22.90% | 717 | 131 |
+
+방어 국면으로 혼합을 제한하면서 이전 방식보다 CAGR은 약 0.03%p 높아지고 거래
+240건과 리밸런싱 61회가 줄었습니다. MDD는 이전 방식보다 약 0.10%p 확대됐지만
+직접 부모보다는 약 0.39%p 개선됐습니다. 3년 롤링 13개 구간 중 이전 방식보다
+CAGR은 10개, Sharpe는 9개 구간에서 높았습니다.
 
 ## VXUSSubstitutionStrategy
 
@@ -363,10 +398,16 @@ VXUS로 대체합니다. QQQ와 VXUS를 합친 위험자산은 최대 70%입니�
 
 BIL이 선택된 경우에는 대체하지 않습니다.
 
-2012-01-03~2026-07-31 결과는 CAGR 14.91%, MDD -23.18%로 부모의 CAGR
-14.47%, MDD -23.29%보다 두 지표가 소폭 개선됐습니다. 다만 선택적 주문 생략과
-방어 국면 SafeBlend가 없는 레거시 비교 전략이므로 현재 기본 확장으로 사용하지
-않습니다.
+### 부모 대비 성과
+
+| 전략 | CAGR | MDD |
+|---|---:|---:|
+| `RetirementAllocationLegacyStrategy` | 14.47% | -23.29% |
+| `VXUSSubstitutionStrategy` | 14.91% | -23.18% |
+
+부모보다 CAGR은 약 0.44%p, MDD는 약 0.11%p 개선됐습니다. 다만 선택적 주문
+생략과 방어 국면 SafeBlend가 없는 레거시 비교 전략이므로 현재 기본 확장으로
+사용하지 않습니다.
 
 ## SingleProductAllocationStrategy
 
@@ -379,6 +420,13 @@ QQQ 상품과 VXUS의 합계는 70%이고 상승 중에는 상단 밴드까지 �
 재사용할 수 있지만 상품 추적오차, 상장 이후의 짧은 검증 기간과 VXUS 직접 거래
 가능 여부를 별도로 고려해야 합니다.
 
+| 항목 | 부모 전략 | `SingleProductAllocationStrategy` |
+|---|---|---|
+| 시장 판단 | QQQ | QQQ로 동일 |
+| QQQ 슬리브 체결 | QQQ | 생성 시 선택한 실제 상품 한 종목 |
+| ProfitBand·SafeBlend·VXUS | 적용 | 동일하게 적용 |
+| 추가 고려사항 | 지수 ETF 자체 성과 | 상품 추적오차·상장일·거래 가능 여부 |
+
 ## 실제 상품 매핑 전략
 
 아래 세 클래스는 `SingleProductAllocationStrategy`에서 상품 ticker만 변경합니다.
@@ -387,16 +435,15 @@ QQQ 상품과 VXUS의 합계는 70%이고 상승 중에는 상단 밴드까지 �
 상품별 운용 방식과 상장일이 다르므로 성과 차이를 전략 규칙의 우열로 해석할 수는
 없습니다.
 
-| 클래스 | QQQ 슬리브의 실제 상품 |
-|---|---|
-| `KodexNasdaqAllocationStrategy` | `379810.KS` |
-| `TimeNasdaqAllocationStrategy` | `426030.KS` |
-| `KoActNasdaqAllocationStrategy` | `0015B0.KS` |
+| 클래스 | QQQ 슬리브 상품 | 검증 기간 | CAGR | MDD |
+|---|---|---|---:|---:|
+| `KodexNasdaqAllocationStrategy` | `379810.KS` | 2021-04-09~2026-07-31 | 17.75% | -18.18% |
+| `TimeNasdaqAllocationStrategy` | `426030.KS` | 2022-05-11~2026-07-31 | 34.07% | -27.23% |
+| `KoActNasdaqAllocationStrategy` | `0015B0.KS` | 2025-02-25~2026-07-31 | 46.31% | -26.11% |
 
 RECOVERY에서는 QQQ 상품 50%, VXUS 20%, 안전자산 30%가 기본 목표입니다.
-2012-01-03~2026-07-31 데이터 중 각 상품 상장일부터 다시 계산한 결과는 KODEX
-CAGR 17.75%·MDD -18.18%, TIME CAGR 34.07%·MDD -27.23%, KoAct CAGR
-46.31%·MDD -26.11%입니다.
+검증 시작일이 서로 다르므로 표의 CAGR과 MDD를 상품 간 우열로 직접 비교해서는
+안 됩니다.
 
 ## NasdaqProductMixAllocationStrategy
 
@@ -406,6 +453,14 @@ QQQ 위험자산 슬리브만 다음 세 상품으로 나눕니다. 단일 상�
 분산하는 것이 변경 목적입니다. 상품별 성과 차이를 평균화할 수 있지만 거래 종목과
 관리 복잡성이 늘고, 가장 성과가 좋은 한 상품에 집중했을 때보다 수익이 낮을 수
 있습니다.
+
+| 항목 | 부모 전략 | `NasdaqProductMixAllocationStrategy` |
+|---|---|---|
+| 시장 판단 | QQQ | QQQ로 동일 |
+| QQQ 슬리브 체결 | QQQ 한 종목 | 국내 나스닥 상품 3종 |
+| 슬리브 내부 비중 | 100% | 50% / 30% / 20% |
+| ProfitBand·SafeBlend·VXUS | 적용 | 동일하게 적용 |
+| 주요 트레이드오프 | 단순한 관리 | 상품 위험 분산, 종목·주문 복잡성 증가 |
 
 | 상품 | 위험자산 슬리브 내 비중 | BULL에서 전체 비중 | RECOVERY에서 전체 비중 |
 |---|---:|---:|---:|

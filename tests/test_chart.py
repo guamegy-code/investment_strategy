@@ -11,6 +11,8 @@ import matplotlib.pyplot as plt
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from chart import (
+    CHECKBOX_CHECK_PATH,
+    CHECKBOX_SELECTED_MARK,
     build_selection,
     chart_tickers,
     chart_values_on_date,
@@ -34,6 +36,13 @@ from chart import (
 
 
 class ChartTickerSelectionTests(unittest.TestCase):
+    def test_selected_checkbox_uses_a_check_mark(self):
+        self.assertEqual(CHECKBOX_SELECTED_MARK, "✓")
+        self.assertEqual(
+            CHECKBOX_CHECK_PATH.vertices.tolist(),
+            [[-0.5, -0.05], [-0.1, -0.45], [0.55, 0.5]],
+        )
+
     def test_strategy_control_label_omits_redundant_suffix(self):
         self.assertEqual(
             strategy_control_label("KoActNasdaqAllocationStrategy"),
