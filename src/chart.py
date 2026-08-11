@@ -652,11 +652,17 @@ def chart_values_on_date(series_by_name, date):
     return values
 
 
-def format_chart_value_popup(date, strategy_values, price_values):
-    """Format strategy and price levels using one aligned name column."""
+
+def format_chart_value_popup(date, strategy_values, price_values, weight_values=None):
+    """Format strategy value, price levels, and current weights using aligned name columns."""
     rows = [f"날짜: {pd.Timestamp(date):%Y-%m-%d}"]
-    names = (*strategy_values, *price_values)
-    name_width = max(map(_display_width, names), default=0)
+    all_names = (
+        *strategy_values, 
+        *price_values, 
+        *(weight_values if weight_values else ())
+    )
+    name_width = max(map(_display_width, all_names), default=0)
+    
     if strategy_values:
         rows.extend(("", "전략"))
         rows.extend(
@@ -669,6 +675,13 @@ def format_chart_value_popup(date, strategy_values, price_values):
             f"{_pad_display(name, name_width)}  {value:,.4f}"
             for name, value in price_values.items()
         )
+    if weight_values:
+        rows.extend(("", "현재 비중"))
+        rows.extend(
+            f"{_pad_display(name, name_width)}  {weight * 100:6.2f}%"
+            for name, weight in weight_values.items()
+        )
+
     return "\n".join(rows)
 
 
@@ -805,9 +818,16 @@ def draw_strategy_lines(price_axis, results, strategy_visibility, state_color_se
             ]
             points = values.reindex(dates).dropna()
             if not points.empty:
+
+   # [추가] 방향별 마커 색상 정의 (한국 스타일: 매수/확대=빨강, 매도/축소=파랑)
+                marker_colors = {
+                    "up": "#FF3B30",   # 애플 스타일 레드
+                    "down": "#007AFF", # 애플 스타일 블루
+                    "same": "#1D1D1F" # "#8E8E93"  # 회색
+                }             
                 markers.append(price_axis.scatter(
                     points.index, points.values, marker=marker, s=60,
-                    color="#1D1D1F", edgecolors="white", linewidths=0.7,
+                    color=marker_colors[direction], edgecolors="white", linewidths=0.7,
                     zorder=3, visible=strategy_visibility[name], picker=5,
                 ))
                 dates_by_marker.append(dates)
@@ -1287,6 +1307,27 @@ def draw_chart(
             displayed_strategies, selected_date
         )
         price_values = chart_values_on_date(displayed_prices, selected_date)
+
+        # ==========================================================
+        # [추가됨] 화면에 표시 중인 전략들의 '현재 비중' 추출 로직
+        # ==========================================================
+        weight_values = {}
+        visible_strategies = list(displayed_strategies.keys())
+        
+        for result in results:
+            name = result["strategy"].__class__.__name__
+            if name in visible_strategies:
+                history = result["history"]
+                if selected_date in history.index and "Weights" in history:
+                    weights = history.at[selected_date, "Weights"]
+                    if isinstance(weights, dict):
+                        # 활성화된 전략이 2개 이상일 때는 헷갈리지 않게 종목명 앞에 [전략명]을 붙여줌
+                        prefix = f"[{name}] " if len(visible_strategies) > 1 else ""
+                        for ticker, weight in weights.items():
+                            if float(weight) > 0.0001:  # 비중이 0인 종목은 깔끔하게 숨김
+                                weight_values[f"{prefix}{ticker}"] = float(weight)
+        # ==========================================================
+
         rebalance_annotation.set_visible(False)
         set_date_guide(value_date_guide, selected_date)
         value_annotation.xy = (mdates.date2num(selected_date), event.ydata)
@@ -1300,9 +1341,12 @@ def draw_chart(
         value_annotation.set_ha("right" if place_left else "left")
         value_annotation.set_va("top" if place_below else "bottom")
         value_annotation.set_multialignment("left")
+        
+        # [수정됨] 팝업 포맷 함수에 weight_values 인자 추가 전달
         value_annotation.set_text(format_chart_value_popup(
-            selected_date, strategy_values, price_values
+            selected_date, strategy_values, price_values, weight_values
         ))
+        
         value_annotation.set_visible(True)
         fig.canvas.draw()
         fit_annotation_inside_axis(value_annotation, price_axis, fig)
