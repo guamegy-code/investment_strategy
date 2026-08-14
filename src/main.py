@@ -1,5 +1,6 @@
 """Run the production strategy and its static benchmarks."""
 
+import argparse
 import pandas as pd
 
 from attribution import RetirementAllocationAttribution
@@ -13,6 +14,8 @@ from pension_strategies import (
     TimeNasdaqAllocationStrategy,
 )
 from runner import Runner
+from strategy_dsl import load_strategy_directory
+from strategy_domain import strategy_display_name
 from strategy import (
     RetirementAllocationVXUSStrategy,
     RetirementAllocationStrategy,
@@ -30,13 +33,13 @@ from experimental_strategies import (
 
 def save_results(results):
     histories = {
-        result["strategy"].__class__.__name__: result["history"]
+        strategy_display_name(result["strategy"]): result["history"]
         for result in results
     }
     benchmark = histories.get("STATIC_70_BND10_BIL10_GLD10")
 
     for result in results:
-        name = result["strategy"].__class__.__name__
+        name = strategy_display_name(result["strategy"])
         result["history"].to_csv(RESULT_DIR / f"{name}_history.csv")
         result["trades"].to_csv(
             RESULT_DIR / f"{name}_trades.csv", index=False
@@ -55,7 +58,7 @@ def save_results(results):
 
     static_results = [
         result for result in results
-        if result["strategy"].__class__.__name__.startswith("STATIC_")
+        if strategy_display_name(result["strategy"]).startswith("STATIC_")
     ]
     pd.DataFrame([result["summary"] for result in static_results]).to_csv(
         RESULT_DIR / "static_benchmark_comparison.csv", index=False
@@ -64,7 +67,7 @@ def save_results(results):
 
 def build_runner():
     """Configure the active strategies shown in the application."""
-    strategies = (
+    python_strategies = (
         RetirementAllocationStrategy(),
         RetirementAllocationVXUSStrategy(),
         RetirementAllocationProfitBandStrategy(),
@@ -78,6 +81,10 @@ def build_runner():
         ASYMMETRIC_TREND_BAND_ADD_DEFENSE2(),
         #ASYMMETRIC_TREND_BAND_ADD_DEFENSE2_TUNED(),
     )
+    declarative_strategies = tuple(
+        load_strategy_directory(RESULT_DIR.parent / "strategies")
+    )
+    strategies = (*python_strategies, *declarative_strategies)
     required_tickers = tuple(dict.fromkeys(
         ticker
         for strategy in strategies
@@ -104,7 +111,21 @@ def ensure_runner_data(runner):
     return ensure_data_files(required_tickers, data_dir=runner.data_dir)
 
 
-def main():
+def parse_args(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--chart-backend",
+        choices=("matplotlib", "dash", "both"),
+        default="matplotlib",
+        help="결과 표시 방식 (기본값: matplotlib). both는 Matplotlib 창을 닫은 뒤 Dash를 시작합니다.",
+    )
+    parser.add_argument("--host", default="127.0.0.1", help="Dash 서버 주소")
+    parser.add_argument("--port", type=int, default=8050, help="Dash 서버 포트")
+    return parser.parse_args(argv)
+
+
+def main(argv=None):
+    args = parse_args(argv)
     runner = build_runner()
     ensure_runner_data(runner)
     results = runner.run()
@@ -116,7 +137,12 @@ def main():
     print("=" * 50)
     print("\n", summary, "\n")
     save_results(results)
-    draw_chart(results)
+    if args.chart_backend in {"matplotlib", "both"}:
+        draw_chart(results)
+    if args.chart_backend in {"dash", "both"}:
+        from research_web import run_research_web
+
+        run_research_web(results, host=args.host, port=args.port)
 
 
 if __name__ == "__main__":

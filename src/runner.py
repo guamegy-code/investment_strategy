@@ -8,6 +8,7 @@ import pandas as pd
 from backtest import Backtest
 from config import DATA_DIR
 from performance import Performance
+from strategy_domain import strategy_display_name
 
 
 class Runner:
@@ -57,7 +58,7 @@ class Runner:
             history, trades, rebalances = backtest.run_all()
             performance = Performance(history)
             summary = performance.summary()
-            summary["Strategy"] = strategy.__class__.__name__
+            summary["Strategy"] = strategy_display_name(strategy)
             summary["StartDate"] = history.index.min()
             summary["EndDate"] = history.index.max()
 

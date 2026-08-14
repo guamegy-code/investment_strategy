@@ -15,6 +15,14 @@ import numpy as np
 import pandas as pd
 
 from config import DATA_DIR, FIGURE_SIZE, RESULT_DIR, SAVE_FIGURE, SHOW_CHART, TICKERS
+from indicator_catalog import (
+    DETAIL_ROWS,
+    INDEXED_INDICATORS,
+    INDICATORS,
+    PANEL_BY_INDICATOR,
+    PANEL_ORDER,
+)
+from strategy_domain import strategy_display_name
 APPLE_COLORS = ["#007AFF", "#FF9500", "#34C759", "#AF52DE", "#FF2D55", "#5AC8FA"]
 LINE_STYLES = ["-", "--", ":", "-."]
 ROW_LINE_STYLES = {"MACD": "-", "MACD_SIGNAL": "--"}
@@ -76,28 +84,6 @@ ALLOCATION_DISPLAY_ORDER = ("QQQ", "BND", "GLD", "BIL", "QLD", "TQQQ")
 DEFAULT_RISK_ASSETS = ("QQQ", "QLD", "TQQQ")
 RISK_WEIGHT_TOLERANCE = 1e-6
 
-INDICATORS = {
-    "Price": ["Close"],
-    "MA": ["MA20", "MA55", "MA120", "MA200"],
-    "EMA": ["EMA20", "EMA55", "EMA120", "EMA200"],
-    "RSI": ["RSI14"],
-    "Disparity": ["DISPARITY60"],
-    "MACD": ["MACD", "MACD_SIGNAL", "MACD_HIST"],
-    "Stochastic": ["STOCH_K", "STOCH_D"],
-    "ROC": ["ROC252"],
-    "TR": ["TR"],
-    "ATR": ["ATR", "ATR60"],
-    "Bollinger": ["BB_UPPER", "BB_MIDDLE", "BB_LOWER"],
-    "Volatility": ["VOL60"],
-    "MDD": ["MDD252"],
-}
-INDEXED_INDICATORS = {"Price", "MA", "EMA", "Bollinger"}
-PANEL_BY_INDICATOR = {
-    **{name: "price" for name in ("Price", "MA", "EMA", "Bollinger")},
-    **{name: "oscillator" for name in ("RSI", "Disparity", "MACD", "Stochastic")},
-    **{name: "risk" for name in ("ROC", "TR", "ATR", "Volatility", "MDD")},
-}
-DETAIL_ROWS = {"MA", "EMA", "Bollinger", "MACD", "Stochastic", "ATR"}
 
 
 @dataclass
@@ -137,7 +123,6 @@ def build_matrix_rows():
 
 MATRIX_ROWS, ROW_FOR_COLUMN = build_matrix_rows()
 INDICATOR_STYLE_INDEX = {indicator: index for index, indicator in enumerate(INDICATORS)}
-PANEL_ORDER = ("price", "oscillator", "risk")
 PANEL_TITLES = {"tickers": "종목", "price": "가격", "oscillator": "오실레이터", "risk": "리스크"}
 SELECTOR_COLUMNS = 4
 SELECTOR_ROWS_BY_PANEL = {
@@ -241,18 +226,18 @@ def build_selection(results, market_data, saved):
     }
 
     strategies = {
-        result["strategy"].__class__.__name__: bool(saved_strategies.get(result["strategy"].__class__.__name__, True))
+        strategy_display_name(result["strategy"]): bool(saved_strategies.get(strategy_display_name(result["strategy"]), True))
         for result in results
     }
     state_colors = {
-        result["strategy"].__class__.__name__: bool(
-            saved_state_colors.get(result["strategy"].__class__.__name__, False)
+        strategy_display_name(result["strategy"]): bool(
+            saved_state_colors.get(strategy_display_name(result["strategy"]), False)
         )
         for result in results
     }
     fx_neutral = {
-        result["strategy"].__class__.__name__: bool(
-            saved_fx_neutral.get(result["strategy"].__class__.__name__, False)
+        strategy_display_name(result["strategy"]): bool(
+            saved_fx_neutral.get(strategy_display_name(result["strategy"]), False)
         )
         for result in results
     }
@@ -770,7 +755,7 @@ def draw_strategy_lines(price_axis, results, strategy_visibility, state_color_se
     visible_marker_dates = {}
     strategy_rebalance_events = {}
     for index, result in enumerate(results):
-        name = result["strategy"].__class__.__name__
+        name = strategy_display_name(result["strategy"])
         history = result["history"]
         strategy_series[name] = history["Portfolio"]
         strategy_states[name] = strategy_state_series(history)
@@ -954,7 +939,7 @@ def draw_chart(
     selection = build_selection(results, market_data, load_selection())
     fx_rates = load_fx_rate_series(results, supplied=fx_rate_data)
     results_by_name = {
-        result["strategy"].__class__.__name__: result for result in results
+        strategy_display_name(result["strategy"]): result for result in results
     }
     strategies_by_name = {
         name: result["strategy"] for name, result in results_by_name.items()

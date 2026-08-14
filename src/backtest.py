@@ -15,6 +15,7 @@ from config import (
 
 from indicators import Indicator
 from portfolio import Portfolio
+from strategy_domain import MarketSnapshot, StrategyEngine, StrategyEvaluation
 
 
 class Backtest:
@@ -49,6 +50,12 @@ class Backtest:
             commission=commission,
             slippage=slippage,
         )
+        self.strategy_engine = (
+            StrategyEngine(strategy)
+            if callable(getattr(strategy, "evaluate", None))
+            else None
+        )
+        self.last_evaluation = None
 
     def _delay_for_signal(self):
         state = getattr(self.strategy, "state", None)
@@ -60,22 +67,29 @@ class Backtest:
 
     def _queue_rebalance(self, signal, signal_date):
         delay = self._delay_for_signal()
+        if isinstance(signal, StrategyEvaluation):
+            target = signal.target_weights
+            days = signal.execution_days
+            reason = signal.reason
+        else:
+            target = signal["target"]
+            days = signal["days"]
+            reason = signal.get("reason")
         if delay <= 0:
             # An immediately actionable new signal invalidates any older order
             # that was still waiting for its execution date.
             self.delayed_rebalance = None
             self.portfolio.start_rebalance(
-                signal["target"], signal["days"], date=signal_date,
-                reason=signal.get("reason"),
+                target, days, date=signal_date, reason=reason,
             )
             return
         # A later signal supersedes an order that has not started executing.
         self.delayed_rebalance = {
             "remaining": delay,
-            "target": signal["target"].copy(),
-            "days": signal["days"],
+            "target": target.copy(),
+            "days": days,
             "signal_date": signal_date,
-            "reason": signal.get("reason"),
+            "reason": reason,
         }
 
     def _activate_delayed_rebalance(self, execution_date):
@@ -191,6 +205,8 @@ class Backtest:
 
         first_signal = True
         columns = self.data.columns
+        if self.strategy_engine is None:
+            self.strategy_engine = StrategyEngine(self.strategy)
 
         # ``iterrows`` creates a pandas Series for every trading day and each
         # lookup then pays pandas indexing overhead.  Strategies only need a
@@ -206,22 +222,28 @@ class Backtest:
 
             prices = self.get_prices(row, field="Close")
             market = self.get_market(row)
-            signal  = self.strategy.evaluate(date, market, self.portfolio)
+            step = self.strategy_engine.advance(
+                MarketSnapshot(date, market), self.portfolio
+            )
+            signal = step.evaluation
+            self.last_evaluation = signal
 
             # ------------------------------------------
             # 최초 투자
             # ------------------------------------------
             if first_signal:
                 self.portfolio.start_rebalance(
-                    signal["target"], days=signal["days"], date=date,
-                    reason=signal.get("reason"),
+                    signal.target_weights,
+                    days=signal.execution_days,
+                    date=date,
+                    reason=signal.reason,
                 )
                 first_signal = False
 
             # ------------------------------------------
             # 전략에 따른 리밸런싱
             # ------------------------------------------
-            elif signal["rebalance"]:
+            elif signal.rebalance_required:
                 self._queue_rebalance(signal, date)
 
             # ------------------------------------------

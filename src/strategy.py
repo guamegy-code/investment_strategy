@@ -57,6 +57,7 @@ class BaseStrategy:
     CASH_ASSET = "BIL"
     DIVERSIFIER_ASSET = "GLD"
     ASSET_MAPPING = {}
+    STRATEGY_VERSION = "1"
 
     def __init__(
         self,

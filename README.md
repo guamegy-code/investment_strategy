@@ -1,5 +1,7 @@
 # Investment Strategy
 
+선언형 YAML 전략 작성 및 확장 방법: [전략 DSL v1](docs/strategy-dsl.md)
+
 ETF 가격 데이터를 이용해 자산배분 전략을 구현하고, 동일한 백테스트 엔진으로
 성과와 거래 내역을 비교하는 프로젝트입니다. 시장 상태에 따라 비중을 조정하는
 퇴직연금 전략과 실제 국내 상품을 매핑한 전략을 함께 제공합니다.
@@ -23,6 +25,11 @@ ETF 가격 데이터를 이용해 자산배분 전략을 구현하고, 동일한
 investment_strategy/
 ├── src/
 │   ├── strategy.py                 # 공통 인터페이스와 주요 전략
+│   ├── strategy_domain.py          # 시장·실행 상태·전략 판단 계약
+│   ├── rebalancing.py              # 실계좌 거래 원장과 리밸런싱 계획
+│   ├── rebalance_service.py         # 계좌·전략 평가 애플리케이션 서비스
+│   ├── api.py                       # FastAPI v1 HTTP API
+│   ├── research_web.py               # Dash/Plotly 백테스트 연구 화면
 │   ├── experimental_strategies.py  # 주요 전략에서 파생된 후보 전략
 │   ├── pension_strategies.py       # 실제 퇴직연금 상품 매핑
 │   ├── downloader.py               # 가격 데이터와 지표 생성
@@ -50,7 +57,31 @@ investment_strategy/
 uv run python src/main.py
 ```
 
+기본값은 기존 Matplotlib 데스크톱 그래프입니다. 같은 백테스트 결과를 Dash/Plotly
+연구 화면으로 열려면 다음을 실행합니다.
+
+```powershell
+uv run python src/main.py --chart-backend dash
+# Matplotlib 창을 닫은 뒤 Dash도 시작하려면
+uv run python src/main.py --chart-backend both
+```
+
+Dash는 기본적으로 `http://127.0.0.1:8050`에서 실행되며, `--host`, `--port`로 변경할 수 있습니다.
+
 `main.py`는 실행할 전략에 필요한 티커와 `FX_RATE_TICKERS`를 확인하고 `data/{ticker}.csv`가 없을 때만 Yahoo Finance에서 자동으로 내려받습니다. 이미 있는 CSV 파일은 그대로 유지합니다. 전체 데이터를 새로 받고 싶다면 `uv run python src/downloader.py`를 별도로 실행하세요.
+
+## 리밸런싱 API 실행
+
+다음 명령으로 로컬 API 서버를 실행합니다.
+
+```powershell
+uv run uvicorn api:app --app-dir src --reload
+```
+
+서버는 `http://127.0.0.1:8000`에서 실행되며, 대화형 API 명세는
+`http://127.0.0.1:8000/docs`에서 확인할 수 있습니다. 현재 개발용 API는 요청 헤더
+`X-User-Id`로 계좌 소유자를 구분합니다. 이는 인증 구현이 아니라 개발용 신원
+어댑터이므로 외부에 공개해서는 안 됩니다.
 
 ## 개발 방법
 

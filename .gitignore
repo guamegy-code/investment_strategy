@@ -2,6 +2,7 @@
 __pycache__/
 *.pyc
 *.log
+.venv/
 .yf-cache/
 
 # Data
@@ -17,3 +18,8 @@ results/*
 
 # VS Code
 .vscode/
+
+# Local secrets
+.env
+.env.*
+!.env.example

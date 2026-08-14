@@ -1,27 +1,27 @@
-# This workflow will install Python dependencies, run tests and lint with a single version of Python
-# For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-python
-
-name: Python application
+name: Notification security
 
 on:
-  schedule:
-    - cron: "0 * * * *"
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
-  build:
+  test-notifier:
     runs-on: ubuntu-latest
     steps:
-    # 1. 저장소의 코드를 가상 환경으로 가져옵니다 (필수!)
-    - name: Checkout repository code
-      uses: actions/checkout@v4
+      - name: Check out repository
+        uses: actions/checkout@v4
 
-    # (선택 사항) 만약 특정 파이썬 버전이 필요하다면 아래 주석을 해제하여 사용하세요.
-    # - name: Set up Python
-    #   uses: actions/setup-python@v5
-    #   with:
-    #     python-version: '3.10'
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
 
-    # 2. 파이썬 스크립트를 실행합니다.
-    - name: Test with pytest
-      run: |
-        python ${{ github.workspace }}/../src/notifier.py
+      - name: Install notifier dependency
+        run: python -m pip install requests
+
+      - name: Test notification configuration and scan current sources
+        run: python -m unittest tests.test_notifier -v
