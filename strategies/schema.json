@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.example/strategy-dsl-v1.schema.json",
+  "title": "Investment strategy DSL v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["strategy", "assets", "target"],
+  "properties": {
+    "strategy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "version"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "name": {"type": "string", "minLength": 1},
+        "version": {"type": ["string", "integer"]},
+        "dsl_version": {"type": ["string", "integer"]},
+        "enabled": {"type": "boolean"}
+      }
+    },
+    "assets": {
+      "type": "object",
+      "required": ["required"],
+      "properties": {
+        "required": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string"}},
+        "risk": {"oneOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}}]}
+      }
+    },
+    "parameters": {"type": "object"},
+    "variables": {"type": "object"},
+    "state": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["initial"],
+        "properties": {
+          "initial": {},
+          "rules": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["set"],
+              "properties": {
+                "when": {"type": "string"},
+                "otherwise": {"const": true},
+                "set": {},
+                "confirm": {"type": "integer", "minimum": 1}
+              }
+            }
+          }
+        }
+      }
+    },
+    "target": {
+      "oneOf": [
+        {"type": "object"},
+        {"type": "array", "items": {"type": "object"}, "minItems": 1}
+      ]
+    },
+    "rebalance": {
+      "type": "object",
+      "properties": {
+        "when": {"type": "string"},
+        "check": {"enum": ["daily", "weekly", "monthly", "quarterly"]},
+        "drift": {"type": ["string", "number"]}
+      }
+    },
+    "execution": {
+      "oneOf": [
+        {"type": "integer", "minimum": 1},
+        {"type": "object", "properties": {"days": {"type": ["string", "integer"]}}}
+      ]
+    }
+  }
+}

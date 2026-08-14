@@ -1,0 +1,22 @@
+strategy:
+  id: retirement-7030-band
+  name: Retirement 70/30 Band
+  version: 1
+  dsl_version: 1
+  # Set to true to include this independent strategy in the normal runner.
+  enabled: false
+
+assets:
+  required: [QQQ, BND]
+  risk: [QQQ]
+
+target:
+  QQQ: 70%
+  BND: 30%
+
+rebalance:
+  check: daily
+  drift: 5%
+
+execution:
+  days: 1
