@@ -1,0 +1,12 @@
+strategy:
+  id: pension-koact-nasdaq
+  name: KoActNasdaqAllocationStrategy
+  version: 1
+  dsl_version: 1
+
+source: retirement-allocation-profit-band-vxus
+
+products:
+  QQQ: {0015B0.KS: 100%}
+  BND: {BND: 100%}
+  BIL: {BIL: 100%}

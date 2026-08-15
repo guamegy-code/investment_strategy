@@ -8,6 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from main import build_runner, ensure_runner_data
 from config import END_DATE, FX_RATE_TICKERS, START_DATE
+from strategy_domain import strategy_display_name
 from experimental_strategies import (
     RetirementAllocationProfitBandStrategy,
     RetirementAllocationProfitBandVXUSStrategy,
@@ -241,7 +242,7 @@ class RetirementStrategyTests(unittest.TestCase):
         runner = build_runner()
 
         self.assertEqual(
-            tuple(strategy.__class__.__name__ for strategy in runner.strategies),
+            tuple(strategy_display_name(strategy) for strategy in runner.strategies),
             (
                 "RetirementAllocationStrategy",
                 "RetirementAllocationVXUSStrategy",
@@ -273,6 +274,17 @@ class RetirementStrategyTests(unittest.TestCase):
             runner.backtest_options,
             {"start_date": START_DATE, "end_date": END_DATE},
         )
+        self.assertEqual(
+            runner.strategies[0].strategy_id, "dsl:retirement-allocation"
+        )
+        self.assertEqual(
+            runner.strategies[1].strategy_id,
+            "dsl:retirement-allocation-vxus",
+        )
+        self.assertEqual(
+            runner.strategies[2].strategy_id,
+            "dsl:retirement-allocation-profit-band",
+        )
 
     def test_main_downloads_only_through_the_runner_data_preparation(self):
         runner = build_runner()
@@ -285,8 +297,16 @@ class RetirementStrategyTests(unittest.TestCase):
         expected_tickers = tuple(dict.fromkeys(
             (*runner.tickers, *FX_RATE_TICKERS)
         ))
+        expected_fields = {}
+        for strategy in runner.strategies:
+            for ticker, fields in getattr(
+                strategy, "required_market_fields", {}
+            ).items():
+                expected_fields.setdefault(ticker, set()).update(fields)
         ensure.assert_called_once_with(
-            expected_tickers, data_dir=runner.data_dir
+            expected_tickers,
+            data_dir=runner.data_dir,
+            required_market_fields=expected_fields,
         )
 
     def test_vxus_substitution_respects_combined_risk_cap(self):

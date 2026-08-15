@@ -11,12 +11,13 @@ assets:
   risk: [QQQ]
 
 target:
-  QQQ: 70%
-  BND: 30%
+  - weights:
+      QQQ: 70%
+      BND: 30%
 
 rebalance:
-  check: daily
-  drift: 5%
+  - check: daily
+    when: target_deviation() >= 5%
 
 execution:
   days: 1

@@ -42,6 +42,24 @@ class EnsureDataFilesTests(unittest.TestCase):
             for call in download.call_args_list
         ))
 
+    def test_existing_file_is_refreshed_when_indicator_warmup_is_missing(self):
+        with tempfile.TemporaryDirectory() as directory:
+            data_dir = Path(directory)
+            (data_dir / "QQQ.csv").write_text(
+                "Date,Close,ROC40\n2012-01-03,100,\n",
+                encoding="utf-8",
+            )
+
+            with patch("downloader.download_one") as download:
+                refreshed = ensure_data_files(
+                    ("QQQ",),
+                    data_dir,
+                    required_market_fields={"QQQ": {"CLOSE", "ROC40"}},
+                )
+
+        self.assertEqual(refreshed, ("QQQ",))
+        download.assert_called_once_with("QQQ", output_dir=data_dir)
+
     def test_download_failures_name_the_failed_ticker(self):
         with tempfile.TemporaryDirectory() as directory:
             with patch(

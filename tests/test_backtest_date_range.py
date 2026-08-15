@@ -21,7 +21,22 @@ class InMemoryBacktest(Backtest):
         return pd.DataFrame({"Close": range(len(dates))}, index=dates)
 
 
+class MarketFieldBacktest(InMemoryBacktest):
+    def load_one(self, ticker):
+        frame = super().load_one(ticker)
+        frame["DISPARITY60"] = 111.0
+        return frame
+
+
 class BacktestDateRangeTests(unittest.TestCase):
+    def test_market_snapshot_includes_disparity60(self):
+        backtest = MarketFieldBacktest(
+            DummyStrategy(), tickers=("QQQ",), start_date="2012-01-01"
+        )
+        row = backtest.data.iloc[0].to_dict()
+
+        self.assertEqual(backtest.get_market(row)["QQQ"]["DISPARITY60"], 111.0)
+
     def test_configured_dates_filter_the_merged_market_data(self):
         backtest = InMemoryBacktest(
             DummyStrategy(),

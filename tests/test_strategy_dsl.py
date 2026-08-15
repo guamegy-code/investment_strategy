@@ -4,11 +4,24 @@ import unittest
 
 import pandas as pd
 
-from strategy import RETIREMENT_7030_BAND
+from backtest import Backtest
+from experimental_strategies import (
+    ASYMMETRIC_TREND_BAND_ADD_DEFENSE2_TUNED,
+    RetirementAllocationProfitBandStrategy,
+    RetirementAllocationProfitBandVXUSStrategy,
+)
+from strategy import (
+    ASYMMETRIC_TREND_BAND_ADD_DEFENSE2,
+    RETIREMENT_7030_BAND,
+    RetirementAllocationStrategy,
+    RetirementAllocationVXUSStrategy,
+    STATIC_RETIREMENT_7030,
+)
 from strategy_domain import StrategyEngine, strategy_identity
 from strategy_dsl import (
     DeclarativeStrategy,
     OperatorRegistry,
+    ProductMappedStrategy,
     StrategyDefinitionError,
     StrategyExpressionError,
     load_strategy_directory,
@@ -33,7 +46,7 @@ def definition(**overrides):
     value = {
         "strategy": {"id": "test", "name": "Test", "version": 1},
         "assets": {"required": ["QQQ", "BND"], "risk": ["QQQ"]},
-        "target": {"QQQ": "70%", "BND": "30%"},
+        "target": [{"weights": {"QQQ": "70%", "BND": "30%"}}],
         "execution": {"days": 1},
     }
     value.update(overrides)
@@ -47,7 +60,481 @@ def market(close=100.0, drawdown=-0.05):
     }
 
 
+def retirement_market(mode="bull", *, bnd_roc=1.0, bil_roc=0.0):
+    qqq = {
+        "Close": 105.0,
+        "EMA20": 103.0,
+        "EMA55": 100.0,
+        "EMA200": 98.0,
+        "ROC5": 3.0,
+        "ROC20": 5.0,
+        "EMA20_SLOPE5": 2.0,
+        "ROC60": 8.0,
+        "EMA200_SLOPE20": 1.0,
+        "DRAWDOWN120": 0.0,
+    }
+    if mode == "caution":
+        qqq.update({
+            "Close": 85.0,
+            "EMA20": 90.0,
+            "EMA55": 95.0,
+            "EMA200": 100.0,
+            "ROC5": -4.0,
+            "ROC20": -10.0,
+            "EMA20_SLOPE5": -2.0,
+            "ROC60": 1.0,
+            "EMA200_SLOPE20": 1.0,
+            "DRAWDOWN120": -0.05,
+        })
+    elif mode == "bear":
+        qqq.update({
+            "Close": 80.0,
+            "EMA20": 90.0,
+            "EMA55": 95.0,
+            "EMA200": 100.0,
+            "ROC5": -4.0,
+            "ROC20": -10.0,
+            "EMA20_SLOPE5": -2.0,
+            "ROC60": -12.0,
+            "EMA200_SLOPE20": -1.0,
+            "DRAWDOWN120": -0.15,
+        })
+    return {
+        "QQQ": qqq,
+        "BND": {"Close": 100.0, "ROC40": bnd_roc},
+        "BIL": {"Close": 100.0, "ROC40": bil_roc},
+        "VXUS": {"Close": 100.0},
+    }
+
+
+def product_definition(**overrides):
+    value = {
+        "strategy": {"id": "products", "name": "Products", "version": 1},
+        "source": "retirement-7030-band",
+        "products": {
+            "QQQ": {"PRODUCT_A": "60%", "PRODUCT_B": "40%"},
+            "BND": {"PRODUCT_C": "100%"},
+        },
+    }
+    value.update(overrides)
+    return value
+
+
+def product_market():
+    return {
+        **market(),
+        "PRODUCT_A": {"Close": 20.0},
+        "PRODUCT_B": {"Close": 30.0},
+        "PRODUCT_C": {"Close": 10.0},
+    }
+
+
 class DeclarativeStrategyTests(unittest.TestCase):
+    def test_tuned_asymmetric_defense2_yaml_enters_at_15_5_percent(self):
+        declarative = DeclarativeStrategy.from_yaml(
+            PROJECT_ROOT
+            / "strategies"
+            / "asymmetric_02_trend_band_defense2_tuned.yaml"
+        )
+        python_strategy = ASYMMETRIC_TREND_BAND_ADD_DEFENSE2_TUNED()
+        portfolio = PortfolioStub({"QQQ": 0.65, "GLD": 0.05, "BND": 0.30})
+
+        def observations(close, ema55, ema200):
+            return {
+                "QQQ": {
+                    "Close": close,
+                    "EMA55": ema55,
+                    "EMA200": ema200,
+                    "RSI14": 50.0,
+                    "DISPARITY60": 100.0,
+                },
+                "GLD": {"Close": 100.0},
+                "BND": {"Close": 100.0},
+            }
+
+        cases = [
+            (pd.Timestamp("2025-01-02"), observations(100.0, 105.0, 100.0)),
+            (pd.Timestamp("2025-01-03"), observations(84.4, 90.0, 100.0)),
+        ]
+        for date, market_data in cases:
+            python_signal = python_strategy.evaluate(date, market_data, portfolio)
+            declarative_signal = declarative.evaluate(date, market_data, portfolio)
+
+            self.assertEqual(declarative_signal["target"], python_signal["target"])
+            self.assertEqual(
+                declarative_signal["rebalance"], python_signal["rebalance"]
+            )
+            self.assertEqual(
+                declarative.defense_mode == "DEFENSIVE",
+                python_strategy.is_defensive_mode,
+            )
+            self.assertEqual(declarative.peak_price, python_strategy.highest_price)
+
+    def test_static_retirement_yaml_matches_python_market_state_path(self):
+        declarative = DeclarativeStrategy.from_yaml(
+            PROJECT_ROOT / "strategies" / "static_01_retirement_7030.yaml"
+        )
+        python_strategy = STATIC_RETIREMENT_7030()
+        portfolio = PortfolioStub({"QQQ": 0.70, "BND": 0.15, "BIL": 0.15})
+        start = pd.Timestamp("2025-01-02")
+        cases = [
+            (start, retirement_market("bull")),
+            *(
+                (start + pd.Timedelta(days=offset), retirement_market("caution"))
+                for offset in range(1, 4)
+            ),
+            *(
+                (start + pd.Timedelta(days=offset), retirement_market("bear"))
+                for offset in range(4, 14)
+            ),
+            *(
+                (start + pd.Timedelta(days=offset), retirement_market("bull"))
+                for offset in range(14, 17)
+            ),
+        ]
+
+        for index, (date, market_data) in enumerate(cases):
+            python_signal = python_strategy.evaluate(date, market_data, portfolio)
+            declarative_signal = declarative.evaluate(date, market_data, portfolio)
+
+            self.assertEqual(declarative_signal["target"], python_signal["target"])
+            if index:
+                self.assertEqual(
+                    declarative_signal["rebalance"], python_signal["rebalance"]
+                )
+            self.assertEqual(declarative.state, python_strategy.state.value)
+            self.assertEqual(
+                declarative.risk_off_score, python_strategy.risk_off_score
+            )
+            self.assertEqual(
+                declarative.recovery_score, python_strategy.recovery_score
+            )
+
+    def test_asymmetric_defense2_yaml_matches_python_path(self):
+        declarative = DeclarativeStrategy.from_yaml(
+            PROJECT_ROOT / "strategies" / "asymmetric_01_trend_band_defense2.yaml"
+        )
+        python_strategy = ASYMMETRIC_TREND_BAND_ADD_DEFENSE2()
+        portfolio = PortfolioStub({"QQQ": 0.65, "GLD": 0.05, "BND": 0.30})
+
+        def observations(close, ema55, ema200, rsi=50.0, disparity=100.0):
+            return {
+                "QQQ": {
+                    "Close": close,
+                    "EMA55": ema55,
+                    "EMA200": ema200,
+                    "RSI14": rsi,
+                    "DISPARITY60": disparity,
+                },
+                "GLD": {"Close": 100.0},
+                "BND": {"Close": 100.0},
+            }
+
+        cases = [
+            (pd.Timestamp("2025-01-02"), observations(100.0, 105.0, 100.0)),
+            (pd.Timestamp("2025-01-03"), observations(74.0, 90.0, 100.0)),
+            (pd.Timestamp("2025-01-06"), observations(76.0, 101.0, 100.0)),
+            (
+                pd.Timestamp("2025-01-07"),
+                observations(110.0, 105.0, 100.0, rsi=96.0, disparity=110.0),
+            ),
+        ]
+
+        for date, market_data in cases:
+            python_signal = python_strategy.evaluate(date, market_data, portfolio)
+            declarative_signal = declarative.evaluate(date, market_data, portfolio)
+
+            self.assertEqual(declarative_signal["target"], python_signal["target"])
+            self.assertEqual(
+                declarative_signal["rebalance"], python_signal["rebalance"]
+            )
+            self.assertEqual(declarative_signal["days"], python_signal["days"])
+            self.assertEqual(
+                declarative.defense_mode == "DEFENSIVE",
+                python_strategy.is_defensive_mode,
+            )
+            self.assertEqual(declarative.peak_price, python_strategy.highest_price)
+
+    def test_profit_band_vxus_yaml_matches_python_transition_path(self):
+        declarative = DeclarativeStrategy.from_yaml(
+            PROJECT_ROOT / "strategies" / "retirement_04_profit_band_vxus.yaml"
+        )
+        python_strategy = RetirementAllocationProfitBandVXUSStrategy()
+        portfolio = PortfolioStub({
+            "QQQ": 0.70,
+            "BND": 0.30,
+            "BIL": 0.0,
+            "VXUS": 0.0,
+        })
+        start = pd.Timestamp("2025-01-02")
+        cases = [
+            (start, retirement_market("bull")),
+            *(
+                (start + pd.Timedelta(days=offset), retirement_market("bear"))
+                for offset in range(1, 11)
+            ),
+            *(
+                (
+                    start + pd.Timedelta(days=offset),
+                    retirement_market("bull", bnd_roc=0.50, bil_roc=0.0),
+                )
+                for offset in range(11, 13)
+            ),
+        ]
+
+        for index, (date, observations) in enumerate(cases):
+            python_signal = python_strategy.evaluate(date, observations, portfolio)
+            declarative_signal = declarative.evaluate(date, observations, portfolio)
+
+            self.assertEqual(declarative_signal["target"], python_signal["target"])
+            self.assertEqual(declarative_signal["days"], python_signal["days"])
+            if index:
+                self.assertEqual(
+                    declarative_signal["rebalance"], python_signal["rebalance"]
+                )
+            self.assertEqual(declarative.state, python_strategy.state.value)
+            self.assertEqual(declarative.safe_asset, python_strategy.safe_asset)
+
+    def test_profit_band_vxus_yaml_preserves_qqq_during_safe_rotation(self):
+        declarative = DeclarativeStrategy.from_yaml(
+            PROJECT_ROOT / "strategies" / "retirement_04_profit_band_vxus.yaml"
+        )
+        python_strategy = RetirementAllocationProfitBandVXUSStrategy()
+        portfolio = PortfolioStub({
+            "QQQ": 0.74,
+            "BND": 0.26,
+            "BIL": 0.0,
+            "VXUS": 0.0,
+        })
+        start = pd.Timestamp("2025-01-02")
+
+        for date, observations in [
+            (start, retirement_market("bull")),
+            (
+                pd.Timestamp("2025-02-03"),
+                retirement_market("bull", bnd_roc=0.0, bil_roc=1.0),
+            ),
+        ]:
+            python_signal = python_strategy.evaluate(date, observations, portfolio)
+            declarative_signal = declarative.evaluate(date, observations, portfolio)
+            self.assertEqual(declarative_signal["target"], python_signal["target"])
+            self.assertEqual(
+                declarative_signal["rebalance"], python_signal["rebalance"]
+            )
+            self.assertEqual(declarative_signal["days"], python_signal["days"])
+
+    def test_profit_band_yaml_preserves_qqq_and_rotates_only_safe_sleeve(self):
+        declarative = DeclarativeStrategy.from_yaml(
+            PROJECT_ROOT / "strategies" / "retirement_03_profit_band.yaml"
+        )
+        python_strategy = RetirementAllocationProfitBandStrategy()
+        portfolio = PortfolioStub({"QQQ": 0.74, "BND": 0.26, "BIL": 0.0})
+        start = pd.Timestamp("2025-01-02")
+
+        first_python = python_strategy.evaluate(
+            start, retirement_market("bull"), portfolio
+        )
+        first_yaml = declarative.evaluate(
+            start, retirement_market("bull"), portfolio
+        )
+        rotation_market = retirement_market(
+            "bull", bnd_roc=0.0, bil_roc=1.0
+        )
+        second_python = python_strategy.evaluate(
+            pd.Timestamp("2025-02-03"), rotation_market, portfolio
+        )
+        second_yaml = declarative.evaluate(
+            pd.Timestamp("2025-02-03"), rotation_market, portfolio
+        )
+
+        self.assertEqual(first_yaml["target"], first_python["target"])
+        self.assertFalse(first_yaml["rebalance"])
+        self.assertEqual(second_yaml["target"], second_python["target"])
+        self.assertEqual(second_yaml["target"], {
+            "QQQ": 0.74,
+            "BND": 0.0,
+            "BIL": 0.26,
+        })
+        self.assertTrue(second_yaml["rebalance"])
+        self.assertEqual(second_yaml["days"], 1)
+
+    def test_retirement_vxus_yaml_matches_python_transition_path(self):
+        declarative = DeclarativeStrategy.from_yaml(
+            PROJECT_ROOT / "strategies" / "retirement_02_allocation_vxus.yaml"
+        )
+        python_strategy = RetirementAllocationVXUSStrategy()
+        portfolio = PortfolioStub({
+            "QQQ": 0.70,
+            "BND": 0.30,
+            "BIL": 0.0,
+            "VXUS": 0.0,
+        })
+        start = pd.Timestamp("2025-01-02")
+        cases = [
+            (start, retirement_market("bull")),
+            *(
+                (start + pd.Timedelta(days=offset), retirement_market("bear"))
+                for offset in range(1, 11)
+            ),
+            *(
+                (
+                    start + pd.Timedelta(days=offset),
+                    retirement_market("bull", bnd_roc=0.50, bil_roc=0.0),
+                )
+                for offset in range(11, 13)
+            ),
+        ]
+        for index, (date, observations) in enumerate(cases):
+            python_signal = python_strategy.evaluate(date, observations, portfolio)
+            declarative_signal = declarative.evaluate(date, observations, portfolio)
+
+            self.assertEqual(declarative_signal["target"], python_signal["target"])
+            self.assertEqual(declarative_signal["days"], python_signal["days"])
+            if index:
+                self.assertEqual(
+                    declarative_signal["rebalance"], python_signal["rebalance"]
+                )
+            self.assertEqual(declarative.state, python_strategy.state.value)
+            self.assertEqual(declarative.safe_asset, python_strategy.safe_asset)
+
+    def test_market_mode_is_representative_state_regardless_of_yaml_order(self):
+        strategy = DeclarativeStrategy(definition(
+            state={
+                "safe_asset": {"initial": "BND"},
+                "market_mode": {
+                    "initial": "BULL",
+                    "rules": [
+                        {"when": "QQQ.close < QQQ.ema200", "set": "BEAR"},
+                        {"otherwise": True, "set": "BULL"},
+                    ],
+                },
+            },
+        ))
+
+        strategy.evaluate(
+            pd.Timestamp("2025-01-02"),
+            market(close=90.0),
+            PortfolioStub(),
+        )
+
+        self.assertEqual(strategy.safe_asset, "BND")
+        self.assertEqual(strategy.market_mode, "BEAR")
+        self.assertEqual(strategy.state, "BEAR")
+
+    def test_market_mode_rejects_unsupported_state(self):
+        with self.assertRaisesRegex(
+            StrategyDefinitionError, "state.market_mode.initial"
+        ):
+            DeclarativeStrategy(definition(state={
+                "market_mode": {"initial": "SIDEWAYS"},
+            }))
+
+    def test_uninitialized_market_mode_must_be_resolved_on_first_evaluation(self):
+        strategy = DeclarativeStrategy(definition(state={
+            "market_mode": {"initial": "UNINITIALIZED"},
+        }))
+
+        with self.assertRaisesRegex(
+            StrategyDefinitionError, "state.market_mode must be one of"
+        ):
+            strategy.evaluate(
+                pd.Timestamp("2025-01-02"), market(), PortfolioStub()
+            )
+
+    def test_market_indicators_are_discovered_and_prepared_before_evaluation(self):
+        strategy = DeclarativeStrategy({
+            "strategy": {"id": "prepared", "name": "Prepared", "version": 1},
+            "assets": {"required": ["QQQ"], "risk": ["QQQ"]},
+            "variables": {"positive_momentum": "QQQ.roc40 > 0"},
+            "target": [{"weights": {"QQQ": "100%"}}],
+        })
+        self.assertEqual(
+            strategy.required_market_fields,
+            {"QQQ": ("CLOSE", "ROC40")},
+        )
+
+        with TemporaryDirectory() as directory:
+            dates = pd.bdate_range("2024-01-02", periods=60)
+            prices = pd.Series(range(100, 160), index=dates, dtype=float)
+            pd.DataFrame({
+                "Open": prices,
+                "High": prices + 1,
+                "Low": prices - 1,
+                "Close": prices,
+                "Volume": 1000,
+            }).rename_axis("Date").to_csv(Path(directory) / "QQQ.csv")
+
+            backtest = Backtest(
+                strategy,
+                data_dir=Path(directory),
+                tickers=("QQQ",),
+            )
+
+        self.assertFalse(backtest.data["QQQ_ROC40"].isna().any())
+        self.assertEqual(len(backtest.data), 20)
+
+    def test_retirement_allocation_yaml_matches_python_transition_path(self):
+        declarative = DeclarativeStrategy.from_yaml(
+            PROJECT_ROOT / "strategies" / "retirement_01_allocation.yaml"
+        )
+        python_strategy = RetirementAllocationStrategy()
+        portfolio = PortfolioStub({"QQQ": 0.70, "BND": 0.30, "BIL": 0.0})
+        cases = [
+            (pd.Timestamp("2025-01-02"), retirement_market("bull")),
+            *(
+                (pd.Timestamp("2025-01-02") + pd.Timedelta(days=offset),
+                 retirement_market("caution"))
+                for offset in range(1, 4)
+            ),
+            *(
+                (pd.Timestamp("2025-01-05") + pd.Timedelta(days=offset),
+                 retirement_market("bull"))
+                for offset in range(1, 4)
+            ),
+            (
+                pd.Timestamp("2025-02-03"),
+                retirement_market("bull", bnd_roc=0.0, bil_roc=1.0),
+            ),
+            *(
+                (pd.Timestamp("2025-02-03") + pd.Timedelta(days=offset),
+                 retirement_market("bear", bnd_roc=0.0, bil_roc=1.0))
+                for offset in range(1, 11)
+            ),
+            *(
+                (pd.Timestamp("2025-02-13") + pd.Timedelta(days=offset),
+                 retirement_market("bull", bnd_roc=0.0, bil_roc=1.0))
+                for offset in range(1, 3)
+            ),
+        ]
+
+        for index, (date, observations) in enumerate(cases):
+            python_signal = python_strategy.evaluate(date, observations, portfolio)
+            declarative_signal = declarative.evaluate(date, observations, portfolio)
+            self.assertEqual(declarative_signal["target"], python_signal["target"])
+            self.assertEqual(declarative_signal["days"], python_signal["days"])
+            if index:
+                self.assertEqual(
+                    declarative_signal["rebalance"], python_signal["rebalance"]
+                )
+                if (
+                    declarative_signal["rebalance"]
+                    and python_signal["reason"]
+                    and python_signal["reason"].split("->", 1)[0]
+                    in {"BULL", "CAUTION", "BEAR", "RECOVERY"}
+                ):
+                    self.assertEqual(
+                        declarative_signal["reason"].split("(", 1)[0],
+                        python_signal["reason"].split("(", 1)[0],
+                    )
+            self.assertEqual(declarative.state, python_strategy.state.value)
+            self.assertEqual(declarative.safe_asset, python_strategy.safe_asset)
+            self.assertEqual(
+                declarative.risk_off_score, python_strategy.risk_off_score
+            )
+            self.assertEqual(
+                declarative.recovery_score, python_strategy.recovery_score
+            )
+
     def test_example_matches_existing_fixed_band_strategy(self):
         declarative = DeclarativeStrategy.from_yaml(
             PROJECT_ROOT / "strategies" / "retirement_7030_band.yaml"
@@ -79,11 +566,11 @@ class DeclarativeStrategyTests(unittest.TestCase):
                     ],
                 }
             },
-            target={
+            target=[{"weights": {
                 "QQQ": "state.risk_level",
-                "BND": "remaining",
-            },
-            rebalance={"when": "changed(state.risk_level)"},
+                "BND": "1 - state.risk_level",
+            }}],
+            rebalance=[{"when": "changed(state.risk_level)"}],
         ))
         portfolio = PortfolioStub({"QQQ": 0.70, "BND": 0.30})
         start = pd.Timestamp("2025-01-02")
@@ -96,7 +583,7 @@ class DeclarativeStrategyTests(unittest.TestCase):
         self.assertFalse(first["rebalance"])
         self.assertTrue(second["rebalance"])
         self.assertEqual(second["target"], {"QQQ": 0.40, "BND": 0.60})
-        self.assertEqual(strategy.state, "40%")
+        self.assertEqual(strategy.state, 0.40)
 
     def test_confirmation_changes_state_only_after_required_days(self):
         strategy = DeclarativeStrategy(definition(
@@ -117,9 +604,9 @@ class DeclarativeStrategyTests(unittest.TestCase):
                     "when": "state.mode == 'defensive'",
                     "weights": {"QQQ": "20%", "BND": "80%"},
                 },
-                {"otherwise": True, "weights": {"QQQ": "70%", "BND": "30%"}},
+                {"weights": {"QQQ": "70%", "BND": "30%"}},
             ],
-            rebalance={"when": "changed(state.mode)"},
+            rebalance=[{"when": "changed(state.mode)"}],
         ))
         portfolio = PortfolioStub({"QQQ": 0.70, "BND": 0.30})
         date = pd.Timestamp("2025-01-02")
@@ -136,7 +623,10 @@ class DeclarativeStrategyTests(unittest.TestCase):
         registry.register("double", lambda value: value * 2)
         strategy = DeclarativeStrategy(definition(
             variables={"risk_weight": "double(20%)"},
-            target={"QQQ": "variables.risk_weight", "BND": "remaining"},
+            target=[{"weights": {
+                "QQQ": "variables.risk_weight",
+                "BND": "1 - variables.risk_weight",
+            }}],
         ), operators=registry)
 
         signal = strategy.evaluate(
@@ -174,6 +664,174 @@ class DeclarativeStrategyTests(unittest.TestCase):
         invalid["assets"] = {}
         with self.assertRaises(StrategyDefinitionError):
             DeclarativeStrategy(invalid)
+
+    def test_target_always_requires_a_weights_rule_list(self):
+        invalid = definition()
+        invalid["target"] = {"QQQ": "70%", "BND": "30%"}
+        with self.assertRaisesRegex(
+            StrategyDefinitionError, "target must be a non-empty rule list"
+        ):
+            DeclarativeStrategy(invalid)
+
+    def test_undocumented_special_weight_names_are_not_supported(self):
+        invalid = definition()
+        invalid["target"] = [{
+            "weights": {"QQQ": "70%", "BND": "remaining"}
+        }]
+        strategy = DeclarativeStrategy(invalid)
+        with self.assertRaisesRegex(StrategyExpressionError, "unknown name"):
+            strategy.evaluate(
+                pd.Timestamp("2025-01-02"), market(), PortfolioStub()
+            )
+
+    def test_execution_uses_only_the_documented_days_key(self):
+        invalid = definition()
+        invalid["execution"] = 3
+        with self.assertRaisesRegex(
+            StrategyDefinitionError, "execution must be a mapping"
+        ):
+            DeclarativeStrategy(invalid)
+
+    def test_product_mapping_splits_one_source_asset_across_products(self):
+        source = DeclarativeStrategy(definition(
+            rebalance=[{"when": "target_deviation() >= 5%"}]
+        ))
+        strategy = ProductMappedStrategy(
+            product_definition(), source
+        )
+        portfolio = PortfolioStub({
+            "PRODUCT_A": 0.46,
+            "PRODUCT_B": 0.30,
+            "PRODUCT_C": 0.24,
+        })
+
+        strategy.evaluate(
+            pd.Timestamp("2025-01-02"), product_market(), portfolio
+        )
+        signal = strategy.evaluate(
+            pd.Timestamp("2025-01-03"), product_market(), portfolio
+        )
+
+        self.assertTrue(signal["rebalance"])
+        self.assertEqual(signal["target"], {
+            "PRODUCT_A": 0.42,
+            "PRODUCT_B": 0.28,
+            "PRODUCT_C": 0.30,
+        })
+        self.assertEqual(
+            strategy.required_tickers,
+            ("QQQ", "BND", "PRODUCT_A", "PRODUCT_B", "PRODUCT_C"),
+        )
+        self.assertEqual(
+            strategy.risk_asset_tickers, ("PRODUCT_A", "PRODUCT_B")
+        )
+
+    def test_state_check_evaluates_only_once_per_period(self):
+        strategy = DeclarativeStrategy(definition(
+            state={
+                "safe_asset": {
+                    "initial": "BND",
+                    "check": "monthly",
+                    "rules": [
+                        {"when": "QQQ.close < QQQ.ema200", "set": "BIL"},
+                        {"otherwise": True, "set": "BND"},
+                    ],
+                }
+            },
+            target=[
+                {
+                    "when": "state.safe_asset == 'BIL'",
+                    "weights": {"QQQ": "70%", "BND": "30%"},
+                },
+                {"weights": {"QQQ": "70%", "BND": "30%"}},
+            ],
+        ))
+        portfolio = PortfolioStub()
+
+        strategy.evaluate(pd.Timestamp("2025-01-02"), market(close=100.0), portfolio)
+        strategy.evaluate(pd.Timestamp("2025-01-03"), market(close=90.0), portfolio)
+        self.assertEqual(strategy._state_values["safe_asset"], "BND")
+
+        strategy.evaluate(pd.Timestamp("2025-02-03"), market(close=90.0), portfolio)
+        self.assertEqual(strategy._state_values["safe_asset"], "BIL")
+
+    def test_ordered_rebalance_rules_use_first_match_and_rule_days(self):
+        strategy = DeclarativeStrategy(definition(
+            state={
+                "mode": {
+                    "initial": "normal",
+                    "rules": [
+                        {"when": "QQQ.close < QQQ.ema200", "set": "defensive"},
+                        {"otherwise": True, "set": "normal"},
+                    ],
+                }
+            },
+            rebalance=[
+                {"when": "changed(state.mode)", "days": 3},
+                {
+                    "check": "monthly",
+                    "when": "target_deviation() >= 5%",
+                    "days": 1,
+                },
+            ],
+        ))
+        portfolio = PortfolioStub({"QQQ": 0.60, "BND": 0.40})
+        start = pd.Timestamp("2025-01-02")
+
+        strategy.evaluate(start, market(close=100.0), portfolio)
+        signal = strategy.evaluate(start + pd.Timedelta(days=1), market(close=90.0), portfolio)
+
+        self.assertTrue(signal["rebalance"])
+        self.assertEqual(signal["days"], 3)
+        self.assertEqual(signal["reason"], "normal->defensive")
+
+    def test_korean_product_mapping_selects_fx_rate_in_python(self):
+        configured = product_definition(products={
+            "QQQ": {"379810.KS": "100%"},
+            "BND": {"BND": "100%"},
+        })
+        strategy = ProductMappedStrategy(configured, DeclarativeStrategy(definition()))
+
+        self.assertEqual(strategy.FX_RATE_TICKER, "KRW=X")
+
+    def test_product_mapping_requires_each_source_share_to_sum_to_100_percent(self):
+        invalid = product_definition(products={
+            "QQQ": {"PRODUCT_A": "60%", "PRODUCT_B": "30%"}
+        })
+        with self.assertRaisesRegex(StrategyDefinitionError, "sum to 100%"):
+            ProductMappedStrategy(invalid, DeclarativeStrategy(definition()))
+
+    def test_directory_loader_resolves_a_local_source_strategy(self):
+        source = """
+strategy:
+  id: base
+  name: Base
+  version: 1
+  enabled: false
+assets:
+  required: [QQQ, BND]
+  risk: [QQQ]
+target:
+  - weights: {QQQ: 70%, BND: 30%}
+"""
+        products = """
+strategy:
+  id: mapped
+  name: Mapped
+  version: 1
+source: base
+products:
+  QQQ: {PRODUCT_A: 50%, PRODUCT_B: 50%}
+  BND: {PRODUCT_C: 100%}
+"""
+        with TemporaryDirectory() as directory:
+            Path(directory, "base.yaml").write_text(source, encoding="utf-8")
+            Path(directory, "mapped.yaml").write_text(products, encoding="utf-8")
+            loaded = load_strategy_directory(directory)
+
+        self.assertEqual(len(loaded), 1)
+        self.assertIsInstance(loaded[0], ProductMappedStrategy)
+        self.assertEqual(loaded[0].strategy_id, "dsl:mapped")
 
 
 if __name__ == "__main__":

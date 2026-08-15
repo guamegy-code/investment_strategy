@@ -388,6 +388,17 @@ class RetirementAllocationTests(unittest.TestCase):
         self.assertTrue(signal["rebalance"])
         self.assertIn("UPTREND_BUY_DIP_QLD", signal["reason"])
 
+    def test_defense2_extreme_overbought_uses_disparity60(self):
+        strategy = ASYMMETRIC_TREND_BAND_ADD_DEFENSE2()
+        test_market = market(110, 105, 100, 95, 2, 5, 1, roc60=5)
+        test_market["QQQ"]["RSI14"] = 96.0
+        test_market["QQQ"]["DISPARITY60"] = 110.0
+
+        signal = strategy.evaluate(self.date, test_market, self.portfolio)
+
+        self.assertTrue(signal["rebalance"])
+        self.assertIn("EXTREME_OVERBOUGHT", signal["reason"])
+
     def test_defense2_tuned_preserves_pension_safe_asset_floor(self):
         strategy = ASYMMETRIC_TREND_BAND_ADD_DEFENSE2_TUNED()
 

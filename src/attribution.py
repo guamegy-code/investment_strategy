@@ -503,8 +503,12 @@ class RetirementAllocationAttribution:
                 if not events.empty
                 else events
             )
-            defense = year_events[year_events["Type"] == "DEFENSIVE"]
-            increase = year_events[year_events["Type"] == "RISK_INCREASE"]
+            if year_events.empty:
+                defense = year_events
+                increase = year_events
+            else:
+                defense = year_events[year_events["Type"] == "DEFENSIVE"]
+                increase = year_events[year_events["Type"] == "RISK_INCREASE"]
             costs = group.get("TransactionCosts", pd.Series([0.0], index=[group.index[0]]))
             cost_change = costs.iloc[-1] - costs.iloc[0]
 

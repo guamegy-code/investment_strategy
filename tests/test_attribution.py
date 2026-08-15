@@ -91,6 +91,20 @@ class AttributionTests(unittest.TestCase):
 
         self.assertIn("state_market_quality", attribution.all_reports())
 
+    def test_yearly_summary_handles_no_transition_events(self):
+        attribution = RetirementAllocationAttribution(
+            self.history,
+            self.market,
+            [self.rebalances[0]],
+            self.benchmark,
+        )
+
+        yearly = attribution.yearly_summary()
+
+        self.assertEqual(yearly["Transitions"].sum(), 0)
+        self.assertEqual(yearly["DefensiveSignals"].sum(), 0)
+        self.assertEqual(yearly["RiskIncreaseSignals"].sum(), 0)
+
     def test_transition_quality_measures_detection_delay_and_false_alarm(self):
         attribution = RetirementAllocationAttribution(
             self.history,

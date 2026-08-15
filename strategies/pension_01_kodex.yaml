@@ -1,0 +1,12 @@
+strategy:
+  id: pension-kodex-nasdaq
+  name: KodexNasdaqAllocationStrategy
+  version: 1
+  dsl_version: 1
+
+source: retirement-allocation-profit-band-vxus
+
+products:
+  QQQ: {379810.KS: 100%}
+  BND: {BND: 100%}
+  BIL: {BIL: 100%}
