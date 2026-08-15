@@ -1,6 +1,6 @@
 strategy:
   id: pension-time-nasdaq
-  name: TimeNasdaqAllocationStrategy
+  name: TimeNasdaqAllocation
   version: 1
   dsl_version: 1
 

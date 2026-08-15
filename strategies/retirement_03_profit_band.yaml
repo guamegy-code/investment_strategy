@@ -1,7 +1,7 @@
 strategy:
   # 상승 구간에서 QQQ 수익을 80% 상단까지 보존하는 퇴직자산 전략
   id: retirement-allocation-profit-band
-  name: RetirementAllocationProfitBandStrategy
+  name: RetirementAllocationProfitBand
   version: 1
   dsl_version: 1
   enabled: true

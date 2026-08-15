@@ -1,6 +1,9 @@
 """Run the production strategy and its static benchmarks."""
 
 import argparse
+from functools import lru_cache
+from hashlib import sha256
+import json
 import pandas as pd
 
 from attribution import RetirementAllocationAttribution
@@ -10,11 +13,50 @@ from downloader import ensure_data_files
 from runner import Runner
 from rebalance_service import DEFAULT_STRATEGY_CATALOG
 from strategy_dsl import load_strategy_directory
-from strategy_domain import strategy_display_name
-def save_results(results):
+from strategy_domain import strategy_display_name, strategy_identity
+from strategy_runtime import (
+    IncrementalStrategyResults,
+    ReloadableStrategyResults,
+    StrategyResultDiskCache,
+    strategy_calculation_fingerprint,
+)
+
+
+STRATEGY_DIRECTORY = RESULT_DIR.parent / "strategies"
+STRATEGY_CACHE_DIRECTORY = RESULT_DIR / ".strategy-cache"
+RESULT_CACHE = StrategyResultDiskCache(STRATEGY_CACHE_DIRECTORY)
+BACKTEST_ENGINE_FILES = tuple(
+    RESULT_DIR.parent / "src" / name
+    for name in (
+        "backtest.py",
+        "config.py",
+        "indicators.py",
+        "performance.py",
+        "portfolio.py",
+        "strategy_domain.py",
+        "strategy_dsl.py",
+    )
+)
+PREFERRED_STRATEGY_ORDER = (
+    "dsl:retirement-allocation",
+    "dsl:retirement-allocation-vxus",
+    "dsl:retirement-allocation-profit-band",
+    "dsl:retirement-allocation-profit-band-vxus",
+    "dsl:pension-kodex-nasdaq",
+    "dsl:pension-time-nasdaq",
+    "dsl:pension-koact-nasdaq",
+    "dsl:pension-nasdaq-product-mix",
+    "dsl:static-retirement-7030",
+    "dsl:asymmetric-trend-band-add-defense2",
+    "dsl:asymmetric-trend-band-add-defense2-tuned",
+)
+
+
+def save_results(results, *, all_results=None):
+    all_results = tuple(all_results if all_results is not None else results)
     histories = {
         strategy_display_name(result["strategy"]): result["history"]
-        for result in results
+        for result in all_results
     }
     benchmark = histories.get("STATIC_70_BND10_BIL10_GLD10")
 
@@ -24,7 +66,7 @@ def save_results(results):
         result["trades"].to_csv(
             RESULT_DIR / f"{name}_trades.csv", index=False
         )
-        if name == "RetirementAllocationStrategy":
+        if strategy_identity(result["strategy"]) == "dsl:retirement-allocation":
             attribution = RetirementAllocationAttribution(
                 history=result["history"],
                 market_data=result["market_data"],
@@ -37,7 +79,7 @@ def save_results(results):
                 )
 
     static_results = [
-        result for result in results
+        result for result in all_results
         if strategy_display_name(result["strategy"]).startswith("STATIC_")
     ]
     pd.DataFrame([result["summary"] for result in static_results]).to_csv(
@@ -45,43 +87,33 @@ def save_results(results):
     )
 
 
-def build_runner():
-    """Configure the active strategies shown in the application."""
-    declarative_strategies = tuple(
+def load_active_strategies():
+    """Load and order every enabled declarative strategy."""
+    declarative_strategies = list(
         load_strategy_directory(
-            RESULT_DIR.parent / "strategies",
+            STRATEGY_DIRECTORY,
             strategy_resolver=DEFAULT_STRATEGY_CATALOG.create,
         )
     )
-    declarative_by_name = {
-        strategy_display_name(strategy): strategy
-        for strategy in declarative_strategies
+    preferred_order = {
+        name: index for index, name in enumerate(PREFERRED_STRATEGY_ORDER)
     }
-    retirement_allocation = declarative_by_name.pop(
-        "RetirementAllocationStrategy"
-    )
-    retirement_allocation_vxus = declarative_by_name.pop(
-        "RetirementAllocationVXUSStrategy"
-    )
-    retirement_profit_band = declarative_by_name.pop(
-        "RetirementAllocationProfitBandStrategy"
-    )
-    retirement_profit_band_vxus = declarative_by_name.pop(
-        "RetirementAllocationProfitBandVXUSStrategy"
-    )
-    asymmetric_defense2 = declarative_by_name.pop(
-        "ASYMMETRIC_TREND_BAND_ADD_DEFENSE2"
-    )
-    static_retirement = declarative_by_name.pop("STATIC_RETIREMENT_7030")
-    strategies = (
-        retirement_allocation,
-        retirement_allocation_vxus,
-        retirement_profit_band,
-        retirement_profit_band_vxus,
-        *declarative_by_name.values(),
-        static_retirement,
-        asymmetric_defense2,
-    )
+    strategies = tuple(sorted(
+        declarative_strategies,
+        key=lambda strategy: preferred_order.get(
+            strategy_identity(strategy), len(preferred_order)
+        ),
+    ))
+    if not strategies:
+        raise ValueError(
+            f"No enabled YAML strategies found in {STRATEGY_DIRECTORY}"
+        )
+    return strategies
+
+
+def build_runner(strategies=None):
+    """Configure the active strategies shown in the application."""
+    strategies = tuple(strategies or load_active_strategies())
     required_tickers = tuple(dict.fromkeys(
         ticker
         for strategy in strategies
@@ -98,6 +130,96 @@ def build_runner():
     for strategy in strategies:
         runner.add_strategy(strategy)
     return runner
+
+
+@lru_cache(maxsize=1)
+def backtest_engine_fingerprint():
+    """Fingerprint Python calculation code for persistent cache invalidation."""
+    digest = sha256()
+    for path in BACKTEST_ENGINE_FILES:
+        digest.update(path.name.encode("utf-8"))
+        digest.update(path.read_bytes())
+    return digest.hexdigest()
+
+
+def strategy_result_cache_key(strategy, runner):
+    """Return a key covering strategy logic, data files, and run options."""
+    digest = sha256()
+    digest.update(strategy_calculation_fingerprint(strategy).encode("ascii"))
+    digest.update(backtest_engine_fingerprint().encode("ascii"))
+    digest.update(json.dumps(
+        runner.backtest_options,
+        sort_keys=True,
+        default=str,
+    ).encode("utf-8"))
+    for ticker in runner.tickers_for(strategy):
+        path = runner.data_dir / f"{ticker}.csv"
+        stat = path.stat()
+        digest.update(str(ticker).encode("utf-8"))
+        digest.update(str(stat.st_size).encode("ascii"))
+        digest.update(str(stat.st_mtime_ns).encode("ascii"))
+    return digest.hexdigest()
+
+
+def run_with_result_cache(runner):
+    """Restore valid results and calculate only cache misses."""
+    cached_by_id = {}
+    keys_by_id = {}
+    pending = []
+    for strategy in runner.strategies:
+        identity = strategy_identity(strategy)
+        cache_key = strategy_result_cache_key(strategy, runner)
+        keys_by_id[identity] = cache_key
+        cached = RESULT_CACHE.load(strategy, cache_key)
+        if cached is None:
+            pending.append(strategy)
+        else:
+            cached_by_id[identity] = cached
+
+    calculated = execute_strategies(pending, ensure_data=False)
+    calculated_by_id = {
+        strategy_identity(result["strategy"]): result for result in calculated
+    }
+    for identity, result in calculated_by_id.items():
+        RESULT_CACHE.save(result, keys_by_id[identity])
+
+    merged = tuple(
+        calculated_by_id.get(strategy_identity(strategy))
+        or cached_by_id[strategy_identity(strategy)]
+        for strategy in runner.strategies
+    )
+    runner.results = list(merged)
+    return merged, calculated
+
+
+def execute_strategy_suite():
+    """Load YAML strategies, prepare data, run backtests, and persist results."""
+    runner = build_runner()
+    ensure_runner_data(runner)
+    results, calculated = run_with_result_cache(runner)
+    if calculated:
+        save_results(calculated, all_results=results)
+    return runner, results
+
+
+def execute_strategies(
+    strategies, *, ensure_data=True, cache_results=False,
+):
+    """Backtest only the supplied strategies for an incremental web reload."""
+    strategies = tuple(strategies)
+    if not strategies:
+        return ()
+    runner = build_runner(strategies)
+    if ensure_data:
+        ensure_runner_data(runner)
+    results = tuple(runner.run())
+    if cache_results:
+        for result in results:
+            RESULT_CACHE.save(
+                result,
+                strategy_result_cache_key(result["strategy"], runner),
+            )
+    return results
 
 
 def ensure_runner_data(runner):
@@ -133,9 +255,7 @@ def parse_args(argv=None):
 
 def main(argv=None):
     args = parse_args(argv)
-    runner = build_runner()
-    ensure_runner_data(runner)
-    results = runner.run()
+    runner, results = execute_strategy_suite()
     summary = runner.summary()
     displayed_period = runner.backtest_period()
 
@@ -143,13 +263,33 @@ def main(argv=None):
     print(f"Backtest period: {displayed_period}")
     print("=" * 50)
     print("\n", summary, "\n")
-    save_results(results)
     if args.chart_backend in {"matplotlib", "both"}:
         draw_chart(results)
     if args.chart_backend in {"dash", "both"}:
         from research_web import run_research_web
+        incremental_results = IncrementalStrategyResults(
+            runner.strategies,
+            results,
+            strategy_loader=load_active_strategies,
+            executor=lambda strategies: execute_strategies(
+                strategies, cache_results=True
+            ),
+            publisher=lambda changed, merged: save_results(
+                changed, all_results=merged
+            ),
+        )
 
-        run_research_web(results, host=args.host, port=args.port)
+        result_store = ReloadableStrategyResults(
+            results,
+            strategy_directory=STRATEGY_DIRECTORY,
+            loader=incremental_results.reload,
+        )
+        run_research_web(
+            results,
+            host=args.host,
+            port=args.port,
+            result_store=result_store,
+        )
 
 
 if __name__ == "__main__":
