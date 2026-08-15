@@ -1,7 +1,7 @@
 strategy:
   # 기본 퇴직자산 전략에 방어 구간의 BND/BIL 혼합과 VXUS 대체를 결합한다.
   id: retirement-allocation-vxus
-  name: RetirementAllocationVXUSStrategy
+  name: RetirementAllocationVXUS
   version: 1
   dsl_version: 1
   enabled: true

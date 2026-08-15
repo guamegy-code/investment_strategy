@@ -1,7 +1,7 @@
 strategy:
   # 상승 구간의 QQQ 수익 보존과 방어 구간의 VXUS 대체를 결합한 퇴직자산 전략
   id: retirement-allocation-profit-band-vxus
-  name: RetirementAllocationProfitBandVXUSStrategy
+  name: RetirementAllocationProfitBandVXUS
   version: 1
   dsl_version: 1
   enabled: true

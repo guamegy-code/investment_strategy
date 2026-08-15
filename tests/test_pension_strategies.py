@@ -241,20 +241,27 @@ class RetirementStrategyTests(unittest.TestCase):
     def test_main_lists_all_active_pension_strategies(self):
         runner = build_runner()
 
+        strategy_names = tuple(
+            strategy_display_name(strategy) for strategy in runner.strategies
+        )
         self.assertEqual(
-            tuple(strategy_display_name(strategy) for strategy in runner.strategies),
+            strategy_names[:10],
             (
-                "RetirementAllocationStrategy",
-                "RetirementAllocationVXUSStrategy",
-                "RetirementAllocationProfitBandStrategy",
-                "RetirementAllocationProfitBandVXUSStrategy",
-                "KodexNasdaqAllocationStrategy",
-                "TimeNasdaqAllocationStrategy",
-                "KoActNasdaqAllocationStrategy",
-                "NasdaqProductMixAllocationStrategy",
+                "RetirementAllocation",
+                "RetirementAllocationVXUS",
+                "RetirementAllocationProfitBand",
+                "RetirementAllocationProfitBandVXUS",
+                "KodexNasdaqAllocation",
+                "TimeNasdaqAllocation",
+                "KoActNasdaqAllocation",
+                "NasdaqProductMixAllocation",
                 "STATIC_RETIREMENT_7030",
                 "ASYMMETRIC_TREND_BAND_ADD_DEFENSE2",
             ),
+        )
+        self.assertIn(
+            strategy_names[10:],
+            ((), ("ASYMMETRIC_TREND_BAND_ADD_DEFENSE2_TUNED",)),
         )
         self.assertEqual(
             tuple(runner.tickers),

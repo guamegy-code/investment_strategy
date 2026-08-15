@@ -1,7 +1,7 @@
 strategy:
   # 퇴직자산용 동적 70/30 전략. 시장 상태에 따라 QQQ 위험 비중을 조절한다.
   id: retirement-allocation
-  name: RetirementAllocationStrategy
+  name: RetirementAllocation
   version: 1
   dsl_version: 1
   enabled: true

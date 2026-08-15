@@ -15,6 +15,7 @@ from research_web import (
     _weight_change_frame,
     create_research_app,
 )
+from strategy_runtime import StrategyResultSnapshot
 
 
 class AlphaStrategy:
@@ -22,6 +23,10 @@ class AlphaStrategy:
 
 
 class BetaStrategy:
+    pass
+
+
+class GammaStrategy:
     pass
 
 
@@ -116,6 +121,55 @@ class ResearchWebTests(unittest.TestCase):
             make_result(BetaStrategy(), [100, 105, 106]),
         )
         self.view = ResearchViewModel(self.results)
+
+    def test_browser_load_publishes_the_latest_strategy_snapshot(self):
+        latest_results = (
+            make_result(AlphaStrategy(), [100, 110, 121]),
+            make_result(GammaStrategy(), [100, 103, 109]),
+        )
+
+        class ResultStore:
+            def __init__(self):
+                self.refresh_count = 0
+
+            def snapshot(self):
+                return StrategyResultSnapshot(latest_results, version=2)
+
+            def refresh_if_changed(self):
+                self.refresh_count += 1
+                return self.snapshot()
+
+        store = ResultStore()
+        app = create_research_app(self.results, result_store=store)
+        layout_response = app.server.test_client().get("/_dash-layout")
+        self.assertEqual(layout_response.status_code, 200)
+        self.assertIn(
+            "no-store", layout_response.headers.get("Cache-Control", "")
+        )
+        layout_text = layout_response.get_data(as_text=True)
+        self.assertIn("GammaStrategy", layout_text)
+        reload_callback = next(
+            metadata["callback"].__wrapped__
+            for metadata in app.callback_map.values()
+            if "research-location" in {
+                item["id"] for item in metadata["inputs"]
+            }
+        )
+
+        output = reload_callback(
+            "/", 1, ["AlphaStrategy"], "AlphaStrategy", "", 1, [], []
+        )
+
+        self.assertGreaterEqual(store.refresh_count, 1)
+        self.assertEqual(output[0], 2)
+        self.assertEqual(output[3], "2개 전략")
+        self.assertEqual(output[8], [
+            {"label": "AlphaStrategy", "value": "AlphaStrategy"},
+            {"label": "GammaStrategy", "value": "GammaStrategy"},
+        ])
+        self.assertEqual(output[9], ["AlphaStrategy"])
+        self.assertEqual(output[11], "AlphaStrategy")
+        self.assertEqual(output[12][1]["Strategy"], "GammaStrategy")
 
     def test_figures_project_existing_result_data(self):
         performance = self.view.performance_figure(["AlphaStrategy"])
@@ -721,7 +775,10 @@ class ResearchWebTests(unittest.TestCase):
         app = create_research_app(self.results)
 
         self.assertEqual(app.title, "Investment Strategy Research")
-        self.assertEqual(len(app.callback_map), 18)
+        self.assertEqual(len(app.callback_map), 19)
+        strategy_selector = find_component(app.layout, "research-strategies")
+        self.assertTrue(strategy_selector.persistence)
+        self.assertEqual(strategy_selector.persistence_type, "local")
         self.assertIsNotNone(find_component(app.layout, "research-kpi-cagr"))
         self.assertEqual(
             find_component(app.layout, "research-kpi-total-return").children,
@@ -795,7 +852,18 @@ class ResearchWebTests(unittest.TestCase):
             "research-indicator-date-range",
             "research-indicator-strategy",
             "research-indicator-overlays",
+            "research-result-version",
         })
+        reload_callback = next(
+            metadata for metadata in app.callback_map.values()
+            if "research-location" in {
+                item["id"] for item in metadata["inputs"]
+            }
+        )
+        self.assertIn(
+            "research-reload-trigger",
+            {item["id"] for item in reload_callback["inputs"]},
+        )
 
     def test_graphs_are_present_initially_and_detail_updates_are_isolated(self):
         app = create_research_app(self.results)
@@ -889,9 +957,12 @@ class ResearchWebTests(unittest.TestCase):
 
         update_detail = detail_callback["callback"].__wrapped__
         detail, _, _, _, total_return = update_detail(
-            "BetaStrategy", "2024-01-01", "2024-01-03", None
+            "BetaStrategy", "2024-01-01", "2024-01-03", 1, None
         )
-        self.assertEqual(detail.layout.datarevision, "BetaStrategy:2024-01-01:2024-01-03")
+        self.assertEqual(
+            detail.layout.datarevision,
+            "BetaStrategy:2024-01-01:2024-01-03:1",
+        )
         self.assertEqual({trace.name for trace in detail.data[:2]}, {"QQQ", "BIL"})
         self.assertEqual(detail.data[2].name, "누적 수익률")
         self.assertEqual(detail.data[3].name, "리밸런싱")
@@ -899,7 +970,7 @@ class ResearchWebTests(unittest.TestCase):
 
         shared_range = {"range": ["2024-01-02", "2024-01-03"]}
         detail, *_ = update_detail(
-            "BetaStrategy", "2024-01-01", "2024-01-03", shared_range
+            "BetaStrategy", "2024-01-01", "2024-01-03", 1, shared_range
         )
         self.assertEqual(
             tuple(detail.layout.xaxis.range),
@@ -962,16 +1033,16 @@ class ResearchWebTests(unittest.TestCase):
         ]["callback"].__wrapped__
 
         alpha_performance = update_performance(
-            ["AlphaStrategy"], "2024-01-01", "2024-01-03"
+            ["AlphaStrategy"], "2024-01-01", "2024-01-03", 1
         )
         beta_performance = update_performance(
-            ["BetaStrategy"], "2024-01-01", "2024-01-03"
+            ["BetaStrategy"], "2024-01-01", "2024-01-03", 1
         )
         alpha_drawdown = update_drawdown(
-            ["AlphaStrategy"], "2024-01-01", "2024-01-03"
+            ["AlphaStrategy"], "2024-01-01", "2024-01-03", 1
         )
         beta_drawdown = update_drawdown(
-            ["BetaStrategy"], "2024-01-01", "2024-01-03"
+            ["BetaStrategy"], "2024-01-01", "2024-01-03", 1
         )
 
         self.assertEqual([trace.name for trace in alpha_performance.data], ["AlphaStrategy"])
@@ -987,11 +1058,11 @@ class ResearchWebTests(unittest.TestCase):
             beta_drawdown.layout.datarevision,
         )
         self.assertEqual(
-            len(update_performance([], "2024-01-01", "2024-01-03").data),
+            len(update_performance([], "2024-01-01", "2024-01-03", 1).data),
             0,
         )
         self.assertEqual(
-            len(update_drawdown([], "2024-01-01", "2024-01-03").data),
+            len(update_drawdown([], "2024-01-01", "2024-01-03", 1).data),
             0,
         )
 

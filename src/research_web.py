@@ -11,6 +11,7 @@ import base64
 from dataclasses import dataclass, field
 from functools import cached_property
 from pathlib import Path
+from threading import RLock
 from typing import Any, Iterable
 import unicodedata
 
@@ -21,6 +22,7 @@ from plotly.subplots import make_subplots
 from dash import ALL, Dash, Input, Output, Patch, State, ctx, dcc, html
 from dash.exceptions import PreventUpdate
 import dash_ag_grid as dag
+from flask import request
 
 from indicator_catalog import (
     INDICATOR_LABELS,
@@ -31,6 +33,7 @@ from indicator_catalog import (
     indicator_panel,
 )
 from strategy_domain import strategy_display_name
+from strategy_runtime import StrategyResultSnapshot
 
 
 # TradingView Markets에서 참고한 밝은 금융 정보 화면의 대비·간격 원칙입니다.
@@ -1389,9 +1392,174 @@ class ResearchViewModel:
         return rows
 
 
-def create_research_app(results: Iterable[dict[str, Any]]) -> Dash:
+def _indicator_layout_configuration(
+    view: ResearchViewModel,
+    selected_pairs: Iterable[tuple[str, str]] | None = None,
+) -> dict[str, Any]:
+    """Build the ticker/indicator controls for one published result snapshot."""
+    market_frames = view.market_frames
+    indicator_tickers = list(market_frames)
+    indicator_start, indicator_end = view.indicator_date_bounds
+    start, end = view.date_bounds
+    indicator_start = indicator_start or start
+    indicator_end = indicator_end or end
+    available_columns = {
+        column for frame in market_frames.values() for column in frame.columns
+    }
+    panel_options = {
+        panel: [
+            option for option in indicator_options(panel)
+            if option["value"] in available_columns
+        ]
+        for panel in PANEL_ORDER
+    }
+    default_tickers = (
+        ["QQQ"] if "QQQ" in indicator_tickers else indicator_tickers[:1]
+    )
+    default_columns = {
+        "price": [
+            column for column in ("Close", "EMA55", "EMA200")
+            if column in available_columns
+        ],
+        "oscillator": [
+            column for column in ("RSI14", "MACD")
+            if column in available_columns
+        ],
+        "risk": [
+            column for column in ("ROC252", "VOL60", "MDD252")
+            if column in available_columns
+        ],
+    }
+    if selected_pairs is None:
+        active_pairs = [
+            (ticker, column)
+            for column in (
+                default_columns["price"]
+                + default_columns["oscillator"]
+                + default_columns["risk"]
+            )
+            for ticker in default_tickers
+        ]
+    else:
+        active_pairs = [
+            (ticker, column)
+            for ticker, column in selected_pairs
+            if ticker in indicator_tickers and column in available_columns
+        ]
+    selected_by_column: dict[str, list[str]] = {}
+    for ticker, column in active_pairs:
+        selected_by_column.setdefault(column, []).append(ticker)
+
+    panels = []
+    for panel in PANEL_ORDER:
+        header = html.Div([
+            html.Div("지표 / 종목", className="research-indicator-matrix-corner"),
+            *[
+                html.Button(
+                    ticker,
+                    id={
+                        "type": "indicator-column-toggle",
+                        "panel": panel,
+                        "ticker": ticker,
+                    },
+                    n_clicks=0,
+                    className="research-indicator-column-toggle",
+                    title=f"{ticker} 열 전체 선택 또는 해제",
+                )
+                for ticker in indicator_tickers
+            ],
+        ], className="research-indicator-matrix-header")
+        rows_for_panel = []
+        for option in panel_options[panel]:
+            column = option["value"]
+            rows_for_panel.append(html.Div([
+                html.Button(
+                    option["label"],
+                    id={"type": "indicator-row-toggle", "column": column},
+                    n_clicks=0,
+                    className="research-indicator-row-toggle",
+                    title=f"{option['label']} 행 전체 선택 또는 해제",
+                ),
+                dcc.Checklist(
+                    id={"type": "indicator-matrix-row", "column": column},
+                    options=[
+                        {"label": ticker, "value": ticker}
+                        for ticker in indicator_tickers
+                    ],
+                    value=selected_by_column.get(column, []),
+                    inline=True,
+                    persistence=True,
+                    persistence_type="local",
+                    className="research-indicator-matrix-checklist",
+                ),
+            ], className="research-indicator-matrix-row"))
+        panels.append(html.Div(
+            html.Div(
+                [header, *rows_for_panel],
+                className="research-indicator-matrix-table",
+                style={"--indicator-ticker-count": max(len(indicator_tickers), 1)},
+            ),
+            id=f"research-indicator-matrix-{panel}",
+            className="research-indicator-matrix-scroll",
+            style={} if panel == "price" else {"display": "none"},
+        ))
+    return {
+        "tickers": indicator_tickers,
+        "start": indicator_start,
+        "end": indicator_end,
+        "pairs": active_pairs,
+        "panels": panels,
+    }
+
+
+def _component_with_id(component: Any, component_id: str) -> Any | None:
+    """Find a component in a generated Dash layout."""
+    if getattr(component, "id", None) == component_id:
+        return component
+    children = getattr(component, "children", None)
+    if children is None:
+        return None
+    if not isinstance(children, (list, tuple)):
+        children = [children]
+    for child in children:
+        found = _component_with_id(child, component_id)
+        if found is not None:
+            return found
+    return None
+
+
+def create_research_app(
+    results: Iterable[dict[str, Any]],
+    *,
+    result_store=None,
+    _defer_initial_figures: bool = False,
+) -> Dash:
     """Create a Dash application over already calculated backtest results."""
-    view = ResearchViewModel(tuple(results))
+    initial_snapshot = StrategyResultSnapshot(tuple(results), version=1)
+    view_cache: dict[int, ResearchViewModel] = {
+        initial_snapshot.version: ResearchViewModel(initial_snapshot.results)
+    }
+    view_cache_lock = RLock()
+
+    def current_snapshot(*, refresh: bool = False) -> StrategyResultSnapshot:
+        if result_store is None:
+            return initial_snapshot
+        return (
+            result_store.refresh_if_changed()
+            if refresh else result_store.snapshot()
+        )
+
+    def current_view(snapshot=None) -> ResearchViewModel:
+        snapshot = snapshot or current_snapshot()
+        with view_cache_lock:
+            cached = view_cache.get(snapshot.version)
+            if cached is None:
+                cached = ResearchViewModel(snapshot.results)
+                view_cache.clear()
+                view_cache[snapshot.version] = cached
+            return cached
+
+    view = current_view(initial_snapshot)
     names = view.names
     start, end = view.date_bounds
     rows = view.summary_rows()
@@ -1446,107 +1614,31 @@ def create_research_app(results: Iterable[dict[str, Any]]) -> Dash:
     selected_total_return = view.total_return(
         names[0] if names else None, start, end
     )
-    market_frames = view.market_frames
-    indicator_tickers = list(market_frames)
-    indicator_start, indicator_end = view.indicator_date_bounds
-    indicator_start = indicator_start or start
-    indicator_end = indicator_end or end
-    available_indicator_columns = {
-        column for frame in market_frames.values() for column in frame.columns
-    }
-    panel_indicator_options = {
-        panel: [
-            option for option in indicator_options(panel)
-            if option["value"] in available_indicator_columns
-        ]
-        for panel in PANEL_ORDER
-    }
-    default_indicator_tickers = (
-        ["QQQ"] if "QQQ" in indicator_tickers else indicator_tickers[:1]
-    )
-    default_indicator_columns = {
-        "price": [
-            column for column in ("Close", "EMA55", "EMA200")
-            if column in available_indicator_columns
-        ],
-        "oscillator": [
-            column for column in ("RSI14", "MACD")
-            if column in available_indicator_columns
-        ],
-        "risk": [
-            column for column in ("ROC252", "VOL60", "MDD252")
-            if column in available_indicator_columns
-        ],
-    }
-    initial_indicator_pairs = [
-        (ticker, column)
-        for column in (
-            default_indicator_columns["price"]
-            + default_indicator_columns["oscillator"]
-            + default_indicator_columns["risk"]
+    indicator_configuration = _indicator_layout_configuration(view)
+    indicator_tickers = indicator_configuration["tickers"]
+    indicator_start = indicator_configuration["start"]
+    indicator_end = indicator_configuration["end"]
+    initial_indicator_pairs = indicator_configuration["pairs"]
+    defer_initial_figures = _defer_initial_figures or result_store is not None
+    if defer_initial_figures:
+        initial_performance_figure = go.Figure()
+        initial_drawdown_figure = go.Figure()
+        initial_detail_figure = go.Figure()
+        initial_indicator_figure = go.Figure()
+    else:
+        initial_performance_figure = view.performance_figure(names, start, end)
+        initial_drawdown_figure = view.drawdown_figure(names, start, end)
+        initial_detail_figure = view.combined_detail_figure(
+            names[0] if names else None, start, end
         )
-        for ticker in default_indicator_tickers
-    ]
-    initial_indicator_figure = view.indicator_figure(
-        None,
-        None,
-        indicator_start,
-        indicator_end,
-        selected_pairs=initial_indicator_pairs,
-    )
-    indicator_matrix_panels = []
-    for panel in PANEL_ORDER:
-        header = html.Div([
-            html.Div("지표 / 종목", className="research-indicator-matrix-corner"),
-            *[
-                html.Button(
-                    ticker,
-                    id={
-                        "type": "indicator-column-toggle",
-                        "panel": panel,
-                        "ticker": ticker,
-                    },
-                    n_clicks=0,
-                    className="research-indicator-column-toggle",
-                    title=f"{ticker} 열 전체 선택 또는 해제",
-                )
-                for ticker in indicator_tickers
-            ],
-        ], className="research-indicator-matrix-header")
-        rows_for_panel = []
-        for option in panel_indicator_options[panel]:
-            column = option["value"]
-            rows_for_panel.append(html.Div([
-                html.Button(
-                    option["label"],
-                    id={"type": "indicator-row-toggle", "column": column},
-                    n_clicks=0,
-                    className="research-indicator-row-toggle",
-                    title=f"{option['label']} 행 전체 선택 또는 해제",
-                ),
-                dcc.Checklist(
-                    id={"type": "indicator-matrix-row", "column": column},
-                    options=[{"label": ticker, "value": ticker} for ticker in indicator_tickers],
-                    value=[
-                        ticker for ticker in default_indicator_tickers
-                        if column in default_indicator_columns[panel]
-                    ],
-                    inline=True,
-                    persistence=True,
-                    persistence_type="local",
-                    className="research-indicator-matrix-checklist",
-                ),
-            ], className="research-indicator-matrix-row"))
-        indicator_matrix_panels.append(html.Div(
-            html.Div(
-                [header, *rows_for_panel],
-                className="research-indicator-matrix-table",
-                style={"--indicator-ticker-count": max(len(indicator_tickers), 1)},
-            ),
-            id=f"research-indicator-matrix-{panel}",
-            className="research-indicator-matrix-scroll",
-            style={} if panel == "price" else {"display": "none"},
-        ))
+        initial_indicator_figure = view.indicator_figure(
+            None,
+            None,
+            indicator_start,
+            indicator_end,
+            selected_pairs=initial_indicator_pairs,
+        )
+    indicator_matrix_panels = indicator_configuration["panels"]
     graph_config = {
         "displaylogo": False,
         "responsive": True,
@@ -1569,6 +1661,17 @@ def create_research_app(results: Iterable[dict[str, Any]]) -> Dash:
         external_stylesheets=[TABLER_STYLESHEET, TABLER_ICONS_STYLESHEET],
         meta_tags=[{"name": "viewport", "content": "width=device-width, initial-scale=1"}],
     )
+
+    @app.server.after_request
+    def prevent_research_snapshot_cache(response):
+        if request.path in {"/", "/_dash-layout", "/_dash-dependencies"}:
+            response.headers["Cache-Control"] = (
+                "no-store, no-cache, must-revalidate, max-age=0"
+            )
+            response.headers["Pragma"] = "no-cache"
+            response.headers["Expires"] = "0"
+        return response
+
     metric_specs = [
         ("CAGR", "연환산 수익률", "trending-up", "percent", "research-kpi-cagr", "positive"),
         ("MDD", "최대 낙폭", "chart-arrows-vertical", "percent", "research-kpi-mdd", "negative"),
@@ -1594,6 +1697,14 @@ def create_research_app(results: Iterable[dict[str, Any]]) -> Dash:
     ]
 
     app.layout = html.Div([
+        dcc.Location(id="research-location", refresh=False),
+        dcc.Interval(
+            id="research-reload-trigger",
+            interval=250,
+            n_intervals=0,
+            max_intervals=1,
+        ),
+        dcc.Store(id="research-result-version", data=initial_snapshot.version),
         dcc.Store(id="research-theme", storage_type="local", data="light"),
         dcc.Store(id="research-detail-range", data={"autorange": True}),
         dcc.Store(id="research-indicator-tooltip-data", data={}),
@@ -1619,11 +1730,21 @@ def create_research_app(results: Iterable[dict[str, Any]]) -> Dash:
                 html.Header([
                     html.Div([
                         html.Div("BACKTEST DASHBOARD", className="research-eyebrow"),
-                        html.H1("시장 전략 리서치", className="research-title"),
+                        html.H1("투자 전략 리서치", className="research-title"),
                         html.P("완료된 백테스트 결과를 한 화면에서 비교하고 분석합니다.", className="research-subtitle"),
                     ]),
-                    html.Span(f"{len(names)}개 전략", className="badge bg-blue-lt research-count"),
+                    html.Span(
+                        f"{len(names)}개 전략",
+                        id="research-strategy-count",
+                        className="badge bg-blue-lt research-count",
+                    ),
                 ], className="research-page-header"),
+
+                html.Div(
+                    id="research-reload-error",
+                    className="alert alert-danger research-reload-error",
+                    style={"display": "none"},
+                ),
 
                 dcc.RadioItems(
                     id="research-view-mode",
@@ -1653,7 +1774,11 @@ def create_research_app(results: Iterable[dict[str, Any]]) -> Dash:
                         dcc.Checklist(
                             id="research-strategies",
                             options=[{"label": name, "value": name} for name in names],
-                            value=names, inline=True, className="research-checklist",
+                            value=names,
+                            inline=True,
+                            persistence=True,
+                            persistence_type="local",
+                            className="research-checklist",
                         ),
                     ], className="research-control research-strategy-control"),
                 ], className="card-body research-toolbar-body"), className="card research-toolbar"),
@@ -1664,7 +1789,7 @@ def create_research_app(results: Iterable[dict[str, Any]]) -> Dash:
                         [dcc.Graph(
                             id="research-performance", config=detail_graph_config,
                             className="research-graph research-navigation-graph",
-                            figure=view.performance_figure(names, start, end),
+                            figure=initial_performance_figure,
                             clear_on_unhover=True,
                             style={"height": "450px", "minHeight": "450px", "width": "100%", "display": "block"},
                         ), dcc.Tooltip(
@@ -1681,7 +1806,7 @@ def create_research_app(results: Iterable[dict[str, Any]]) -> Dash:
                         [dcc.Graph(
                             id="research-drawdown", config=detail_graph_config,
                             className="research-graph research-navigation-graph",
-                            figure=view.drawdown_figure(names, start, end),
+                            figure=initial_drawdown_figure,
                             clear_on_unhover=True,
                             style={"height": "450px", "minHeight": "450px", "width": "100%", "display": "block"},
                         ), dcc.Tooltip(
@@ -1720,7 +1845,7 @@ def create_research_app(results: Iterable[dict[str, Any]]) -> Dash:
                             dcc.Graph(
                                 id="research-detail-graph", config=detail_graph_config,
                                 className="research-graph research-detail-graph research-combined-detail-graph",
-                                figure=view.combined_detail_figure(names[0] if names else None, start, end),
+                                figure=initial_detail_figure,
                                 clear_on_unhover=True,
                                 style={"height": "520px", "minHeight": "520px", "width": "100%", "display": "block"},
                             ),
@@ -1867,6 +1992,7 @@ def create_research_app(results: Iterable[dict[str, Any]]) -> Dash:
                             ], className="research-indicator-editor-toolbar"),
                             html.Div(
                                 indicator_matrix_panels,
+                                id="research-indicator-matrix-body",
                                 className="research-indicator-matrix-body",
                             ),
                         ], className="research-indicator-editor", open=False),
@@ -1899,6 +2025,112 @@ def create_research_app(results: Iterable[dict[str, Any]]) -> Dash:
             ], className="research-container research-content"),
         ], id="research-page", className="research-page"),
     ], className="research-app-shell")
+
+    @app.callback(
+        Output("research-result-version", "data"),
+        Output("research-reload-error", "children"),
+        Output("research-reload-error", "style"),
+        Output("research-strategy-count", "children"),
+        Output("research-date-range", "min_date_allowed"),
+        Output("research-date-range", "max_date_allowed"),
+        Output("research-date-range", "start_date"),
+        Output("research-date-range", "end_date"),
+        Output("research-strategies", "options"),
+        Output("research-strategies", "value"),
+        Output("research-detail-strategy", "options"),
+        Output("research-detail-strategy", "value"),
+        Output("research-summary-grid", "rowData"),
+        Output("research-indicator-date-range", "min_date_allowed"),
+        Output("research-indicator-date-range", "max_date_allowed"),
+        Output("research-indicator-date-range", "start_date"),
+        Output("research-indicator-date-range", "end_date"),
+        Output("research-indicator-strategy", "options"),
+        Output("research-indicator-strategy", "value"),
+        Output("research-indicator-matrix-body", "children"),
+        Input("research-location", "pathname"),
+        Input("research-reload-trigger", "n_intervals"),
+        State("research-strategies", "value"),
+        State("research-detail-strategy", "value"),
+        State("research-indicator-strategy", "value"),
+        State("research-result-version", "data"),
+        State({"type": "indicator-matrix-row", "column": ALL}, "value"),
+        State({"type": "indicator-matrix-row", "column": ALL}, "id"),
+    )
+    def reload_strategy_results(
+        _pathname,
+        _reload_tick,
+        selected_names,
+        detail_name,
+        indicator_strategy,
+        _displayed_version,
+        indicator_row_values,
+        indicator_row_ids,
+    ):
+        snapshot = current_snapshot(refresh=True)
+        active_view = current_view(snapshot)
+        active_names = active_view.names
+        active_start, active_end = active_view.date_bounds
+
+        preserved_names = [
+            name for name in (selected_names or []) if name in active_names
+        ]
+        if detail_name not in active_names:
+            detail_name = active_names[0] if active_names else None
+        if indicator_strategy not in active_names:
+            indicator_strategy = ""
+
+        selected_pairs = [
+            (ticker, row_id["column"])
+            for row_id, selected in zip(
+                indicator_row_ids or [], indicator_row_values or []
+            )
+            for ticker in (selected or [])
+        ]
+        indicator_config = _indicator_layout_configuration(
+            active_view, selected_pairs
+        )
+        error_children = []
+        error_style = {"display": "none"}
+        if snapshot.error:
+            error_children = [
+                html.Strong("전략 파일을 다시 불러오지 못했습니다. "),
+                html.Span(snapshot.error),
+                html.Div(
+                    "마지막으로 정상 실행된 결과를 계속 표시합니다.",
+                    className="research-reload-error-note",
+                ),
+            ]
+            error_style = {}
+
+        strategy_options = [
+            {"label": name, "value": name} for name in active_names
+        ]
+        indicator_options_for_strategy = [
+            {"label": "표시 안 함", "value": ""},
+            *strategy_options,
+        ]
+        return (
+            snapshot.version,
+            error_children,
+            error_style,
+            f"{len(active_names)}개 전략",
+            active_start,
+            active_end,
+            active_start,
+            active_end,
+            strategy_options,
+            preserved_names,
+            strategy_options,
+            detail_name,
+            active_view.summary_rows(),
+            indicator_config["start"],
+            indicator_config["end"],
+            indicator_config["start"],
+            indicator_config["end"],
+            indicator_options_for_strategy,
+            indicator_strategy,
+            indicator_config["panels"],
+        )
 
     app.clientside_callback(
         """
@@ -1961,7 +2193,7 @@ def create_research_app(results: Iterable[dict[str, Any]]) -> Dash:
         if not isinstance(triggered, dict):
             raise PreventUpdate
         return _toggle_indicator_matrix_values(
-            triggered, row_values, row_ids, indicator_tickers,
+            triggered, row_values, row_ids, list(current_view().market_frames),
         )
 
     @app.callback(
@@ -1969,11 +2201,12 @@ def create_research_app(results: Iterable[dict[str, Any]]) -> Dash:
         Input("research-indicator-strategy", "value"),
         Input("research-indicator-date-range", "start_date"),
         Input("research-indicator-date-range", "end_date"),
+        Input("research-result-version", "data"),
     )
     def update_indicator_tooltip_data(
-        overlay_strategy, selected_start, selected_end,
+        overlay_strategy, selected_start, selected_end, _version,
     ):
-        return view.indicator_tooltip_data(
+        return current_view().indicator_tooltip_data(
             overlay_strategy, selected_start, selected_end,
         )
 
@@ -1985,6 +2218,7 @@ def create_research_app(results: Iterable[dict[str, Any]]) -> Dash:
         Input("research-indicator-date-range", "end_date"),
         Input("research-indicator-strategy", "value"),
         Input("research-indicator-overlays", "value"),
+        Input("research-result-version", "data"),
         State({"type": "indicator-matrix-row", "column": ALL}, "id"),
     )
     def update_indicator_research(
@@ -1993,6 +2227,7 @@ def create_research_app(results: Iterable[dict[str, Any]]) -> Dash:
         selected_end,
         overlay_strategy,
         overlay_options,
+        version,
         row_ids,
     ):
         selected_pairs = [
@@ -2000,7 +2235,7 @@ def create_research_app(results: Iterable[dict[str, Any]]) -> Dash:
             for row_id, selected in zip(row_ids, row_values)
             for ticker in (selected or [])
         ]
-        figure = view.indicator_figure(
+        figure = current_view().indicator_figure(
             None,
             None,
             selected_start,
@@ -2013,7 +2248,7 @@ def create_research_app(results: Iterable[dict[str, Any]]) -> Dash:
             datarevision=(
                 f"indicators:{selected_pairs}:"
                 f"{overlay_strategy}:"
-                f"{','.join(overlay_options or [])}"
+                f"{','.join(overlay_options or [])}:{version}"
             ),
             uirevision=f"indicator-range:{selected_start}:{selected_end}",
         )
@@ -2024,10 +2259,18 @@ def create_research_app(results: Iterable[dict[str, Any]]) -> Dash:
         Input("research-strategies", "value"),
         Input("research-date-range", "start_date"),
         Input("research-date-range", "end_date"),
+        Input("research-result-version", "data"),
     )
-    def update_performance(selected_names, selected_start, selected_end):
-        figure = view.performance_figure(selected_names, selected_start, selected_end)
-        revision = f"performance:{','.join(selected_names or [])}:{selected_start}:{selected_end}"
+    def update_performance(
+        selected_names, selected_start, selected_end, version,
+    ):
+        figure = current_view().performance_figure(
+            selected_names, selected_start, selected_end
+        )
+        revision = (
+            f"performance:{','.join(selected_names or [])}:"
+            f"{selected_start}:{selected_end}:{version}"
+        )
         figure.update_layout(datarevision=revision, uirevision=revision)
         return figure
 
@@ -2036,10 +2279,18 @@ def create_research_app(results: Iterable[dict[str, Any]]) -> Dash:
         Input("research-strategies", "value"),
         Input("research-date-range", "start_date"),
         Input("research-date-range", "end_date"),
+        Input("research-result-version", "data"),
     )
-    def update_drawdown(selected_names, selected_start, selected_end):
-        figure = view.drawdown_figure(selected_names, selected_start, selected_end)
-        revision = f"drawdown:{','.join(selected_names or [])}:{selected_start}:{selected_end}"
+    def update_drawdown(
+        selected_names, selected_start, selected_end, version,
+    ):
+        figure = current_view().drawdown_figure(
+            selected_names, selected_start, selected_end
+        )
+        revision = (
+            f"drawdown:{','.join(selected_names or [])}:"
+            f"{selected_start}:{selected_end}:{version}"
+        )
         figure.update_layout(datarevision=revision, uirevision=revision)
         return figure
 
@@ -2052,16 +2303,28 @@ def create_research_app(results: Iterable[dict[str, Any]]) -> Dash:
         Input("research-detail-strategy", "value"),
         Input("research-date-range", "start_date"),
         Input("research-date-range", "end_date"),
+        Input("research-result-version", "data"),
         State("research-detail-range", "data"),
     )
     def update_detail(
-        selected_name, selected_start, selected_end, stored_range,
+        selected_name,
+        selected_start,
+        selected_end,
+        version,
+        stored_range,
     ):
-        summary = next((row for row in rows if row["Strategy"] == selected_name), {})
-        detail_figure = view.combined_detail_figure(
+        active_view = current_view()
+        summary = next(
+            (
+                row for row in active_view.summary_rows()
+                if row["Strategy"] == selected_name
+            ),
+            {},
+        )
+        detail_figure = active_view.combined_detail_figure(
             selected_name, selected_start, selected_end
         )
-        revision = f"{selected_name}:{selected_start}:{selected_end}"
+        revision = f"{selected_name}:{selected_start}:{selected_end}:{version}"
         detail_figure.update_layout(datarevision=revision, uirevision=revision)
         _apply_stored_detail_range(detail_figure, stored_range)
         bounded_range = _bounded_detail_range(detail_figure, stored_range)
@@ -2081,7 +2344,9 @@ def create_research_app(results: Iterable[dict[str, Any]]) -> Dash:
             _metric_value(summary.get("MDD"), "percent"),
             _metric_value(summary.get("Sharpe"), "number"),
             _metric_value(
-                view.total_return(selected_name, selected_start, selected_end),
+                active_view.total_return(
+                    selected_name, selected_start, selected_end
+                ),
                 "percent",
             ),
         )
@@ -2421,9 +2686,62 @@ def create_research_app(results: Iterable[dict[str, Any]]) -> Dash:
         State("research-theme", "data"),
     )
 
+    if result_store is not None:
+        initial_layout = app.layout
+        published_layouts: dict[tuple[int, str | None], Any] = {
+            (initial_snapshot.version, None): initial_layout
+        }
+
+        def serve_current_layout():
+            snapshot = current_snapshot(refresh=True)
+            cache_key = (snapshot.version, snapshot.error)
+            with view_cache_lock:
+                published = published_layouts.get(cache_key)
+            if published is not None:
+                return published
+
+            # Layout generation is deliberately separated from the live result
+            # store so this nested app cannot trigger another strategy reload.
+            published = create_research_app(
+                snapshot.results, _defer_initial_figures=True
+            ).layout
+            version_store = _component_with_id(
+                published, "research-result-version"
+            )
+            if version_store is not None:
+                version_store.data = snapshot.version
+            if snapshot.error:
+                error_box = _component_with_id(
+                    published, "research-reload-error"
+                )
+                if error_box is not None:
+                    error_box.children = [
+                        html.Strong("전략 파일을 다시 불러오지 못했습니다. "),
+                        html.Span(snapshot.error),
+                        html.Div(
+                            "마지막으로 정상 실행된 결과를 계속 표시합니다.",
+                            className="research-reload-error-note",
+                        ),
+                    ]
+                    error_box.style = {}
+            with view_cache_lock:
+                published_layouts.clear()
+                published_layouts[cache_key] = published
+            return published
+
+        app.layout = serve_current_layout
+
     return app
 
 
-def run_research_web(results: Iterable[dict[str, Any]], host="127.0.0.1", port=8050) -> None:
+def run_research_web(
+    results: Iterable[dict[str, Any]],
+    host="127.0.0.1",
+    port=8050,
+    *,
+    result_store=None,
+) -> None:
     """Run the local research dashboard after a backtest has completed."""
-    create_research_app(results).run(host=host, port=port, debug=False)
+    create_research_app(results, result_store=result_store).run(
+        host=host, port=port, debug=False
+    )

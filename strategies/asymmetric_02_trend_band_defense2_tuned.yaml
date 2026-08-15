@@ -4,7 +4,7 @@ strategy:
   name: ASYMMETRIC_TREND_BAND_ADD_DEFENSE2_TUNED
   version: 1
   dsl_version: 1
-  enabled: false
+  enabled: true
 
 assets:
   required: [QQQ, GLD, BND]
