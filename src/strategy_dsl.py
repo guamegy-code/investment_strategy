@@ -28,7 +28,12 @@ class StrategyExpressionError(StrategyDefinitionError):
 
 
 _PERCENT_LITERAL = re.compile(r"(?<![\w.])(\d+(?:\.\d+)?)%")
-_MISSING = object()
+_PRODUCT_FX_RATE_BY_SUFFIX = {
+    ".KS": "KRW=X",
+    ".KQ": "KRW=X",
+}
+_MARKET_MODES = {"BULL", "CAUTION", "BEAR", "RECOVERY"}
+_UNINITIALIZED_MARKET_MODE = "UNINITIALIZED"
 
 
 def _percentage_expression(text: str) -> str:
@@ -53,6 +58,15 @@ def _number(value: Any, *, field: str) -> float:
     if not isfinite(result):
         raise StrategyDefinitionError(f"{field} must be finite")
     return result
+
+
+def _state_literal(value: Any) -> Any:
+    """Normalize readable percentage state values while preserving labels."""
+    if isinstance(value, str) and re.fullmatch(
+        r"\s*-?\d+(?:\.\d+)?%\s*", value
+    ):
+        return _number(value, field="state value")
+    return deepcopy(value)
 
 
 class _Namespace:
@@ -194,6 +208,10 @@ class _ExpressionEvaluator:
         }
         function = core.get(name)
         if function is None:
+            runtime_function = self.context.get(name)
+            if callable(runtime_function):
+                function = runtime_function
+        if function is None:
             definition = self.operators.get(name)
             if definition is None:
                 raise StrategyExpressionError(f"unknown function: {name}")
@@ -253,8 +271,6 @@ class _ExpressionEvaluator:
                     return False
                 left = right
             return True
-        if isinstance(node, ast.IfExp):
-            return self._eval(node.body if self._eval(node.test) else node.orelse)
         if isinstance(node, ast.Call):
             return self._eval_call(node)
         raise StrategyExpressionError(
@@ -268,15 +284,125 @@ def _require_mapping(value: Any, field: str) -> dict[str, Any]:
     return deepcopy(dict(value))
 
 
+def _reject_unknown(
+    value: Mapping[str, Any], allowed: set[str], field: str
+) -> None:
+    unknown = sorted(set(value) - allowed)
+    if unknown:
+        raise StrategyDefinitionError(
+            f"{field} contains unsupported keys: {', '.join(unknown)}"
+        )
+
+
+def _required_market_fields(
+    definition: Mapping[str, Any], tickers: tuple[str, ...]
+) -> dict[str, tuple[str, ...]]:
+    ticker_names = {ticker.casefold(): ticker for ticker in tickers}
+    found = {ticker: {"CLOSE"} for ticker in tickers}
+
+    def inspect(value: Any) -> None:
+        if isinstance(value, Mapping):
+            for nested in value.values():
+                inspect(nested)
+            return
+        if isinstance(value, list):
+            for nested in value:
+                inspect(nested)
+            return
+        if not isinstance(value, str):
+            return
+        expression = value.strip()
+        if expression.startswith("="):
+            expression = expression[1:].strip()
+        try:
+            tree = ast.parse(_percentage_expression(expression), mode="eval")
+        except SyntaxError:
+            return
+        for node in ast.walk(tree):
+            if not (
+                isinstance(node, ast.Attribute)
+                and isinstance(node.value, ast.Name)
+            ):
+                continue
+            ticker = ticker_names.get(node.value.id.casefold())
+            if ticker is not None:
+                found[ticker].add(node.attr.upper())
+
+    for section in ("variables", "state", "target", "rebalance", "execution"):
+        inspect(definition.get(section, {}))
+    return {
+        ticker: tuple(sorted(fields))
+        for ticker, fields in found.items()
+    }
+
+
 def _validate_definition(raw: Any, source: str) -> dict[str, Any]:
     definition = _require_mapping(raw, source)
+    _reject_unknown(
+        definition,
+        {
+            "strategy", "assets", "parameters", "variables", "state",
+            "target", "rebalance", "execution", "source", "products",
+        },
+        "strategy definition",
+    )
     metadata = _require_mapping(definition.get("strategy"), "strategy")
+    _reject_unknown(
+        metadata, {"id", "name", "version", "dsl_version", "enabled"},
+        "strategy",
+    )
     for field in ("id", "name", "version"):
         if metadata.get(field) in (None, ""):
             raise StrategyDefinitionError(f"strategy.{field} is required")
+
+    product_definition = "source" in definition or "products" in definition
+    if product_definition:
+        _reject_unknown(
+            definition, {"strategy", "source", "products"},
+            "product strategy definition",
+        )
+        source_strategy = definition.get("source")
+        if not isinstance(source_strategy, str) or not source_strategy.strip():
+            raise StrategyDefinitionError("source must be a strategy ID")
+        products = _require_mapping(definition.get("products"), "products")
+        if not products:
+            raise StrategyDefinitionError("products must not be empty")
+        product_owners: dict[str, str] = {}
+        for source_asset, configured_products in products.items():
+            if not str(source_asset):
+                raise StrategyDefinitionError("products source asset must not be empty")
+            configured_products = _require_mapping(
+                configured_products, f"products.{source_asset}"
+            )
+            if not configured_products:
+                raise StrategyDefinitionError(
+                    f"products.{source_asset} must not be empty"
+                )
+            total = 0.0
+            for product, share in configured_products.items():
+                product = str(product)
+                if not product:
+                    raise StrategyDefinitionError("product ticker must not be empty")
+                owner = product_owners.get(product)
+                if owner is not None and owner != str(source_asset):
+                    raise StrategyDefinitionError(
+                        f"product {product} is mapped from both {owner} and {source_asset}"
+                    )
+                product_owners[product] = str(source_asset)
+                value = _number(share, field=f"products.{source_asset}.{product}")
+                if value <= 0.0:
+                    raise StrategyDefinitionError("product shares must be positive")
+                total += value
+            if abs(total - 1.0) > 1e-8:
+                raise StrategyDefinitionError(
+                    f"products.{source_asset} shares must sum to 100%"
+                )
+        return definition
+
     if "target" not in definition:
         raise StrategyDefinitionError("target is required")
     assets = _require_mapping(definition.get("assets", {}), "assets")
+    _reject_unknown(assets, {"required", "risk"}, "assets")
     required = assets.get("required")
     if not isinstance(required, list) or not required:
         raise StrategyDefinitionError("assets.required must be a non-empty list")
@@ -285,13 +411,23 @@ def _validate_definition(raw: Any, source: str) -> dict[str, Any]:
     state = _require_mapping(definition.get("state", {}), "state")
     for name, config in state.items():
         config = _require_mapping(config, f"state.{name}")
+        _reject_unknown(config, {"initial", "check", "rules"}, f"state.{name}")
         if "initial" not in config:
             raise StrategyDefinitionError(f"state.{name}.initial is required")
+        check = config.get("check", "daily")
+        if check not in {"daily", "weekly", "monthly", "quarterly"}:
+            raise StrategyDefinitionError(
+                f"unsupported state.{name}.check: {check}"
+            )
         rules = config.get("rules", [])
         if not isinstance(rules, list):
             raise StrategyDefinitionError(f"state.{name}.rules must be a list")
         for index, rule in enumerate(rules):
             rule = _require_mapping(rule, f"state.{name}.rules[{index}]")
+            _reject_unknown(
+                rule, {"when", "otherwise", "set", "confirm"},
+                f"state.{name}.rules[{index}]",
+            )
             if "set" not in rule:
                 raise StrategyDefinitionError(
                     f"state.{name}.rules[{index}].set is required"
@@ -303,6 +439,64 @@ def _validate_definition(raw: Any, source: str) -> dict[str, Any]:
             confirm = int(rule.get("confirm", 1))
             if confirm < 1:
                 raise StrategyDefinitionError("confirm must be at least 1")
+    market_mode = state.get("market_mode")
+    if market_mode is not None:
+        allowed_modes = _MARKET_MODES | {_UNINITIALIZED_MARKET_MODE}
+        initial_mode = str(market_mode["initial"])
+        if initial_mode not in allowed_modes:
+            raise StrategyDefinitionError(
+                "state.market_mode.initial must be BULL, CAUTION, BEAR, "
+                "RECOVERY, or UNINITIALIZED"
+            )
+        for index, rule in enumerate(market_mode.get("rules", [])):
+            assigned = rule["set"]
+            if (
+                isinstance(assigned, str)
+                and not assigned.startswith("=")
+                and assigned not in allowed_modes
+            ):
+                raise StrategyDefinitionError(
+                    f"state.market_mode.rules[{index}].set has unsupported "
+                    f"market mode: {assigned}"
+                )
+
+    target = definition["target"]
+    if not isinstance(target, list) or not target:
+        raise StrategyDefinitionError("target must be a non-empty rule list")
+    unconditional = 0
+    for index, rule in enumerate(target):
+        rule = _require_mapping(rule, f"target[{index}]")
+        _reject_unknown(rule, {"when", "weights"}, f"target[{index}]")
+        weights = _require_mapping(rule.get("weights"), f"target[{index}].weights")
+        if not weights:
+            raise StrategyDefinitionError(f"target[{index}].weights must not be empty")
+        if "when" not in rule:
+            unconditional += 1
+            if index != len(target) - 1:
+                raise StrategyDefinitionError(
+                    "an unconditional target must be the final target rule"
+                )
+    if unconditional > 1:
+        raise StrategyDefinitionError("target may have only one unconditional rule")
+
+    rebalance = definition.get("rebalance", [])
+    if not isinstance(rebalance, list):
+        raise StrategyDefinitionError("rebalance must be a rule list")
+    for index, rule in enumerate(rebalance):
+        rule = _require_mapping(rule, f"rebalance[{index}]")
+        _reject_unknown(rule, {"when", "check", "days"}, f"rebalance[{index}]")
+        if "when" not in rule:
+            raise StrategyDefinitionError(f"rebalance[{index}].when is required")
+        check = rule.get("check", "daily")
+        if check not in {"daily", "weekly", "monthly", "quarterly"}:
+            raise StrategyDefinitionError(
+                f"unsupported rebalance[{index}].check: {check}"
+            )
+
+    execution = definition.get("execution", {})
+    if not isinstance(execution, Mapping):
+        raise StrategyDefinitionError("execution must be a mapping")
+    _reject_unknown(execution, {"days"}, "execution")
     return definition
 
 
@@ -327,6 +521,10 @@ class DeclarativeStrategy:
         operators: OperatorRegistry | None = None,
     ):
         self.definition = _validate_definition(definition, "strategy definition")
+        if "source" in self.definition:
+            raise StrategyDefinitionError(
+                "product strategy definitions must be loaded from a strategy directory"
+            )
         metadata = self.definition["strategy"]
         self.strategy_id = f"dsl:{metadata['id']}"
         self.display_name = str(metadata["name"])
@@ -336,6 +534,9 @@ class DeclarativeStrategy:
 
         assets = self.definition["assets"]
         self.required_tickers = tuple(str(item) for item in assets["required"])
+        self.required_market_fields = _required_market_fields(
+            self.definition, self.required_tickers
+        )
         risk = assets.get("risk", ())
         if isinstance(risk, str):
             risk = [risk]
@@ -343,17 +544,41 @@ class DeclarativeStrategy:
 
         self.parameters = deepcopy(self.definition.get("parameters", {}))
         self._state_values = {
-            name: deepcopy(config["initial"])
+            name: _state_literal(config["initial"])
             for name, config in self.definition.get("state", {}).items()
         }
         self._state_candidates: dict[str, dict[str, Any]] = {}
+        self._last_state_periods: dict[str, Any] = {}
         self._previous_state_values = deepcopy(self._state_values)
         self._changed_state: set[str] = set()
-        self._last_rebalance_period: Any = None
+        self._last_rebalance_periods: dict[int, Any] = {}
         self._evaluated_once = False
         self.variables: dict[str, Any] = {}
         self.target: dict[str, float] | None = None
-        self.state = next(iter(self._state_values.values()), None)
+        self.state = self._representative_state(allow_uninitialized=True)
+
+    def __getattr__(self, name: str) -> Any:
+        variables = self.__dict__.get("variables", {})
+        if name in variables:
+            return variables[name]
+        state_values = self.__dict__.get("_state_values", {})
+        if name in state_values:
+            return state_values[name]
+        raise AttributeError(name)
+
+    def _representative_state(self, *, allow_uninitialized: bool = False) -> Any:
+        if "market_mode" not in self._state_values:
+            return next(iter(self._state_values.values()), None)
+        value = self._state_values["market_mode"]
+        allowed = _MARKET_MODES | (
+            {_UNINITIALIZED_MARKET_MODE} if allow_uninitialized else set()
+        )
+        if value not in allowed:
+            expected = ", ".join(sorted(allowed))
+            raise StrategyDefinitionError(
+                f"state.market_mode must be one of: {expected}"
+            )
+        return value
 
     @classmethod
     def from_yaml(
@@ -361,24 +586,44 @@ class DeclarativeStrategy:
     ) -> "DeclarativeStrategy":
         return cls(load_strategy_definition(path), operators=operators)
 
-    def _context(self, market: Mapping[str, Any], portfolio: Any) -> dict[str, Any]:
+    def _context(
+        self,
+        market: Mapping[str, Any],
+        portfolio: Any,
+        target: Mapping[str, float] | None = None,
+    ) -> dict[str, Any]:
         prices = {
             ticker: observations.get("Close")
             for ticker, observations in market.items()
             if observations.get("Close") is not None
         }
         weights = portfolio.weights(prices) if prices else {}
-        return {
+        context = {
             **market,
             "parameters": self.parameters,
             "variables": self.variables,
             "state": self._state_values,
             "portfolio": {"weight": weights},
         }
+        if target is not None:
+            deviation = max(
+                (
+                    abs(float(weights.get(ticker, 0.0)) - goal)
+                    for ticker, goal in target.items()
+                ),
+                default=0.0,
+            )
+            context["target_deviation"] = lambda: deviation
+        return context
 
-    def _evaluator(self, market: Mapping[str, Any], portfolio: Any) -> _ExpressionEvaluator:
+    def _evaluator(
+        self,
+        market: Mapping[str, Any],
+        portfolio: Any,
+        target: Mapping[str, float] | None = None,
+    ) -> _ExpressionEvaluator:
         return _ExpressionEvaluator(
-            self._context(market, portfolio),
+            self._context(market, portfolio, target),
             previous_state=self._previous_state_values,
             changed_state=self._changed_state,
             operators=self.operators,
@@ -389,10 +634,16 @@ class DeclarativeStrategy:
         for name, expression in self.definition.get("variables", {}).items():
             self.variables[name] = self._evaluator(market, portfolio).evaluate(expression)
 
-    def _update_state(self, market: Mapping[str, Any], portfolio: Any) -> None:
+    def _update_state(
+        self, date: Any, market: Mapping[str, Any], portfolio: Any
+    ) -> None:
         self._previous_state_values = deepcopy(self._state_values)
         self._changed_state = set()
         for name, config in self.definition.get("state", {}).items():
+            period = self._period(date, str(config.get("check", "daily")))
+            if self._last_state_periods.get(name) == period:
+                continue
+            self._last_state_periods[name] = period
             evaluator = self._evaluator(market, portfolio)
             selected = None
             for rule in config.get("rules", []):
@@ -403,10 +654,10 @@ class DeclarativeStrategy:
                 self._state_candidates.pop(name, None)
                 continue
             assignment = selected["set"]
-            desired = (
+            desired = _state_literal(
                 evaluator.evaluate(assignment[1:])
                 if isinstance(assignment, str) and assignment.startswith("=")
-                else deepcopy(assignment)
+                else assignment
             )
             current = self._state_values[name]
             if desired == current:
@@ -421,48 +672,32 @@ class DeclarativeStrategy:
                 self._state_candidates.pop(name, None)
             else:
                 self._state_candidates[name] = {"value": desired, "days": days}
-        self.state = next(iter(self._state_values.values()), None)
+        self.state = self._representative_state()
 
     def _selected_target(self, market: Mapping[str, Any], portfolio: Any) -> Mapping[str, Any]:
         target = self.definition["target"]
-        if isinstance(target, Mapping):
-            return target
-        if not isinstance(target, list):
-            raise StrategyDefinitionError("target must be a mapping or rule list")
         evaluator = self._evaluator(market, portfolio)
         for rule in target:
             rule = _require_mapping(rule, "target rule")
-            if rule.get("otherwise") or bool(evaluator.evaluate(rule.get("when"))):
+            if "when" not in rule or bool(evaluator.evaluate(rule["when"])):
                 return _require_mapping(rule.get("weights"), "target rule weights")
         raise StrategyDefinitionError("no target rule matched")
 
     def _target_weights(self, market: Mapping[str, Any], portfolio: Any) -> dict[str, float]:
         raw = self._selected_target(market, portfolio)
         evaluator = self._evaluator(market, portfolio)
-        prices = {ticker: market[ticker]["Close"] for ticker in raw}
-        current = portfolio.weights(prices)
         target: dict[str, float] = {}
-        remaining_tickers: list[str] = []
         for ticker, expression in raw.items():
-            if expression == "keep_current":
-                target[str(ticker)] = float(current.get(ticker, 0.0))
-            elif expression == "remaining":
-                remaining_tickers.append(str(ticker))
-            else:
-                value = (
-                    _number(expression, field=f"target.{ticker}")
-                    if not isinstance(expression, str)
-                    or expression.strip().endswith("%")
-                    and re.fullmatch(r"\s*\d+(?:\.\d+)?%\s*", expression)
-                    else _number(
-                        evaluator.evaluate(expression), field=f"target.{ticker}"
-                    )
+            value = (
+                _number(expression, field=f"target.{ticker}")
+                if not isinstance(expression, str)
+                or expression.strip().endswith("%")
+                and re.fullmatch(r"\s*\d+(?:\.\d+)?%\s*", expression)
+                else _number(
+                    evaluator.evaluate(expression), field=f"target.{ticker}"
                 )
-                target[str(ticker)] = value
-        if len(remaining_tickers) > 1:
-            raise StrategyDefinitionError("only one target may use remaining")
-        if remaining_tickers:
-            target[remaining_tickers[0]] = round(1.0 - sum(target.values()), 10)
+            )
+            target[str(ticker)] = value
         if set(target) != set(self.required_tickers):
             missing = sorted(set(self.required_tickers) - set(target))
             extra = sorted(set(target) - set(self.required_tickers))
@@ -485,43 +720,59 @@ class DeclarativeStrategy:
             return date.to_period("M")
         if schedule == "quarterly":
             return date.to_period("Q")
-        raise StrategyDefinitionError(f"unsupported rebalance check: {schedule}")
+        raise StrategyDefinitionError(f"unsupported check period: {schedule}")
 
     def _should_rebalance(
         self, date: Any, market: Mapping[str, Any], portfolio: Any, target: Mapping[str, float]
-    ) -> tuple[bool, str | None]:
-        config = self.definition.get("rebalance", {})
-        if not config or not self._evaluated_once:
-            return False, None
-        evaluator = self._evaluator(market, portfolio)
-        condition = config.get("when")
-        if condition is not None and bool(evaluator.evaluate(condition)):
-            return True, "DECLARATIVE_CONDITION"
+    ) -> tuple[bool, str | None, int | None]:
+        rules = self.definition.get("rebalance", [])
+        if not rules:
+            return False, None, None
+        evaluator = self._evaluator(market, portfolio, target)
+        eligible: list[tuple[int, Mapping[str, Any]]] = []
+        for index, rule in enumerate(rules):
+            schedule = str(rule.get("check", "daily"))
+            period = self._period(date, schedule)
+            previous_period = self._last_rebalance_periods.get(index)
+            self._last_rebalance_periods[index] = period
+            if not self._evaluated_once or period == previous_period:
+                continue
+            eligible.append((index, rule))
+        for index, rule in eligible:
+            if not bool(evaluator.evaluate(rule["when"])):
+                continue
+            days = None
+            if "days" in rule:
+                days = int(evaluator.evaluate(rule["days"]))
+                if days < 1:
+                    raise StrategyDefinitionError(
+                        f"rebalance[{index}].days must be at least 1"
+                    )
+            return True, self._rebalance_reason(index), days
+        return False, None, None
 
-        drift_limit = config.get("drift")
-        if drift_limit is None:
-            return False, None
-        schedule = str(config.get("check", "daily"))
-        period = self._period(date, schedule)
-        if period == self._last_rebalance_period:
-            return False, None
-        self._last_rebalance_period = period
-        prices = {ticker: market[ticker]["Close"] for ticker in target}
-        weights = portfolio.weights(prices)
-        limit = _number(drift_limit, field="rebalance.drift")
-        outside = any(
-            abs(float(weights.get(ticker, 0.0)) - goal) >= limit
-            for ticker, goal in target.items()
+    def _rebalance_reason(self, rule_index: int) -> str:
+        primary_state = (
+            "market_mode"
+            if "market_mode" in self._state_values
+            else next(iter(self._state_values), None)
         )
-        return outside, f"{schedule.upper()}_{limit:.1%}_DRIFT" if outside else None
+        if primary_state in self._changed_state:
+            previous = self._previous_state_values[primary_state]
+            current = self._state_values[primary_state]
+            details = []
+            for name in ("risk_off_score", "recovery_score"):
+                if name in self.variables:
+                    label = name.removesuffix("_score")
+                    details.append(f"{label}={self.variables[name]}")
+            suffix = f"({','.join(details)})" if details else ""
+            return f"{previous}->{current}{suffix}"
+        return f"DECLARATIVE_RULE_{rule_index + 1}"
 
     def _execution_days(self, market: Mapping[str, Any], portfolio: Any) -> int:
         execution = self.definition.get("execution", {})
-        if isinstance(execution, int):
-            days = execution
-        else:
-            execution = _require_mapping(execution, "execution")
-            days = self._evaluator(market, portfolio).evaluate(execution.get("days", 1))
+        execution = _require_mapping(execution, "execution")
+        days = self._evaluator(market, portfolio).evaluate(execution.get("days", 1))
         days = int(days)
         if days < 1:
             raise StrategyDefinitionError("execution days must be at least 1")
@@ -529,16 +780,170 @@ class DeclarativeStrategy:
 
     def evaluate(self, date: Any, market: Mapping[str, Any], portfolio: Any) -> dict[str, Any]:
         self._calculate_variables(market, portfolio)
-        self._update_state(market, portfolio)
+        self._update_state(date, market, portfolio)
         target = self._target_weights(market, portfolio)
-        rebalance, reason = self._should_rebalance(date, market, portfolio, target)
+        rebalance, reason, rule_days = self._should_rebalance(
+            date, market, portfolio, target
+        )
         self.target = target
         self._evaluated_once = True
         return {
             "rebalance": rebalance,
             "target": target.copy(),
-            "days": self._execution_days(market, portfolio),
+            "days": rule_days or self._execution_days(market, portfolio),
             "reason": reason,
+        }
+
+
+class _MappedPortfolioView:
+    """Present actual product holdings as source-asset weights."""
+
+    def __init__(
+        self,
+        portfolio: Any,
+        market: Mapping[str, Mapping[str, Any]],
+        products: Mapping[str, Mapping[str, float]],
+    ):
+        self._portfolio = portfolio
+        self._products = products
+        prices = {
+            ticker: observations.get("Close")
+            for ticker, observations in market.items()
+            if observations.get("Close") is not None
+        }
+        self._actual_weights = portfolio.weights(prices)
+
+    def weights(self, prices: Mapping[str, Any]) -> dict[str, float]:
+        result = {}
+        for source_asset in prices:
+            mapped = self._products.get(source_asset)
+            if mapped is None:
+                result[source_asset] = float(
+                    self._actual_weights.get(source_asset, 0.0)
+                )
+            else:
+                result[source_asset] = sum(
+                    float(self._actual_weights.get(product, 0.0))
+                    for product in mapped
+                )
+        return result
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._portfolio, name)
+
+
+class ProductMappedStrategy:
+    """Delegate decisions to a source strategy and map targets to products."""
+
+    def __init__(self, definition: Mapping[str, Any], source_strategy: Any):
+        self.definition = _validate_definition(definition, "product strategy definition")
+        if "source" not in self.definition:
+            raise StrategyDefinitionError("source is required for a product strategy")
+        if not callable(getattr(source_strategy, "evaluate", None)):
+            raise StrategyDefinitionError("source strategy must define evaluate()")
+
+        metadata = self.definition["strategy"]
+        self.strategy_id = f"dsl:{metadata['id']}"
+        self.display_name = str(metadata["name"])
+        self.STRATEGY_VERSION = str(metadata["version"])
+        self.dsl_version = str(metadata.get("dsl_version", "1"))
+        self.source_strategy_id = str(self.definition["source"])
+        self.source_strategy = source_strategy
+        self.products = {
+            str(source_asset): {
+                str(product): _number(
+                    share, field=f"products.{source_asset}.{product}"
+                )
+                for product, share in configured_products.items()
+            }
+            for source_asset, configured_products in self.definition["products"].items()
+        }
+
+        source_tickers = tuple(
+            str(ticker)
+            for ticker in getattr(source_strategy, "required_tickers", ())
+        )
+        if not source_tickers:
+            raise StrategyDefinitionError("source strategy must declare required_tickers")
+        unknown_sources = sorted(set(self.products) - set(source_tickers))
+        if unknown_sources:
+            raise StrategyDefinitionError(
+                "products contains assets not used by the source strategy: "
+                + ", ".join(unknown_sources)
+            )
+        product_tickers = tuple(
+            product
+            for configured_products in self.products.values()
+            for product in configured_products
+        )
+        self.required_tickers = tuple(dict.fromkeys((*source_tickers, *product_tickers)))
+        fx_rates = {
+            rate
+            for ticker in product_tickers
+            for suffix, rate in _PRODUCT_FX_RATE_BY_SUFFIX.items()
+            if ticker.upper().endswith(suffix)
+        }
+        if len(fx_rates) > 1:
+            raise StrategyDefinitionError(
+                "mapped products require more than one exchange rate"
+            )
+        if fx_rates:
+            self.FX_RATE_TICKER = next(iter(fx_rates))
+
+        source_risk = tuple(
+            str(ticker)
+            for ticker in getattr(source_strategy, "risk_asset_tickers", ())
+        )
+        self.risk_asset_tickers = tuple(dict.fromkeys(
+            product
+            for source_asset in source_risk
+            for product in self.products.get(source_asset, {source_asset: 1.0})
+        ))
+        self.target: dict[str, float] | None = None
+
+    def __getattr__(self, name: str) -> Any:
+        source = self.__dict__.get("source_strategy")
+        if source is None:
+            raise AttributeError(name)
+        return getattr(source, name)
+
+    def _map_target(self, source_target: Mapping[str, Any]) -> dict[str, float]:
+        mapped_target: dict[str, float] = {}
+        for source_asset, raw_weight in source_target.items():
+            weight = _number(raw_weight, field=f"source target.{source_asset}")
+            configured_products = self.products.get(
+                str(source_asset), {str(source_asset): 1.0}
+            )
+            allocated = 0.0
+            items = list(configured_products.items())
+            for index, (product, share) in enumerate(items):
+                product_weight = (
+                    round(weight - allocated, 10)
+                    if index == len(items) - 1
+                    else round(weight * share, 10)
+                )
+                mapped_target[product] = round(
+                    mapped_target.get(product, 0.0) + product_weight, 10
+                )
+                allocated += product_weight
+        if abs(sum(mapped_target.values()) - 1.0) > 1e-8:
+            raise StrategyDefinitionError("mapped target weights must sum to 100%")
+        return mapped_target
+
+    def evaluate(
+        self, date: Any, market: Mapping[str, Any], portfolio: Any
+    ) -> dict[str, Any]:
+        source_portfolio = _MappedPortfolioView(portfolio, market, self.products)
+        source_signal = self.source_strategy.evaluate(date, market, source_portfolio)
+        if not isinstance(source_signal, Mapping):
+            raise StrategyDefinitionError("source strategy evaluation must be a mapping")
+        mapped_target = self._map_target(
+            _require_mapping(source_signal.get("target"), "source target")
+        )
+        self.target = mapped_target
+        return {
+            **dict(source_signal),
+            "target": mapped_target.copy(),
         }
 
 
@@ -547,20 +952,53 @@ def load_strategy_directory(
     *,
     enabled_only: bool = True,
     operators: OperatorRegistry | None = None,
-) -> list[DeclarativeStrategy]:
-    """Load independent YAML strategies from a directory in filename order."""
+    strategy_resolver: Callable[[str], Any] | None = None,
+) -> list[Any]:
+    """Load calculation and product-mapped strategies from a directory."""
     root = Path(directory)
     if not root.exists():
         return []
-    strategies = []
+    definitions = [
+        load_strategy_definition(path)
+        for path in sorted((*root.glob("*.yaml"), *root.glob("*.yml")))
+    ]
     seen: set[str] = set()
-    for path in sorted((*root.glob("*.yaml"), *root.glob("*.yml"))):
-        definition = load_strategy_definition(path)
-        if enabled_only and not definition["strategy"].get("enabled", True):
+    for definition in definitions:
+        strategy_id = f"dsl:{definition['strategy']['id']}"
+        if strategy_id in seen:
+            raise StrategyDefinitionError(f"duplicate strategy id: {strategy_id}")
+        seen.add(strategy_id)
+
+    local_sources: dict[str, Any] = {}
+    for definition in definitions:
+        if "source" in definition:
             continue
         strategy = DeclarativeStrategy(definition, operators=operators)
-        if strategy.strategy_id in seen:
-            raise StrategyDefinitionError(f"duplicate strategy id: {strategy.strategy_id}")
-        seen.add(strategy.strategy_id)
-        strategies.append(strategy)
-    return strategies
+        local_sources[strategy.strategy_id] = strategy
+        local_sources[strategy.strategy_id.removeprefix("dsl:")] = strategy
+
+    loaded: list[Any] = []
+    for definition in definitions:
+        enabled = definition["strategy"].get("enabled", True)
+        if enabled_only and not enabled:
+            continue
+        if "source" not in definition:
+            strategy_id = f"dsl:{definition['strategy']['id']}"
+            loaded.append(local_sources[strategy_id])
+            continue
+
+        source_id = str(definition["source"])
+        source_strategy = local_sources.get(source_id)
+        if source_strategy is not None:
+            source_strategy = deepcopy(source_strategy)
+        elif strategy_resolver is not None:
+            try:
+                source_strategy = strategy_resolver(source_id)
+            except (KeyError, ValueError) as exc:
+                raise StrategyDefinitionError(
+                    f"unknown source strategy: {source_id}"
+                ) from exc
+        else:
+            raise StrategyDefinitionError(f"unknown source strategy: {source_id}")
+        loaded.append(ProductMappedStrategy(definition, source_strategy))
+    return loaded

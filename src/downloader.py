@@ -15,6 +15,7 @@ from config import (
     FX_RATE_TICKERS,
     TICKERS,
     START_DATE,
+    DATA_START_DATE,
     END_DATE,
 )
 
@@ -30,7 +31,7 @@ def download_one(ticker: str, output_dir=DATA_DIR) -> pd.DataFrame:
 
     df = yf.download(
         ticker,
-        start=START_DATE,
+        start=DATA_START_DATE,
         end=END_DATE,
         auto_adjust=True,
         progress=False,
@@ -57,21 +58,55 @@ def download_one(ticker: str, output_dir=DATA_DIR) -> pd.DataFrame:
     return df
 
 
-def ensure_data_files(tickers, data_dir=DATA_DIR):
-    """Download only ticker CSV files that do not already exist."""
+def _needs_indicator_refresh(path, fields):
+    fields = {str(field).upper() for field in fields} - {"CLOSE"}
+    if not fields:
+        return False
+    try:
+        frame = pd.read_csv(path, index_col="Date", parse_dates=True)
+    except (OSError, ValueError):
+        return True
+    if frame.empty:
+        return True
+    start = pd.Timestamp(START_DATE)
+    first_date = frame.index.min()
+    # 상장일이 백테스트 시작일보다 훨씬 늦으면 선행 데이터를 만들 수 없다.
+    if first_date > start + pd.Timedelta(days=14):
+        return False
+    first_rows = frame.loc[frame.index >= start]
+    if first_rows.empty:
+        return True
+    columns = {str(column).upper(): column for column in frame.columns}
+    if not fields.issubset(columns):
+        return True
+    first = first_rows.iloc[0]
+    return any(pd.isna(first[columns[field]]) for field in fields)
+
+
+def ensure_data_files(
+    tickers, data_dir=DATA_DIR, required_market_fields=None
+):
+    """Download missing files and refresh files lacking indicator warm-up."""
     data_dir = Path(data_dir)
     ordered_tickers = tuple(dict.fromkeys(tickers or ()))
-    missing = tuple(
+    required_market_fields = required_market_fields or {}
+    pending = tuple(
         ticker
         for ticker in ordered_tickers
-        if not (data_dir / f"{ticker}.csv").is_file()
+        if (
+            not (data_dir / f"{ticker}.csv").is_file()
+            or _needs_indicator_refresh(
+                data_dir / f"{ticker}.csv",
+                required_market_fields.get(ticker, ()),
+            )
+        )
     )
-    if not missing:
+    if not pending:
         return ()
 
-    print(f"누락된 시장 데이터 자동 다운로드: {', '.join(missing)}")
+    print(f"누락되었거나 선행 기간이 부족한 시장 데이터 다운로드: {', '.join(pending)}")
     failures = []
-    for ticker in missing:
+    for ticker in pending:
         try:
             download_one(ticker, output_dir=data_dir)
         except Exception as error:
@@ -82,7 +117,7 @@ def ensure_data_files(tickers, data_dir=DATA_DIR):
             f"{ticker}: {error}" for ticker, error in failures
         )
         raise RuntimeError(f"시장 데이터 자동 다운로드 실패: {detail}")
-    return missing
+    return pending
 
 
 def main():

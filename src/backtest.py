@@ -130,10 +130,25 @@ class Backtest:
             "EMA200_SLOPE20",
             "DRAWDOWN120",
             "RSI14",
+            "DISPARITY60",
             "VOL60",
         }
-        if not required.issubset(df.columns):
+        strategy_fields = {
+            field.upper()
+            for field in getattr(
+                self.strategy, "required_market_fields", {}
+            ).get(ticker, ())
+        }
+        available = {str(column).upper() for column in df.columns}
+        if not required.issubset(df.columns) or not strategy_fields.issubset(available):
             df = Indicator.add_indicators(df)
+            available = {str(column).upper() for column in df.columns}
+        missing = sorted(strategy_fields - available)
+        if missing:
+            raise ValueError(
+                f"Strategy requires unavailable indicators for {ticker}: "
+                + ", ".join(missing)
+            )
         return df
 
 
@@ -154,6 +169,24 @@ class Backtest:
             merged = merged.loc[merged.index >= self.start_date]
         if self.end_date is not None:
             merged = merged.loc[merged.index <= self.end_date]
+        required_fields = getattr(
+            self.strategy, "required_market_fields", {}
+        )
+        columns_by_name = {
+            str(column).casefold(): column for column in merged.columns
+        }
+        readiness_columns = []
+        for ticker, fields in required_fields.items():
+            for field in fields:
+                expected = f"{ticker}_{field}".casefold()
+                column = columns_by_name.get(expected)
+                if column is None:
+                    raise ValueError(
+                        f"Strategy requires unavailable market field: {ticker}.{field}"
+                    )
+                readiness_columns.append(column)
+        if readiness_columns:
+            merged = merged.dropna(subset=readiness_columns)
         if merged.empty:
             raise ValueError(
                 "No overlapping market data in the configured backtest period"
@@ -177,6 +210,9 @@ class Backtest:
     # ==================================================
     def get_market(self, row):
         market = {}
+        required_fields = getattr(
+            self.strategy, "required_market_fields", {}
+        )
         for ticker in self.tickers:
             market[ticker] = {
                 "Close": row[f"{ticker}_Close"],
@@ -193,8 +229,25 @@ class Backtest:
                 "EMA200_SLOPE20": row.get(f"{ticker}_EMA200_SLOPE20"),
                 "DRAWDOWN120": row.get(f"{ticker}_DRAWDOWN120"),
                 "RSI14": row.get(f"{ticker}_RSI14"),
+                "DISPARITY60": row.get(f"{ticker}_DISPARITY60"),
                 "VOL60": row.get(f"{ticker}_VOL60"),
             }
+            for field in required_fields.get(ticker, ()):
+                if any(
+                    key.casefold() == field.casefold()
+                    for key in market[ticker]
+                ):
+                    continue
+                source_column = next(
+                    (
+                        key for key in row
+                        if key.casefold() == f"{ticker}_{field}".casefold()
+                    ),
+                    None,
+                )
+                market[ticker][field] = (
+                    row.get(source_column) if source_column is not None else None
+                )
         return market    
     
 

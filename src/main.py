@@ -7,30 +7,10 @@ from attribution import RetirementAllocationAttribution
 from chart import draw_chart
 from config import END_DATE, FX_RATE_TICKERS, RESULT_DIR, START_DATE
 from downloader import ensure_data_files
-from pension_strategies import (
-    KodexNasdaqAllocationStrategy,
-    KoActNasdaqAllocationStrategy,
-    NasdaqProductMixAllocationStrategy,
-    TimeNasdaqAllocationStrategy,
-)
 from runner import Runner
+from rebalance_service import DEFAULT_STRATEGY_CATALOG
 from strategy_dsl import load_strategy_directory
 from strategy_domain import strategy_display_name
-from strategy import (
-    RetirementAllocationVXUSStrategy,
-    RetirementAllocationStrategy,
-    EXPANDING_RISK_FORECAST_30_70,
-    STATIC_RETIREMENT_7030,
-    ASYMMETRIC_TREND_BAND_ADD_DEFENSE2,
-)
-
-from experimental_strategies import (
-    ASYMMETRIC_TREND_BAND_ADD_DEFENSE2_TUNED,
-    RetirementAllocationProfitBandStrategy,
-    RetirementAllocationProfitBandVXUSStrategy,
-)
-
-
 def save_results(results):
     histories = {
         strategy_display_name(result["strategy"]): result["history"]
@@ -67,24 +47,41 @@ def save_results(results):
 
 def build_runner():
     """Configure the active strategies shown in the application."""
-    python_strategies = (
-        RetirementAllocationStrategy(),
-        RetirementAllocationVXUSStrategy(),
-        RetirementAllocationProfitBandStrategy(),
-        RetirementAllocationProfitBandVXUSStrategy(),
-        KodexNasdaqAllocationStrategy(),
-        TimeNasdaqAllocationStrategy(),
-        KoActNasdaqAllocationStrategy(),
-        NasdaqProductMixAllocationStrategy(),
-        #EXPANDING_RISK_FORECAST_30_70(),
-        STATIC_RETIREMENT_7030(),
-        ASYMMETRIC_TREND_BAND_ADD_DEFENSE2(),
-        #ASYMMETRIC_TREND_BAND_ADD_DEFENSE2_TUNED(),
-    )
     declarative_strategies = tuple(
-        load_strategy_directory(RESULT_DIR.parent / "strategies")
+        load_strategy_directory(
+            RESULT_DIR.parent / "strategies",
+            strategy_resolver=DEFAULT_STRATEGY_CATALOG.create,
+        )
     )
-    strategies = (*python_strategies, *declarative_strategies)
+    declarative_by_name = {
+        strategy_display_name(strategy): strategy
+        for strategy in declarative_strategies
+    }
+    retirement_allocation = declarative_by_name.pop(
+        "RetirementAllocationStrategy"
+    )
+    retirement_allocation_vxus = declarative_by_name.pop(
+        "RetirementAllocationVXUSStrategy"
+    )
+    retirement_profit_band = declarative_by_name.pop(
+        "RetirementAllocationProfitBandStrategy"
+    )
+    retirement_profit_band_vxus = declarative_by_name.pop(
+        "RetirementAllocationProfitBandVXUSStrategy"
+    )
+    asymmetric_defense2 = declarative_by_name.pop(
+        "ASYMMETRIC_TREND_BAND_ADD_DEFENSE2"
+    )
+    static_retirement = declarative_by_name.pop("STATIC_RETIREMENT_7030")
+    strategies = (
+        retirement_allocation,
+        retirement_allocation_vxus,
+        retirement_profit_band,
+        retirement_profit_band_vxus,
+        *declarative_by_name.values(),
+        static_retirement,
+        asymmetric_defense2,
+    )
     required_tickers = tuple(dict.fromkeys(
         ticker
         for strategy in strategies
@@ -108,7 +105,17 @@ def ensure_runner_data(runner):
     required_tickers = tuple(dict.fromkeys(
         (*(runner.tickers or ()), *FX_RATE_TICKERS)
     ))
-    return ensure_data_files(required_tickers, data_dir=runner.data_dir)
+    required_market_fields = {}
+    for strategy in runner.strategies:
+        for ticker, fields in getattr(
+            strategy, "required_market_fields", {}
+        ).items():
+            required_market_fields.setdefault(ticker, set()).update(fields)
+    return ensure_data_files(
+        required_tickers,
+        data_dir=runner.data_dir,
+        required_market_fields=required_market_fields,
+    )
 
 
 def parse_args(argv=None):

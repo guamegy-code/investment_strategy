@@ -1,0 +1,15 @@
+strategy:
+  id: pension-nasdaq-product-mix
+  name: NasdaqProductMixAllocationStrategy
+  version: 1
+  dsl_version: 1
+
+source: retirement-allocation-profit-band-vxus
+
+products:
+  QQQ:
+    379810.KS: 50%
+    426030.KS: 30%
+    0015B0.KS: 20%
+  BND: {BND: 100%}
+  BIL: {BIL: 100%}

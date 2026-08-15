@@ -1,0 +1,139 @@
+strategy:
+  # 방어 진입을 고점 대비 -15.5%로 앞당긴 비대칭 추세 밴드 전략
+  id: asymmetric-trend-band-add-defense2-tuned
+  name: ASYMMETRIC_TREND_BAND_ADD_DEFENSE2_TUNED
+  version: 1
+  dsl_version: 1
+  enabled: false
+
+assets:
+  required: [QQQ, GLD, BND]
+  risk: [QQQ]
+
+parameters:
+  normal_risk_weight: 0.65
+  defensive_risk_weight: 0.30
+  defensive_drawdown: -0.155
+  uptrend_lower_band: -0.03
+  downtrend_lower_band: -0.06
+  downtrend_upper_band: 0.03
+  overbought_rsi: 95
+  overbought_disparity: 110
+  oversold_rsi: 20
+  oversold_disparity: 90
+
+variables:
+  is_uptrend: QQQ.ema55 >= QQQ.ema200
+
+  extreme_overbought: >
+    QQQ.rsi14 > parameters.overbought_rsi
+    and QQQ.disparity60 >= parameters.overbought_disparity
+
+  extreme_oversold: >
+    QQQ.rsi14 <= parameters.oversold_rsi
+    and QQQ.disparity60 <= parameters.oversold_disparity
+
+state:
+  # 고점 대비 하락 시 방어에 진입하고 장기 추세가 회복되면 정상으로 돌아간다.
+  defense_mode:
+    initial: NORMAL
+    rules:
+      - when: >
+          state.defense_mode == 'DEFENSIVE'
+          and variables.is_uptrend
+        set: NORMAL
+      - when: >
+          state.defense_mode == 'NORMAL'
+          and not variables.extreme_overbought
+          and not variables.extreme_oversold
+          and state.peak_price > 0
+          and QQQ.close / state.peak_price - 1 <= parameters.defensive_drawdown
+        set: DEFENSIVE
+
+  # 방어 상태에 맞는 QQQ 목표 비중을 이후 상태와 목표 계산에서 공통으로 사용한다.
+  risk_target:
+    initial: 65%
+    rules:
+      - when: state.defense_mode == 'DEFENSIVE'
+        set: "=parameters.defensive_risk_weight"
+      - otherwise: true
+        set: "=parameters.normal_risk_weight"
+
+  # 새로운 고점에서는 올라가며, 실제 리밸런싱 신호가 발생하면 현재 가격으로 초기화한다.
+  peak_price:
+    initial: 0
+    rules:
+      # 정상 목표를 다시 매수하는 회복일에는 Python 전략과 같이 고점을 변경하지 않는다.
+      - when: >
+          changed(state.defense_mode)
+          and previous(state.defense_mode) == 'DEFENSIVE'
+          and state.defense_mode == 'NORMAL'
+          and portfolio.weight.QQQ <= parameters.normal_risk_weight
+        set: "=state.peak_price"
+      - when: >
+          variables.extreme_overbought
+          or variables.extreme_oversold
+        set: "=QQQ.close"
+      - when: >
+          changed(state.defense_mode)
+          and state.defense_mode == 'DEFENSIVE'
+        set: "=QQQ.close"
+      - when: >
+          variables.is_uptrend
+          and portfolio.weight.QQQ - state.risk_target <= parameters.uptrend_lower_band
+        set: "=QQQ.close"
+      - when: >
+          not variables.is_uptrend
+          and (
+            portfolio.weight.QQQ - state.risk_target <= parameters.downtrend_lower_band
+            or portfolio.weight.QQQ - state.risk_target >= parameters.downtrend_upper_band
+          )
+        set: "=QQQ.close"
+      - when: QQQ.close > state.peak_price
+        set: "=QQQ.close"
+
+target:
+  - when: state.defense_mode == 'DEFENSIVE'
+    weights:
+      QQQ: state.risk_target
+      GLD: 10%
+      BND: 60%
+  - weights:
+      QQQ: state.risk_target
+      GLD: 5%
+      BND: 30%
+
+rebalance:
+  # 방어 해제 시 QQQ가 정상 목표 이하일 때만 즉시 정상 비중으로 복귀한다.
+  - when: >
+      changed(state.defense_mode)
+      and previous(state.defense_mode) == 'DEFENSIVE'
+      and state.defense_mode == 'NORMAL'
+      and portfolio.weight.QQQ <= parameters.normal_risk_weight
+    days: 1
+
+  - when: variables.extreme_overbought
+    days: 1
+  - when: variables.extreme_oversold
+    days: 1
+
+  - when: >
+      changed(state.defense_mode)
+      and state.defense_mode == 'DEFENSIVE'
+    days: 1
+
+  - when: >
+      variables.is_uptrend
+      and portfolio.weight.QQQ - state.risk_target <= parameters.uptrend_lower_band
+    days: 1
+  - when: >
+      not variables.is_uptrend
+      and portfolio.weight.QQQ - state.risk_target <= parameters.downtrend_lower_band
+    days: 1
+  - when: >
+      not variables.is_uptrend
+      and portfolio.weight.QQQ - state.risk_target >= parameters.downtrend_upper_band
+    days: 1
+
+execution:
+  days: 1

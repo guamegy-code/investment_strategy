@@ -1,0 +1,252 @@
+strategy:
+  # 상승 구간에서 QQQ 수익을 80% 상단까지 보존하는 퇴직자산 전략
+  id: retirement-allocation-profit-band
+  name: RetirementAllocationProfitBandStrategy
+  version: 1
+  dsl_version: 1
+  enabled: true
+
+assets:
+  required: [QQQ, BND, BIL]
+  risk: [QQQ]
+
+parameters:
+  # 장기 하락장 판정에 사용하는 최근 고점 대비 낙폭 한계
+  structural_drawdown: -0.08
+  # BND와 BIL 사이의 잦은 교체를 막는 ROC40 차이 완충값(%p)
+  safe_switch_buffer: 0.25
+  safe_blend_inner: 0.25
+  safe_blend_outer: 1.00
+  canonical_risk_weight: 0.70
+  upper_risk_weight: 0.80
+
+variables:
+  # 단기 추세 조건 6개 중 하락 조건을 만족한 개수
+  risk_off_score: >
+    count(
+      QQQ.close < QQQ.ema20,
+      QQQ.close < QQQ.ema55,
+      QQQ.ema20 < QQQ.ema55,
+      QQQ.roc5 < 0,
+      QQQ.roc20 < 0,
+      QQQ.ema20_slope5 < 0
+    )
+
+  # 같은 6개 지표에서 상승 조건을 만족한 개수
+  recovery_score: >
+    count(
+      QQQ.close > QQQ.ema20,
+      QQQ.close > QQQ.ema55,
+      QQQ.ema20 > QQQ.ema55,
+      QQQ.roc5 > 0,
+      QQQ.roc20 > 0,
+      QQQ.ema20_slope5 > 0
+    )
+
+  # 단기 하락뿐 아니라 장기 추세와 낙폭까지 함께 악화된 경우에만 참이다.
+  structural_bear: >
+    variables.risk_off_score >= 5
+    and QQQ.close < QQQ.ema20
+    and QQQ.ema20 < QQQ.ema55
+    and QQQ.ema55 < QQQ.ema200
+    and QQQ.roc60 < 0
+    and QQQ.ema200_slope20 < 0
+    and QQQ.drawdown120 <= parameters.structural_drawdown
+
+  # RECOVERY에서 성급하게 BULL로 복귀하지 않도록 중기 추세를 확인한다.
+  bull_reentry_allowed: >
+    QQQ.close > QQQ.ema55
+    and QQQ.roc60 > 0
+
+  # 이 구간에서는 QQQ를 70%로 되돌리지 않고 현재 수익 비중을 유지한다.
+  qqq_inside_profit_band: >
+    portfolio.weight.QQQ > parameters.canonical_risk_weight
+    and portfolio.weight.QQQ < parameters.upper_risk_weight
+
+state:
+  # 엔진이 그래프와 성과 분석에 사용하는 대표 시장 상태
+  market_mode:
+    initial: UNINITIALIZED
+    rules:
+      # 첫 평가에서는 확인 기간 없이 현재 시장 상태를 선택한다.
+      - when: state.market_mode == 'UNINITIALIZED' and variables.structural_bear
+        set: BEAR
+      - when: state.market_mode == 'UNINITIALIZED' and variables.risk_off_score >= 5
+        set: CAUTION
+      - when: state.market_mode == 'UNINITIALIZED'
+        set: BULL
+
+      - when: state.market_mode == 'BULL' and variables.structural_bear
+        set: BEAR
+        confirm: 10
+      - when: state.market_mode == 'BULL' and variables.risk_off_score >= 5
+        set: CAUTION
+        confirm: 3
+
+      - when: state.market_mode == 'CAUTION' and variables.structural_bear
+        set: BEAR
+        confirm: 10
+      - when: state.market_mode == 'CAUTION' and variables.recovery_score >= 4
+        set: BULL
+        confirm: 3
+
+      - when: state.market_mode == 'BEAR' and variables.recovery_score >= 3
+        set: RECOVERY
+        confirm: 2
+
+      - when: state.market_mode == 'RECOVERY' and variables.structural_bear
+        set: BEAR
+        confirm: 10
+      - when: >
+          state.market_mode == 'RECOVERY'
+          and variables.recovery_score >= 4
+          and variables.bull_reentry_allowed
+        set: BULL
+        confirm: 3
+      - when: state.market_mode == 'RECOVERY' and variables.risk_off_score >= 5
+        set: CAUTION
+        confirm: 3
+
+  safe_asset:
+    # 안전자산은 매월 한 번만 비교하고 0.25%p 완충 구간을 적용한다.
+    initial: UNINITIALIZED
+    check: monthly
+    rules:
+      - when: >
+          state.safe_asset == 'UNINITIALIZED'
+          and BND.roc40 >= BIL.roc40
+        set: BND
+      - when: state.safe_asset == 'UNINITIALIZED'
+        set: BIL
+      - when: >
+          state.safe_asset == 'BND'
+          and BIL.roc40 > BND.roc40 + parameters.safe_switch_buffer
+        set: BIL
+      - when: >
+          state.safe_asset == 'BIL'
+          and BND.roc40 > BIL.roc40 + parameters.safe_switch_buffer
+        set: BND
+
+  # BEAR/RECOVERY에서는 ROC40 차이에 따라 BND 비율을 25%p 단위로 혼합한다.
+  safe_bond_share:
+    initial: 100%
+    check: monthly
+    rules:
+      - when: BND.roc40 - BIL.roc40 >= parameters.safe_blend_outer
+        set: 100%
+      - when: BND.roc40 - BIL.roc40 >= parameters.safe_blend_inner
+        set: 75%
+      - when: BND.roc40 - BIL.roc40 >= -parameters.safe_blend_inner
+        set: 50%
+      - when: BND.roc40 - BIL.roc40 > -parameters.safe_blend_outer
+        set: 25%
+      - otherwise: true
+        set: 0%
+
+  risk_weight:
+    # market_mode를 실제 QQQ 목표 비중으로 변환한다.
+    initial: 70%
+    rules:
+      - {when: state.market_mode == 'BEAR', set: 0%}
+      - {when: state.market_mode == 'RECOVERY', set: 50%}
+      - {when: "state.market_mode in ['BULL', 'CAUTION']", set: 70%}
+
+  execution_days:
+    # 방어 진입은 빠르게, 위험자산 복귀는 나누어 실행한다.
+    initial: 1
+    rules:
+      - {when: state.market_mode == 'BEAR', set: 1}
+      - {when: state.market_mode == 'CAUTION', set: 2}
+      - {when: state.market_mode == 'RECOVERY', set: 3}
+      - {when: state.market_mode == 'BULL', set: 5}
+
+target:
+  # 수익 보존 구간에서는 현재 QQQ 비중을 그대로 목표에 사용한다.
+  - when: >
+      state.market_mode in ['BULL', 'CAUTION']
+      and variables.qqq_inside_profit_band
+      and state.safe_asset == 'BND'
+    weights:
+      QQQ: portfolio.weight.QQQ
+      BND: round(1 - portfolio.weight.QQQ, 10)
+      BIL: 0%
+  - when: >
+      state.market_mode in ['BULL', 'CAUTION']
+      and variables.qqq_inside_profit_band
+    weights:
+      QQQ: portfolio.weight.QQQ
+      BND: 0%
+      BIL: round(1 - portfolio.weight.QQQ, 10)
+
+  # BULL/CAUTION에서 70% 이하이거나 80% 이상이면 표준 70/30 목표를 사용한다.
+  - when: >
+      state.market_mode in ['BULL', 'CAUTION']
+      and state.safe_asset == 'BND'
+    weights:
+      QQQ: state.risk_weight
+      BND: round(1 - state.risk_weight, 10)
+      BIL: 0%
+  - when: state.market_mode in ['BULL', 'CAUTION']
+    weights:
+      QQQ: state.risk_weight
+      BND: 0%
+      BIL: round(1 - state.risk_weight, 10)
+
+  # BEAR/RECOVERY에서는 수익 밴드를 해제하고 BND/BIL 혼합 목표를 적용한다.
+  - weights:
+      QQQ: state.risk_weight
+      BND: round((1 - state.risk_weight) * state.safe_bond_share, 10)
+      BIL: round((1 - state.risk_weight) * (1 - state.safe_bond_share), 10)
+
+rebalance:
+  # QQQ가 80%에 도달하면 시장 상태와 관계없이 표준 목표로 복원한다.
+  - when: >
+      state.market_mode in ['BULL', 'CAUTION']
+      and portfolio.weight.QQQ >= parameters.upper_risk_weight
+    days: state.execution_days
+
+  # 수익 보존 구간의 상태 전환과 월간 밴드 신호는 주문하지 않는다.
+  - when: >
+      changed(state.market_mode)
+      and not (
+        state.market_mode in ['BULL', 'CAUTION']
+        and variables.qqq_inside_profit_band
+      )
+      and not (
+        previous(state.market_mode) == 'CAUTION'
+        and state.market_mode == 'BULL'
+      )
+    days: state.execution_days
+  - when: >
+      changed(state.market_mode)
+      and not (
+        state.market_mode in ['BULL', 'CAUTION']
+        and variables.qqq_inside_profit_band
+      )
+      and previous(state.market_mode) == 'CAUTION'
+      and state.market_mode == 'BULL'
+      and (
+        changed(state.safe_asset)
+        or target_deviation() >= 5%
+      )
+    days: state.execution_days
+
+  # 안전자산 교체 시에는 QQQ 수익 비중을 유지하고 안전자산 부분만 이동한다.
+  - when: changed(state.safe_asset)
+    days: 1
+  - when: >
+      changed(state.safe_bond_share)
+      and state.market_mode in ['BEAR', 'RECOVERY']
+    days: 1
+
+  - check: monthly
+    when: >
+      not (
+        state.market_mode in ['BULL', 'CAUTION']
+        and variables.qqq_inside_profit_band
+      )
+      and target_deviation() >= 5%
+    days: state.execution_days
+
+execution:
+  days: state.execution_days
