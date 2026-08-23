@@ -1,0 +1,23 @@
+strategy:
+  id: band-7030-tdf
+  name: 70/30 TDF
+  version: 1
+  dsl_version: 1
+  # Set to true to include this independent strategy in the normal runner.
+  enabled: true
+
+assets:
+  required: [QQQ, TDF2050_PROXY]
+  risk: [QQQ]
+
+target:
+  - weights:
+      QQQ: 70%
+      TDF2050_PROXY: 30%
+
+rebalance:
+  - check: daily
+    when: target_deviation() >= 5%
+
+execution:
+  days: 1

@@ -94,6 +94,7 @@ class SecretScanningTests(unittest.TestCase):
         }
         excluded_directories = {
             ".git", ".pytest_cache", ".uv-cache", ".yf-cache",
+            "node_modules",
             "data", "data_extended", "data_multimarket",
             "data_probability_signals", "data_risk_assets", "results",
         }

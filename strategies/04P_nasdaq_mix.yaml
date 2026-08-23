@@ -1,0 +1,16 @@
+strategy:
+  id: nasdaq-mix
+  name: Nasdaq Mix
+  version: 1
+  dsl_version: 1
+  enabled: false
+
+source: profit-band-vxus
+
+products:
+  QQQ:
+    379810.KS: 50%  # Kodex
+    426030.KS: 30%  # Time
+    0015B0.KS: 20%  # KoAct
+  BND: {BND: 100%}
+  BIL: {BIL: 100%}

@@ -1,0 +1,8 @@
+{
+  "name": "investment-strategy-data-proxy",
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  }
+}

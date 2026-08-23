@@ -1,0 +1,176 @@
+strategy:
+  # 퇴직자산용 동적 70/30 전략. 시장 상태에 따라 QQQ 위험 비중을 조절한다.
+  id: allocation
+  name: Allocation
+  version: 1
+  dsl_version: 1
+  enabled: false
+
+assets:
+  required: [QQQ, BND, BIL]
+  risk: [QQQ]
+
+parameters:
+  # 장기 하락장 판정에 사용하는 최근 고점 대비 낙폭 한계
+  structural_drawdown: -0.08
+  # BND와 BIL 사이의 잦은 교체를 막는 ROC40 차이 완충값(%p)
+  safe_switch_buffer: 0.25
+
+variables:
+  # 단기 추세 조건 6개 중 하락 조건을 만족한 개수
+  risk_off_score: >
+    count(
+      QQQ.close < QQQ.ema20,
+      QQQ.close < QQQ.ema55,
+      QQQ.ema20 < QQQ.ema55,
+      QQQ.roc5 < 0,
+      QQQ.roc20 < 0,
+      QQQ.ema20_slope5 < 0
+    )
+
+  # 같은 6개 지표에서 상승 조건을 만족한 개수
+  recovery_score: >
+    count(
+      QQQ.close > QQQ.ema20,
+      QQQ.close > QQQ.ema55,
+      QQQ.ema20 > QQQ.ema55,
+      QQQ.roc5 > 0,
+      QQQ.roc20 > 0,
+      QQQ.ema20_slope5 > 0
+    )
+
+  # 단기 하락뿐 아니라 장기 추세와 낙폭까지 함께 악화된 경우에만 참이다.
+  structural_bear: >
+    variables.risk_off_score >= 5
+    and QQQ.close < QQQ.ema20
+    and QQQ.ema20 < QQQ.ema55
+    and QQQ.ema55 < QQQ.ema200
+    and QQQ.roc60 < 0
+    and QQQ.ema200_slope20 < 0
+    and QQQ.drawdown120 <= parameters.structural_drawdown
+
+  # RECOVERY에서 성급하게 BULL로 복귀하지 않도록 중기 추세를 확인한다.
+  bull_reentry_allowed: >
+    QQQ.close > QQQ.ema55
+    and QQQ.roc60 > 0
+
+state:
+  # 엔진이 그래프와 성과 분석에 사용하는 대표 시장 상태
+  market_mode:
+    initial: UNINITIALIZED
+    rules:
+      # 첫 평가에서는 확인 기간 없이 현재 시장 상태를 선택한다.
+      - when: state.market_mode == 'UNINITIALIZED' and variables.structural_bear
+        set: BEAR
+      - when: state.market_mode == 'UNINITIALIZED' and variables.risk_off_score >= 5
+        set: CAUTION
+      - when: state.market_mode == 'UNINITIALIZED'
+        set: BULL
+
+      - when: state.market_mode == 'BULL' and variables.structural_bear
+        set: BEAR
+        confirm: 10
+      - when: state.market_mode == 'BULL' and variables.risk_off_score >= 5
+        set: CAUTION
+        confirm: 3
+
+      - when: state.market_mode == 'CAUTION' and variables.structural_bear
+        set: BEAR
+        confirm: 10
+      - when: state.market_mode == 'CAUTION' and variables.recovery_score >= 4
+        set: BULL
+        confirm: 3
+
+      - when: state.market_mode == 'BEAR' and variables.recovery_score >= 3
+        set: RECOVERY
+        confirm: 2
+
+      - when: state.market_mode == 'RECOVERY' and variables.structural_bear
+        set: BEAR
+        confirm: 10
+      - when: >
+          state.market_mode == 'RECOVERY'
+          and variables.recovery_score >= 4
+          and variables.bull_reentry_allowed
+        set: BULL
+        confirm: 3
+      - when: state.market_mode == 'RECOVERY' and variables.risk_off_score >= 5
+        set: CAUTION
+        confirm: 3
+
+  safe_asset:
+    # 안전자산은 매월 한 번만 비교하고 0.25%p 완충 구간을 적용한다.
+    initial: UNINITIALIZED
+    check: monthly
+    rules:
+      - when: >
+          state.safe_asset == 'UNINITIALIZED'
+          and BND.roc40 >= BIL.roc40
+        set: BND
+      - when: state.safe_asset == 'UNINITIALIZED'
+        set: BIL
+      - when: >
+          state.safe_asset == 'BND'
+          and BIL.roc40 > BND.roc40 + parameters.safe_switch_buffer
+        set: BIL
+      - when: >
+          state.safe_asset == 'BIL'
+          and BND.roc40 > BIL.roc40 + parameters.safe_switch_buffer
+        set: BND
+
+  risk_weight:
+    # market_mode를 실제 QQQ 목표 비중으로 변환한다.
+    initial: 70%
+    rules:
+      - {when: state.market_mode == 'BEAR', set: 0%}
+      - {when: state.market_mode == 'RECOVERY', set: 50%}
+      - {when: "state.market_mode in ['BULL', 'CAUTION']", set: 70%}
+
+  execution_days:
+    # 방어 진입은 빠르게, 위험자산 복귀는 나누어 실행한다.
+    initial: 1
+    rules:
+      - {when: state.market_mode == 'BEAR', set: 1}
+      - {when: state.market_mode == 'CAUTION', set: 2}
+      - {when: state.market_mode == 'RECOVERY', set: 3}
+      - {when: state.market_mode == 'BULL', set: 5}
+
+target:
+  # 선택된 안전자산 한쪽에 위험자산을 제외한 비중을 전부 배분한다.
+  - when: state.safe_asset == 'BND'
+    weights:
+      QQQ: state.risk_weight
+      BND: round(1 - state.risk_weight, 10)
+      BIL: 0%
+  - weights:
+      QQQ: state.risk_weight
+      BND: 0%
+      BIL: round(1 - state.risk_weight, 10)
+
+rebalance:
+  # CAUTION -> BULL은 목표가 같고 밴드 안이면 상태만 변경한다.
+  - when: >
+      changed(state.market_mode)
+      and not (
+        previous(state.market_mode) == 'CAUTION'
+        and state.market_mode == 'BULL'
+      )
+    days: state.execution_days
+  - when: >
+      changed(state.market_mode)
+      and previous(state.market_mode) == 'CAUTION'
+      and state.market_mode == 'BULL'
+      and (
+        changed(state.safe_asset)
+        or target_deviation() >= 5%
+      )
+    days: state.execution_days
+  - when: changed(state.safe_asset)
+    days: 1
+  # 상태 변화가 없더라도 매월 목표에서 5%p 이상 벗어났는지 확인한다.
+  - check: monthly
+    when: target_deviation() >= 5%
+    days: state.execution_days
+
+execution:
+  days: state.execution_days

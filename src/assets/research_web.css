@@ -167,6 +167,15 @@ body {
   color: var(--research-primary);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--research-primary) 18%, transparent);
 }
+.research-checklist label.research-product-strategy {
+  color: #0f766e;
+}
+.research-checklist label.research-product-strategy:has(input:checked) {
+  border-color: #0f766e;
+  background: color-mix(in srgb, #0f766e 16%, var(--research-surface));
+  color: #0b5f58;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, #0f766e 22%, transparent);
+}
 .research-checklist label:has(input:focus-visible) {
   outline: 3px solid color-mix(in srgb, var(--research-primary) 24%, transparent);
   outline-offset: 2px;
@@ -276,6 +285,8 @@ body {
   min-height: 88px;
   padding: 16px;
 }
+.research-detail-actions { display: flex; align-items: center; gap: 16px; }
+.research-detail-fx-toggle { margin: 0; white-space: nowrap; }
 .research-detail-select { width: min(360px, 100%); }
 .research-detail-dropdown { font-size: 13px; }
 .Select-control, .Select-menu-outer {
@@ -653,6 +664,17 @@ body:has(.research-navigation-graph .nsewdrag:active) .dragcover {
   border-bottom: 1px solid var(--research-border);
 }
 .research-indicator-matrix-row:last-child { border-bottom: 0; }
+.research-indicator-matrix-row > label {
+  display: grid;
+  min-width: 0;
+  min-height: 38px;
+  margin: 0;
+  place-items: center;
+  border-left: 1px solid var(--research-border);
+  background: var(--research-surface);
+  cursor: pointer;
+}
+.research-indicator-matrix-row > label .indicator-matrix-cell { margin: 0; }
 .research-indicator-matrix-corner,
 .research-indicator-column-toggle,
 .research-indicator-row-toggle {
@@ -799,6 +821,7 @@ body:has(.research-navigation-graph .nsewdrag:active) .dragcover {
   .research-chart-body { padding-inline: 0; }
   .research-graph { height: 360px; }
   .research-detail-header { display: grid; }
+  .research-detail-actions { align-items: flex-start; flex-direction: column; gap: 8px; }
   .research-detail-select { width: 100%; }
   .research-detail-kpi-grid { padding: 12px 16px; }
   .research-detail-graph { height: 380px; }

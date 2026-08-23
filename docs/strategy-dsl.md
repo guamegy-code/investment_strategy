@@ -29,8 +29,9 @@ execution:
   days: 1
 ```
 
-`strategies` 디렉터리의 `enabled: true`인 YAML은 `build_runner()`가 자동으로
-읽는다. 파일명은 실행 의미에 영향을 주지 않으며 `strategy.id`가 영구 식별자다.
+`strategies` 디렉터리의 기본 YAML은 정적 웹페이지에서 읽는다. 사용자가 가져온 YAML은
+브라우저에만 저장되며, 개인 알림 전략은 Google 스프레드시트에 별도로 등록한다. 파일명은
+실행 의미에 영향을 주지 않으며 `strategy.id`가 영구 식별자다.
 
 ## 키워드
 
@@ -67,6 +68,18 @@ execution:
 | `execution` | `days` | 분할 실행일수, 기본값 `1` | 아니요 |
 | 최상위 | `source` | 실제 상품 매핑에 사용할 기존 전략 ID | 상품 매핑 시 예 |
 | 최상위 | `products` | 기준 종목과 실제 상품의 매핑 | 상품 매핑 시 예 |
+
+## 자산과 티커
+
+`assets.required`와 목표 비중의 키에는 전략이 사용하는 자산 식별자를 넣습니다. 일반적인
+자산은 Yahoo Finance에서 사용하는 티커 심볼(ticker symbol)을 사용합니다. 예를 들어
+`QQQ`는 Invesco QQQ ETF, `BND`는 Vanguard Total Bond Market ETF, `SPY`는 SPDR S&P
+500 ETF의 티커입니다. 한국 종목은 `426030.KS`처럼 시장 접미사를 포함할 수 있습니다.
+
+`TDF2050_PROXY`도 `QQQ`, `BND`처럼 전략에서 사용할 수 있는 자산 식별자입니다. 다만
+Yahoo Finance 티커가 아닌 합성 자산입니다. 필요한 경우 `SPY` 40.81%, `VXUS` 33.39%,
+`BND` 25.80%를 월별 리밸런싱한 가격 흐름으로 동적으로 계산합니다. 실제 TDF 상품 가격으로
+대체하지 않으며, 실제 TDF의 액티브 운용·국내채권·글라이드패스를 그대로 재현하지는 않습니다.
 
 상태 변수의 이름과 값은 전략 작성자가 정의한다.
 

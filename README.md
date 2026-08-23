@@ -1,122 +1,35 @@
 # Investment Strategy
 
-선언형 YAML 전략 작성 및 확장 방법: [전략 DSL v1](docs/strategy-dsl.md)
+YAML로 정의한 자산배분 전략을 브라우저에서 검토하고, Google Apps Script와
+Cloudflare Worker를 이용해 리밸런싱 알림을 받는 프로젝트입니다.
 
-ETF 가격 데이터를 이용해 자산배분 전략을 구현하고, 동일한 백테스트 엔진으로
-성과와 거래 내역을 비교하는 프로젝트입니다. 시장 상태에 따라 비중을 조정하는
-퇴직연금 전략과 실제 국내 상품을 매핑한 전략을 함께 제공합니다.
+백테스트 결과는 전략 연구를 위한 자료이며 투자 권유가 아닙니다. 과거 성과는 미래
+성과를 보장하지 않습니다.
 
-이 저장소의 백테스트 결과는 전략 연구와 개발을 위한 자료이며 투자 권유가
-아닙니다. 과거 성과는 미래 성과를 보장하지 않습니다.
+## 사용 흐름
 
-## 주요 특징
+1. 정적 웹페이지에서 기본 전략을 검토하거나 YAML 전략 파일을 가져옵니다.
+2. 개인 전략은 브라우저에서 검토한 뒤 Google 스프레드시트의 `개인 전략` 탭에 등록합니다.
+3. Apps Script가 Cloudflare Worker에 평가를 요청합니다.
+4. Worker는 최근 시장 데이터와 저장된 전략 상태로 리밸런싱 필요 여부를 계산합니다.
+5. Apps Script가 필요한 경우에만 Telegram 메시지를 보냅니다.
 
-- 여러 전략을 동일한 조건으로 백테스트하고 성과표와 비교 그래프로 시각화
-- CAGR, MDD, Sharpe, Sortino, Calmar 등 핵심 성과 지표 계산
-- 다음 거래일 시가 체결과 수수료·슬리피지를 반영한 실행 모델
-- 일별 포트폴리오, 거래 내역과 리밸런싱 원인을 기록하여 결과 추적
-- 고정 구간, 롤링 구간, 민감도 및 OOS 검증 도구 제공
-- 여러 거래일에 걸친 분할 리밸런싱 지원
-- 기준 지수의 신호와 실제 퇴직연금 상품을 분리하여 자산 매핑
+웹페이지에서의 전략 계산은 사용자의 브라우저에서 이뤄집니다. 자동 알림 평가만
+Cloudflare Worker에서 수행합니다.
 
-## 프로젝트 구조
+## 주요 구성
 
 ```text
-investment_strategy/
-├── src/
-│   ├── strategy.py                 # 공통 인터페이스와 주요 전략
-│   ├── strategy_domain.py          # 시장·실행 상태·전략 판단 계약
-│   ├── rebalancing.py              # 실계좌 거래 원장과 리밸런싱 계획
-│   ├── rebalance_service.py         # 계좌·전략 평가 애플리케이션 서비스
-│   ├── api.py                       # FastAPI v1 HTTP API
-│   ├── research_web.py               # Dash/Plotly 백테스트 연구 화면
-│   ├── experimental_strategies.py  # 주요 전략에서 파생된 후보 전략
-│   ├── pension_strategies.py       # 실제 퇴직연금 상품 매핑
-│   ├── downloader.py               # 가격 데이터와 지표 생성
-│   ├── backtest.py                 # 백테스트 실행 엔진
-│   ├── portfolio.py                # 주문, 포지션과 거래비용
-│   ├── performance.py              # 성과 지표
-│   ├── runner.py                   # 여러 전략 실행 및 비교
-│   ├── main.py                     # 기본 실행 진입점
-│   └── validation/                 # 구간, 민감도 및 OOS 검증
-├── tests/                          # 단위 및 회귀 테스트
-├── data/                           # 기본 시장 데이터
-├── data_extended/                  # 장기 검증 데이터
-├── results/                        # 백테스트 결과와 차트
-├── validation/                     # OOS 잠금 파일
-├── docs/
-│   ├── strategy.md                 # 전체 상속 관계와 통합 성과
-│   ├── development.md              # 전략 설계, 구현, 검증과 문서화
-│   └── strategies/                 # 전략별 상태, 전이와 배분 로직
-└── README.md
+strategies/       기본 YAML 전략
+src/web/          정적 웹페이지 소스
+dist/web/         배포용 정적 웹 산출물
+data-proxy/       가격 프록시 및 알림 평가 Cloudflare Worker
+docs/             전략 DSL, 운영 및 사용자 안내
 ```
 
-## 실행
+## 문서
 
-```powershell
-uv run python src/main.py
-```
-
-기본값은 기존 Matplotlib 데스크톱 그래프입니다. 같은 백테스트 결과를 Dash/Plotly
-연구 화면으로 열려면 다음을 실행합니다.
-
-```powershell
-uv run python src/main.py --chart-backend dash
-# Matplotlib 창을 닫은 뒤 Dash도 시작하려면
-uv run python src/main.py --chart-backend both
-```
-
-Dash는 기본적으로 `http://127.0.0.1:8050`에서 실행되며, `--host`, `--port`로 변경할 수 있습니다.
-
-Dash 서버를 실행한 상태에서 `strategies` 디렉터리의 YAML을 저장하고 웹브라우저를
-새로 고침하면 변경을 감지해 필요한 전략을 다시 계산한 뒤 화면을 갱신합니다. YAML 문법이나
-실행 중 오류가 발생하면 마지막으로 정상 계산된 결과를 유지하고 화면 상단에 오류를
-표시합니다. Python 파일을 변경한 경우에는 서버를 다시 시작해야 합니다.
-
-새로 고침할 때는 계산 규칙이 변경되거나 새로 활성화된 전략만 다시 백테스트합니다.
-`name`, `version` 같은 표시 정보만 바뀐 전략은 기존 계산 결과를 재사용하며, 비활성화된
-전략은 별도 계산 없이 화면에서 제거합니다.
-
-완료된 백테스트는 `results/.strategy-cache`에 로컬 캐시됩니다. 다음 실행에서는 전략 규칙,
-백테스트 엔진, 실행 기간과 시장 데이터가 동일한 결과를 복원하며, 달라진 전략만 다시
-계산합니다. 이 캐시는 생성된 결과물이므로 Git에는 포함되지 않습니다.
-
-`main.py`는 실행할 전략에 필요한 티커와 `FX_RATE_TICKERS`를 확인하고 `data/{ticker}.csv`가 없을 때만 Yahoo Finance에서 자동으로 내려받습니다. 이미 있는 CSV 파일은 그대로 유지합니다. 전체 데이터를 새로 받고 싶다면 `uv run python src/downloader.py`를 별도로 실행하세요.
-
-## 리밸런싱 API 실행
-
-다음 명령으로 로컬 API 서버를 실행합니다.
-
-```powershell
-uv run uvicorn api:app --app-dir src --reload
-```
-
-서버는 `http://127.0.0.1:8000`에서 실행되며, 대화형 API 명세는
-`http://127.0.0.1:8000/docs`에서 확인할 수 있습니다. 현재 개발용 API는 요청 헤더
-`X-User-Id`로 계좌 소유자를 구분합니다. 이는 인증 구현이 아니라 개발용 신원
-어댑터이므로 외부에 공개해서는 안 됩니다.
-
-## 개발 방법
-
-이 프로젝트에서 개발의 기본 단위는 자산배분 전략입니다. 전략은 시장을 어떤
-상태로 판단할지, 상태마다 어떤 자산을 얼마나 보유할지, 언제 리밸런싱할지를
-정의합니다. 백테스트 엔진은 모든 전략의 신호를 동일한 체결 조건으로 실행하여
-성과와 거래 내역을 비교합니다.
-
-모든 전략은 `BaseStrategy`의 인터페이스를 따릅니다. 새로운 아이디어는 직접 전략
-클래스로 구현할 수 있고, 기존 전략의 판단 로직을 재사용한다면 해당 클래스를
-상속하여 차이만 구현할 수 있습니다. 실제 퇴직연금 상품 전략은 원본 전략의 신호와
-상품 매핑을 분리합니다.
-
-전략 개발은 다음 흐름으로 진행합니다.
-
-1. 전략의 목적과 기준 전략을 정합니다.
-2. 자산배분 상태, 상태 전이와 리밸런싱 규칙을 설계합니다.
-3. 필요한 시장 데이터와 실제 매매 자산을 정의합니다.
-4. 전략 클래스를 구현하고 퇴직연금 등의 운용 제약을 검사합니다.
-5. 동일 조건의 백테스트와 구간·민감도·OOS 검증을 수행합니다.
-6. 상속 관계, 성과와 부모 전략과의 차이를 문서화합니다.
-
-구체적인 인터페이스, 데이터 준비, 상품 매핑, 테스트와 실행 방법은
-[개발 방법 문서](docs/development.md)를 참고하세요. 전체 클래스 관계와 현재 성과는
-[전략 클래스 문서](docs/strategy.md)에서 확인할 수 있습니다.
+- [전략 DSL](docs/strategy-dsl.md)
+- [Cloudflare 데이터 프록시 및 배포](docs/data-proxy.md)
+- [Google Apps Script 알림 설정](docs/google-apps-script/README.md)
+- [외부 개발자용 전략 검토 및 알림 설정](docs/third-party-developer-guide.md)

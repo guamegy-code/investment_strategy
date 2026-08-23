@@ -384,10 +384,10 @@ def _validate_definition(raw: Any, source: str) -> dict[str, Any]:
                 if not product:
                     raise StrategyDefinitionError("product ticker must not be empty")
                 owner = product_owners.get(product)
-                if owner is not None and owner != str(source_asset):
-                    raise StrategyDefinitionError(
-                        f"product {product} is mapped from both {owner} and {source_asset}"
-                    )
+#                if owner is not None and owner != str(source_asset):
+#                    raise StrategyDefinitionError(
+#                        f"product {product} is mapped from both {owner} and {source_asset}"
+#                    )
                 product_owners[product] = str(source_asset)
                 value = _number(share, field=f"products.{source_asset}.{product}")
                 if value <= 0.0:

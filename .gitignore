@@ -15,6 +15,9 @@ data_probability_signals/*.csv
 
 # Results
 results/*
+dist/*.html
+data-proxy/node_modules/
+data-proxy/.wrangler/
 
 # VS Code
 .vscode/
