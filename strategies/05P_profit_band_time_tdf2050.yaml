@@ -1,0 +1,14 @@
+strategy:
+  id: time-vxus-tdf2050
+  name: "Profit Band TIME + KODEX TDF2050 (VXUS)"
+  version: 1
+  dsl_version: 1
+  enabled: true
+
+source: profit-band-vxus-v2
+
+products:
+  QQQ: {426030.KS: 100%}
+  VXUS: {426030.KS: 100%}
+  BND: {434060.KS: 100%}
+  BIL: {434060.KS: 100%}

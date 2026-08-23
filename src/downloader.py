@@ -27,6 +27,17 @@ def download_one(ticker: str, output_dir=DATA_DIR) -> pd.DataFrame:
     ETF 하나 다운로드
     """
 
+    from tdf_proxy import (
+        TDF_PROXY_COMPONENT_WEIGHTS,
+        TDF_PROXY_TICKER,
+        build_tdf2050_proxy,
+    )
+
+    if ticker == TDF_PROXY_TICKER:
+        ensure_data_files(TDF_PROXY_COMPONENT_WEIGHTS, data_dir=output_dir)
+        print(f"Building {TDF_PROXY_TICKER}...")
+        return build_tdf2050_proxy(data_dir=output_dir)
+
     print(f"Downloading {ticker}...")
 
     df = yf.download(

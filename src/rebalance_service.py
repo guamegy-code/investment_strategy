@@ -73,33 +73,33 @@ class StrategyCatalog:
 
 DEFAULT_STRATEGY_CATALOG = StrategyCatalog((
     StrategyDescriptor(
-        "retirement-allocation",
-        "Retirement Allocation",
+        "allocation",
+        "Allocation",
         RetirementAllocationStrategy,
     ),
     StrategyDescriptor(
-        "retirement-allocation-vxus",
-        "Retirement Allocation VXUS",
+        "allocation-vxus",
+        "Allocation VXUS",
         RetirementAllocationVXUSStrategy,
     ),
     StrategyDescriptor(
-        "retirement-allocation-profit-band",
-        "Retirement Allocation Profit Band",
+        "profit-band",
+        "Profit Band",
         RetirementAllocationProfitBandStrategy,
     ),
     StrategyDescriptor(
-        "retirement-allocation-profit-band-vxus",
-        "Retirement Allocation Profit Band VXUS",
+        "profit-band-vxus",
+        "Profit Band VXUS",
         RetirementAllocationProfitBandVXUSStrategy,
     ),
     StrategyDescriptor(
-        "static-retirement-7030",
-        "Static Retirement 70/30",
+        "static-7030",
+        "Static 70/30",
         STATIC_RETIREMENT_7030,
     ),
     StrategyDescriptor(
-        "asymmetric-trend-band-add-defense2",
-        "Asymmetric Trend Band Add Defense 2",
+        "trend-band-defense",
+        "Trend Band Defense",
         ASYMMETRIC_TREND_BAND_ADD_DEFENSE2,
     ),
 ))

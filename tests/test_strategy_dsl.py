@@ -6,7 +6,6 @@ import pandas as pd
 
 from backtest import Backtest
 from experimental_strategies import (
-    ASYMMETRIC_TREND_BAND_ADD_DEFENSE2_TUNED,
     RetirementAllocationProfitBandStrategy,
     RetirementAllocationProfitBandVXUSStrategy,
 )
@@ -110,7 +109,7 @@ def retirement_market(mode="bull", *, bnd_roc=1.0, bil_roc=0.0):
 def product_definition(**overrides):
     value = {
         "strategy": {"id": "products", "name": "Products", "version": 1},
-        "source": "retirement-7030-band",
+        "source": "band-7030",
         "products": {
             "QQQ": {"PRODUCT_A": "60%", "PRODUCT_B": "40%"},
             "BND": {"PRODUCT_C": "100%"},
@@ -130,49 +129,9 @@ def product_market():
 
 
 class DeclarativeStrategyTests(unittest.TestCase):
-    def test_tuned_asymmetric_defense2_yaml_enters_at_15_5_percent(self):
-        declarative = DeclarativeStrategy.from_yaml(
-            PROJECT_ROOT
-            / "strategies"
-            / "asymmetric_02_trend_band_defense2_tuned.yaml"
-        )
-        python_strategy = ASYMMETRIC_TREND_BAND_ADD_DEFENSE2_TUNED()
-        portfolio = PortfolioStub({"QQQ": 0.65, "GLD": 0.05, "BND": 0.30})
-
-        def observations(close, ema55, ema200):
-            return {
-                "QQQ": {
-                    "Close": close,
-                    "EMA55": ema55,
-                    "EMA200": ema200,
-                    "RSI14": 50.0,
-                    "DISPARITY60": 100.0,
-                },
-                "GLD": {"Close": 100.0},
-                "BND": {"Close": 100.0},
-            }
-
-        cases = [
-            (pd.Timestamp("2025-01-02"), observations(100.0, 105.0, 100.0)),
-            (pd.Timestamp("2025-01-03"), observations(84.4, 90.0, 100.0)),
-        ]
-        for date, market_data in cases:
-            python_signal = python_strategy.evaluate(date, market_data, portfolio)
-            declarative_signal = declarative.evaluate(date, market_data, portfolio)
-
-            self.assertEqual(declarative_signal["target"], python_signal["target"])
-            self.assertEqual(
-                declarative_signal["rebalance"], python_signal["rebalance"]
-            )
-            self.assertEqual(
-                declarative.defense_mode == "DEFENSIVE",
-                python_strategy.is_defensive_mode,
-            )
-            self.assertEqual(declarative.peak_price, python_strategy.highest_price)
-
     def test_static_retirement_yaml_matches_python_market_state_path(self):
         declarative = DeclarativeStrategy.from_yaml(
-            PROJECT_ROOT / "strategies" / "static_01_retirement_7030.yaml"
+            PROJECT_ROOT / "strategies" / "09_static_7030.yaml"
         )
         python_strategy = STATIC_RETIREMENT_7030()
         portfolio = PortfolioStub({"QQQ": 0.70, "BND": 0.15, "BIL": 0.15})
@@ -212,7 +171,7 @@ class DeclarativeStrategyTests(unittest.TestCase):
 
     def test_asymmetric_defense2_yaml_matches_python_path(self):
         declarative = DeclarativeStrategy.from_yaml(
-            PROJECT_ROOT / "strategies" / "asymmetric_01_trend_band_defense2.yaml"
+            PROJECT_ROOT / "strategies" / "10_trend_band_defense.yaml"
         )
         python_strategy = ASYMMETRIC_TREND_BAND_ADD_DEFENSE2()
         portfolio = PortfolioStub({"QQQ": 0.65, "GLD": 0.05, "BND": 0.30})
@@ -257,7 +216,7 @@ class DeclarativeStrategyTests(unittest.TestCase):
 
     def test_profit_band_vxus_yaml_matches_python_transition_path(self):
         declarative = DeclarativeStrategy.from_yaml(
-            PROJECT_ROOT / "strategies" / "retirement_04_profit_band_vxus.yaml"
+            PROJECT_ROOT / "strategies" / "04_profit_band_vxus.yaml"
         )
         python_strategy = RetirementAllocationProfitBandVXUSStrategy()
         portfolio = PortfolioStub({
@@ -297,7 +256,7 @@ class DeclarativeStrategyTests(unittest.TestCase):
 
     def test_profit_band_vxus_yaml_preserves_qqq_during_safe_rotation(self):
         declarative = DeclarativeStrategy.from_yaml(
-            PROJECT_ROOT / "strategies" / "retirement_04_profit_band_vxus.yaml"
+            PROJECT_ROOT / "strategies" / "04_profit_band_vxus.yaml"
         )
         python_strategy = RetirementAllocationProfitBandVXUSStrategy()
         portfolio = PortfolioStub({
@@ -325,7 +284,7 @@ class DeclarativeStrategyTests(unittest.TestCase):
 
     def test_profit_band_yaml_preserves_qqq_and_rotates_only_safe_sleeve(self):
         declarative = DeclarativeStrategy.from_yaml(
-            PROJECT_ROOT / "strategies" / "retirement_03_profit_band.yaml"
+            PROJECT_ROOT / "strategies" / "03_profit_band.yaml"
         )
         python_strategy = RetirementAllocationProfitBandStrategy()
         portfolio = PortfolioStub({"QQQ": 0.74, "BND": 0.26, "BIL": 0.0})
@@ -360,7 +319,7 @@ class DeclarativeStrategyTests(unittest.TestCase):
 
     def test_retirement_vxus_yaml_matches_python_transition_path(self):
         declarative = DeclarativeStrategy.from_yaml(
-            PROJECT_ROOT / "strategies" / "retirement_02_allocation_vxus.yaml"
+            PROJECT_ROOT / "strategies" / "02_allocation_vxus.yaml"
         )
         python_strategy = RetirementAllocationVXUSStrategy()
         portfolio = PortfolioStub({
@@ -475,7 +434,7 @@ class DeclarativeStrategyTests(unittest.TestCase):
 
     def test_retirement_allocation_yaml_matches_python_transition_path(self):
         declarative = DeclarativeStrategy.from_yaml(
-            PROJECT_ROOT / "strategies" / "retirement_01_allocation.yaml"
+            PROJECT_ROOT / "strategies" / "01_allocation.yaml"
         )
         python_strategy = RetirementAllocationStrategy()
         portfolio = PortfolioStub({"QQQ": 0.70, "BND": 0.30, "BIL": 0.0})
@@ -537,7 +496,7 @@ class DeclarativeStrategyTests(unittest.TestCase):
 
     def test_example_matches_existing_fixed_band_strategy(self):
         declarative = DeclarativeStrategy.from_yaml(
-            PROJECT_ROOT / "strategies" / "retirement_7030_band.yaml"
+            PROJECT_ROOT / "strategies" / "07_band_7030_bnd.yaml"
         )
         python_strategy = RETIREMENT_7030_BAND()
         portfolio = PortfolioStub({"QQQ": 0.76, "BND": 0.24})
@@ -650,7 +609,7 @@ class DeclarativeStrategyTests(unittest.TestCase):
         StrategyEngine(first)
 
     def test_directory_loader_skips_disabled_strategies(self):
-        source = (PROJECT_ROOT / "strategies" / "retirement_7030_band.yaml").read_text(
+        source = (PROJECT_ROOT / "strategies" / "01_allocation.yaml").read_text(
             encoding="utf-8"
         )
         with TemporaryDirectory() as directory:

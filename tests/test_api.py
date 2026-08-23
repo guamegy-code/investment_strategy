@@ -83,8 +83,8 @@ class RebalanceApiTests(unittest.TestCase):
         response = self.client.get("/api/v1/strategies")
         self.assertEqual(response.status_code, 200)
         ids = {item["strategy_id"] for item in response.json()}
-        self.assertIn("retirement-allocation", ids)
-        self.assertIn("retirement-allocation-profit-band-vxus", ids)
+        self.assertIn("allocation", ids)
+        self.assertIn("profit-band-vxus", ids)
 
         openapi = self.client.get("/openapi.json").json()
         self.assertIn("/api/v1/accounts/{account_id}/evaluations", openapi["paths"])
@@ -140,7 +140,7 @@ class RebalanceApiTests(unittest.TestCase):
             f"/api/v1/accounts/{account_id}/evaluations",
             headers=self.headers,
             json={
-                "strategy_id": "retirement-allocation",
+                "strategy_id": "allocation",
                 "market": market_payload(),
                 "quotes": quotes_payload(),
             },
@@ -154,11 +154,11 @@ class RebalanceApiTests(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 201, body)
-        self.assertEqual(body["strategy_id"], "retirement-allocation")
+        self.assertEqual(body["strategy_id"], "allocation")
         self.assertEqual(
-            body["evaluation"]["strategy_id"], "retirement-allocation"
+            body["evaluation"]["strategy_id"], "allocation"
         )
-        self.assertEqual(body["plan"]["strategy_id"], "retirement-allocation")
+        self.assertEqual(body["plan"]["strategy_id"], "allocation")
         self.assertTrue(body["evaluation"]["rebalance_required"])
         self.assertTrue(body["plan"]["notification_required"])
         self.assertEqual(len(body["plan"]["suggested_orders"]), 2)
@@ -183,7 +183,7 @@ class RebalanceApiTests(unittest.TestCase):
             f"/api/v1/accounts/{account_id}/evaluations",
             headers=self.headers,
             json={
-                "strategy_id": "retirement-allocation",
+                "strategy_id": "allocation",
                 "market": market_payload(),
                 "quotes": [quotes_payload()[0], quotes_payload()[2]],
             },

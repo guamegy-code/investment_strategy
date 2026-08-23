@@ -38,17 +38,23 @@ BACKTEST_ENGINE_FILES = tuple(
     )
 )
 PREFERRED_STRATEGY_ORDER = (
-    "dsl:retirement-allocation",
-    "dsl:retirement-allocation-vxus",
-    "dsl:retirement-allocation-profit-band",
-    "dsl:retirement-allocation-profit-band-vxus",
-    "dsl:pension-kodex-nasdaq",
-    "dsl:pension-time-nasdaq",
-    "dsl:pension-koact-nasdaq",
-    "dsl:pension-nasdaq-product-mix",
-    "dsl:static-retirement-7030",
-    "dsl:asymmetric-trend-band-add-defense2",
-    "dsl:asymmetric-trend-band-add-defense2-tuned",
+    "dsl:allocation",
+    "dsl:allocation-vxus",
+    "dsl:profit-band",
+    "dsl:profit-band-vxus",
+    "dsl:profit-band-vxus-v2",
+    "dsl:profit-band-tdf2050",
+    "dsl:band-7030",
+    "dsl:band-7030-tdf",
+    "dsl:kodex-nasdaq",
+    "dsl:time-nasdaq",
+    "dsl:koact-nasdaq",
+    "dsl:nasdaq-mix",
+    "dsl:time-tdf2050-profit-band",
+    "dsl:nasdaq-tdf2050-7030",
+    "dsl:nasdaq-tdf2050-mix",
+    "dsl:static-7030",
+    "dsl:trend-band-defense",
 )
 
 
@@ -62,11 +68,17 @@ def save_results(results, *, all_results=None):
 
     for result in results:
         name = strategy_display_name(result["strategy"])
-        result["history"].to_csv(RESULT_DIR / f"{name}_history.csv")
+        history_path = RESULT_DIR / f"{name}_history.csv"
+        history_path.parent.mkdir(parents=True, exist_ok=True)
+        result["history"].to_csv(history_path)
         result["trades"].to_csv(
             RESULT_DIR / f"{name}_trades.csv", index=False
         )
-        if strategy_identity(result["strategy"]) == "dsl:retirement-allocation":
+        (RESULT_DIR / f"{name}_rebalances.json").write_text(
+            json.dumps(result["rebalances"], ensure_ascii=False, default=str),
+            encoding="utf-8",
+        )
+        if strategy_identity(result["strategy"]) == "dsl:allocation":
             attribution = RetirementAllocationAttribution(
                 history=result["history"],
                 market_data=result["market_data"],

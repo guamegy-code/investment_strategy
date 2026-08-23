@@ -1,0 +1,12 @@
+strategy:
+  id: time-tdf2050-profit-band
+  name: Profit Band TIME + KODEX TDF2050
+  version: 2
+  dsl_version: 1
+  enabled: true
+
+source: profit-band-tdf2050
+
+products:
+  QQQ: {426030.KS: 100%}
+  TDF2050_PROXY: {434060.KS: 100%}

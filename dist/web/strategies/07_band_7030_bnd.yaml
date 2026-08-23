@@ -1,0 +1,23 @@
+strategy:
+  id: band-7030
+  name: 70/30 Band
+  version: 1
+  dsl_version: 1
+  # Set to true to include this independent strategy in the normal runner.
+  enabled: true
+
+assets:
+  required: [QQQ, BND]
+  risk: [QQQ]
+
+target:
+  - weights:
+      QQQ: 70%
+      BND: 30%
+
+rebalance:
+  - check: daily
+    when: target_deviation() >= 5%
+
+execution:
+  days: 1
