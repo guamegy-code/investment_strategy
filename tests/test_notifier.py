@@ -8,7 +8,7 @@ import requests
 
 
 PROJECT_DIR = Path(__file__).resolve().parents[1]
-SRC_DIR = PROJECT_DIR / "src"
+SRC_DIR = PROJECT_DIR / "src" / "legacy-python"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 

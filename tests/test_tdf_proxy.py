@@ -7,7 +7,7 @@ import pandas as pd
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(PROJECT_ROOT / "src"))
+sys.path.insert(0, str(PROJECT_ROOT / "src" / "legacy-python"))
 
 from tdf_proxy import build_proxy_frame
 from strategy_dsl import ProductMappedStrategy, load_strategy_directory
