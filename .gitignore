@@ -26,3 +26,5 @@ data-proxy/.wrangler/
 .env
 .env.*
 !.env.example
+
+.tools/
