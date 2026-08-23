@@ -5,11 +5,15 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
 import yaml
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJECT_ROOT / "src" / "legacy-python"))
 
 from backtest import Backtest
 from offline_export import WEB_SOURCE_DIR, build_bundle, export_html, export_static_site
