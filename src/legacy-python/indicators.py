@@ -98,8 +98,9 @@ class Indicator:
         df["ROC120"] = df["Close"].pct_change(120) * 100
         df["EMA20_SLOPE5"] = df["EMA20"].pct_change(5) * 100
         df["EMA200_SLOPE20"] = df["EMA200"].pct_change(20) * 100
-        rolling_high = df["Close"].rolling(120).max()
-        df["DRAWDOWN120"] = df["Close"] / rolling_high - 1
+        for period in (20, 60, 120):
+            rolling_high = df["Close"].rolling(period).max()
+            df[f"DRAWDOWN{period}"] = df["Close"] / rolling_high - 1
         return df
 
     # ==================================================
@@ -114,6 +115,7 @@ class Indicator:
         df["TR"] = tr
         df["ATR"] = tr.rolling(period).mean()
         df["ATR60"] = df["ATR"].rolling(60).mean()
+        df["ATR_PCT"] = df["ATR"] / df["Close"]
         return df
 
     # ==================================================
@@ -162,6 +164,7 @@ class Indicator:
         df = cls.add_trend_features(df)
         df = cls.add_atr(df)
         df = cls.add_bollinger(df)
-        df = cls.add_volatility(df)
+        df = cls.add_volatility(df, period=20)
+        df = cls.add_volatility(df, period=60)
         df = cls.add_mdd(df)
         return df

@@ -32,4 +32,4 @@ docs/             전략 DSL, 운영 및 사용자 안내
 - [전략 DSL](docs/strategy-dsl.md)
 - [Cloudflare 데이터 프록시 및 배포](docs/data-proxy.md)
 - [Google Apps Script 알림 설정](docs/google-apps-script/README.md)
-- [외부 개발자용 전략 검토 및 알림 설정](docs/third-party-developer-guide.md)
+- [전략 사용자용 전략 검토 및 알림 설정](docs/strategy-user-guide.md)

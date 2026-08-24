@@ -50,6 +50,14 @@ class OfflineExportTests(unittest.TestCase):
         self.assertIn("endpoint.searchParams.set('start',startDate)", runtime)
         self.assertIn("end.value=last;", runtime)
 
+    def test_strategy_buttons_show_the_yaml_filename(self):
+        runtime = (WEB_SOURCE_DIR / "app.js").read_text(encoding="utf-8")
+
+        self.assertIn("function strategyYamlFilename(definition)", runtime)
+        self.assertIn("function syncStrategyButtonMetadata()", runtime)
+        self.assertIn("new MutationObserver(syncStrategyButtonMetadata)", runtime)
+        self.assertIn("def._yaml_file=file.name", runtime)
+
     def test_bundle_embeds_yaml_definitions_and_compressed_market_csv(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)
@@ -73,6 +81,7 @@ class OfflineExportTests(unittest.TestCase):
             ))
 
             self.assertEqual(bundle["strategies"][0]["strategy"]["id"], "sample")
+            self.assertEqual(bundle["strategies"][0]["_yaml_file"], "sample.yaml")
             self.assertEqual(market["QQQ"], "Date,Open,Close\n2024-01-01,100,101\n")
             self.assertRegex(bundle["market_data_version"], r"^[0-9a-f]{16}$")
 

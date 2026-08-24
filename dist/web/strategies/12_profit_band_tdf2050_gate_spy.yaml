@@ -1,0 +1,311 @@
+strategy:
+  # Experimental candidate: SPY confirms a QQQ early-warning condition.
+  id: profit-band-tdf2050-gate-spy
+  name: Profit Band TDF 2050 Gate SPY
+  version: 1
+  dsl_version: 1
+  enabled: true
+
+assets:
+  required: [QQQ, TDF2050_PROXY, BND, BIL]
+  observations: [SPY]
+  risk: [QQQ]
+
+parameters:
+  canonical_risk_weight: 0.70
+  upper_risk_weight: 0.775
+  caution_risk_cap: 0.75
+  bond_entry_gap: 1.50
+  bond_exit_gap: 0.00
+
+variables:
+  risk_off_score: >
+    count(
+      QQQ.close < QQQ.ema20,
+      QQQ.close < QQQ.ema55,
+      QQQ.ema20 < QQQ.ema55,
+      QQQ.roc5 < 0,
+      QQQ.roc20 < 0,
+      QQQ.ema20_slope5 < 0
+    )
+
+  recovery_score: >
+    count(
+      QQQ.close > QQQ.ema20,
+      QQQ.close > QQQ.ema55,
+      QQQ.ema20 > QQQ.ema55,
+      QQQ.roc5 > 0,
+      QQQ.roc20 > 0,
+      QQQ.ema20_slope5 > 0
+    )
+
+  structural_bear: >
+    variables.risk_off_score >= 5
+    and QQQ.close < QQQ.ema20
+    and QQQ.ema20 < QQQ.ema55
+    and QQQ.ema55 < QQQ.ema200
+    and QQQ.roc60 < 0
+    and QQQ.ema200_slope20 < 0
+
+  bull_reentry_allowed: >
+    QQQ.close > QQQ.ema55
+    and QQQ.roc60 > 0
+
+  qqq_inside_profit_band: >
+    portfolio.weight.QQQ > parameters.canonical_risk_weight
+    and portfolio.weight.QQQ < parameters.upper_risk_weight
+
+state:
+  # These are the VXUS2 four-state transition rules.
+  market_mode:
+    initial: UNINITIALIZED
+    rules:
+      - when: state.market_mode == 'UNINITIALIZED' and variables.structural_bear
+        set: BEAR
+      - when: state.market_mode == 'UNINITIALIZED' and variables.risk_off_score >= 5
+        set: CAUTION
+      - when: state.market_mode == 'UNINITIALIZED'
+        set: BULL
+
+      - when: state.market_mode == 'BULL' and variables.structural_bear
+        set: BEAR
+        confirm: 10
+      # First stage: QQQ must be below its short trend with at least three
+      # existing risk-off observations. Second stage: SPY confirms weakness.
+      - when: >
+          state.market_mode == 'BULL'
+          and QQQ.close < QQQ.ema20
+          and variables.risk_off_score >= 3
+          and SPY.close < SPY.ema20
+          and SPY.roc5 <= -1
+        set: CAUTION
+        confirm: 1
+
+      - when: state.market_mode == 'CAUTION' and variables.structural_bear
+        set: BEAR
+        confirm: 10
+      - when: state.market_mode == 'CAUTION' and variables.recovery_score >= 4
+        set: BULL
+        confirm: 3
+
+      - when: state.market_mode == 'BEAR' and variables.recovery_score >= 3
+        set: RECOVERY
+        confirm: 2
+
+      - when: state.market_mode == 'RECOVERY' and variables.structural_bear
+        set: BEAR
+        confirm: 10
+      - when: >
+          state.market_mode == 'RECOVERY'
+          and variables.recovery_score >= 4
+          and variables.bull_reentry_allowed
+        set: BULL
+        confirm: 3
+      - when: state.market_mode == 'RECOVERY' and variables.risk_off_score >= 5
+        set: CAUTION
+        confirm: 3
+
+  risk_weight:
+    initial: 70%
+    rules:
+      - {when: state.market_mode == 'BEAR', set: 0%}
+      - {when: state.market_mode == 'RECOVERY', set: 50%}
+      - {when: "state.market_mode in ['BULL', 'CAUTION']", set: 70%}
+
+  execution_days:
+    initial: 1
+    rules:
+      - {when: state.market_mode == 'BEAR', set: 1}
+      - {when: state.market_mode == 'CAUTION', set: 2}
+      - {when: state.market_mode == 'RECOVERY', set: 3}
+      - {when: state.market_mode == 'BULL', set: 5}
+
+  # Normally TDF receives 82% of the non-QQQ sleeve. Enter the defensive
+  # sleeve immediately, but restore TDF only after a confirmed recovery.
+  safe_tdf_share:
+    initial: 82%
+    rules:
+      - when: >
+          state.market_mode == 'CAUTION'
+          and state.safe_tdf_share > 0
+          and variables.risk_off_score >= 5
+        set: 0%
+      - when: >
+          state.safe_tdf_share == 0
+          and variables.recovery_score >= 3
+        set: 82%
+        confirm: 2
+      - otherwise: true
+        set: "= state.safe_tdf_share"
+
+  # BND can replace the non-TDF safe capacity when its trend is favorable.
+  bond_share:
+    initial: 0%
+    check: monthly
+    rules:
+      - when: >
+          state.bond_share == 0
+          and BND.roc40 > BIL.roc40 + parameters.bond_entry_gap
+          and BND.close > BND.ema55
+        set: 100%
+        confirm: 2
+      - when: >
+          state.bond_share > 0
+          and BND.roc40 <= BIL.roc40 + parameters.bond_exit_gap
+        set: 0%
+        confirm: 2
+
+  # In strong CAUTION, limit favorable-trend BND to half of the non-TDF
+  # capacity and keep the remainder in BIL.
+  bnd_capacity:
+    initial: 100%
+    rules:
+      - when: >
+          state.market_mode == 'CAUTION'
+          and state.safe_tdf_share == 0
+        set: 50%
+      - otherwise: true
+        set: 100%
+
+target:
+  # Preserve QQQ gains in BULL, and in CAUTION only up to the 75% cap.
+  - when: >
+      (
+        state.market_mode == 'BULL'
+        or (
+          state.market_mode == 'CAUTION'
+          and portfolio.weight.QQQ <= parameters.caution_risk_cap
+        )
+      )
+      and variables.qqq_inside_profit_band
+    weights:
+      QQQ: portfolio.weight.QQQ
+      TDF2050_PROXY: >
+        round((1 - portfolio.weight.QQQ) * state.safe_tdf_share, 10)
+      BND: >
+        round(
+          (1 - portfolio.weight.QQQ)
+          * (1 - state.safe_tdf_share)
+          * state.bnd_capacity
+          * state.bond_share,
+          10
+        )
+      BIL: >
+        round(
+          max(
+            0,
+            1
+            - portfolio.weight.QQQ
+            - (1 - portfolio.weight.QQQ) * state.safe_tdf_share
+            - (1 - portfolio.weight.QQQ)
+              * (1 - state.safe_tdf_share)
+              * state.bnd_capacity
+              * state.bond_share
+          ),
+          10
+        )
+
+  - weights:
+      QQQ: state.risk_weight
+      TDF2050_PROXY: >
+        round((1 - state.risk_weight) * state.safe_tdf_share, 10)
+      BND: >
+        round(
+          (1 - state.risk_weight)
+          * (1 - state.safe_tdf_share)
+          * state.bnd_capacity
+          * state.bond_share,
+          10
+        )
+      BIL: >
+        round(
+          max(
+            0,
+            1
+            - state.risk_weight
+            - (1 - state.risk_weight) * state.safe_tdf_share
+            - (1 - state.risk_weight)
+              * (1 - state.safe_tdf_share)
+              * state.bnd_capacity
+              * state.bond_share
+          ),
+          10
+        )
+
+rebalance:
+  - when: >
+      (
+        state.market_mode == 'BULL'
+        and portfolio.weight.QQQ >= parameters.upper_risk_weight
+      )
+      or (
+        state.market_mode == 'CAUTION'
+        and portfolio.weight.QQQ > parameters.caution_risk_cap
+      )
+    days: state.execution_days
+
+  - when: >
+      changed(state.market_mode)
+      and not (
+        (
+          state.market_mode == 'BULL'
+          or (
+            state.market_mode == 'CAUTION'
+            and portfolio.weight.QQQ <= parameters.caution_risk_cap
+          )
+        )
+        and variables.qqq_inside_profit_band
+      )
+      and not (
+        previous(state.market_mode) == 'CAUTION'
+        and state.market_mode == 'BULL'
+      )
+      and target_deviation() >= 2%
+    days: state.execution_days
+
+  - when: >
+      changed(state.market_mode)
+      and not (
+        (
+          state.market_mode == 'BULL'
+          or (
+            state.market_mode == 'CAUTION'
+            and portfolio.weight.QQQ <= parameters.caution_risk_cap
+          )
+        )
+        and variables.qqq_inside_profit_band
+      )
+      and previous(state.market_mode) == 'CAUTION'
+      and state.market_mode == 'BULL'
+      and (
+        changed(state.safe_tdf_share)
+        or target_deviation() >= 5%
+      )
+      and target_deviation() >= 2%
+    days: state.execution_days
+
+  - when: >
+      changed(state.safe_tdf_share)
+      or changed(state.bnd_capacity)
+    days: 1
+
+  - when: changed(state.bond_share)
+    days: 1
+
+  - check: monthly
+    when: >
+      not (
+        (
+          state.market_mode == 'BULL'
+          or (
+            state.market_mode == 'CAUTION'
+            and portfolio.weight.QQQ <= parameters.caution_risk_cap
+          )
+        )
+        and variables.qqq_inside_profit_band
+      )
+      and target_deviation() >= 5%
+    days: state.execution_days
+
+execution:
+  days: state.execution_days

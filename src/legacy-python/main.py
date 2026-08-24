@@ -4,6 +4,7 @@ import argparse
 from functools import lru_cache
 from hashlib import sha256
 import json
+from pathlib import Path
 import pandas as pd
 
 from attribution import RetirementAllocationAttribution
@@ -25,8 +26,9 @@ from strategy_runtime import (
 STRATEGY_DIRECTORY = RESULT_DIR.parent / "strategies"
 STRATEGY_CACHE_DIRECTORY = RESULT_DIR / ".strategy-cache"
 RESULT_CACHE = StrategyResultDiskCache(STRATEGY_CACHE_DIRECTORY)
+MODULE_DIRECTORY = Path(__file__).resolve().parent
 BACKTEST_ENGINE_FILES = tuple(
-    RESULT_DIR.parent / "src" / name
+    MODULE_DIRECTORY / name
     for name in (
         "backtest.py",
         "config.py",

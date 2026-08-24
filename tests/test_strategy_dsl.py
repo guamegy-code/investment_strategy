@@ -432,6 +432,37 @@ class DeclarativeStrategyTests(unittest.TestCase):
         self.assertFalse(backtest.data["QQQ_ROC40"].isna().any())
         self.assertEqual(len(backtest.data), 20)
 
+    def test_observation_asset_is_available_to_rules_but_not_target(self):
+        strategy = DeclarativeStrategy({
+            "strategy": {"id": "observed", "name": "Observed", "version": 1},
+            "assets": {
+                "required": ["QQQ", "BND"],
+                "observations": ["SPY"],
+                "risk": ["QQQ"],
+            },
+            "variables": {"broad_market_weak": "SPY.close < SPY.ema20"},
+            "target": [
+                {
+                    "when": "variables.broad_market_weak",
+                    "weights": {"QQQ": "50%", "BND": "50%"},
+                },
+                {"weights": {"QQQ": "70%", "BND": "30%"}},
+            ],
+        })
+        observed_market = {
+            "QQQ": {"Close": 100.0},
+            "BND": {"Close": 100.0},
+            "SPY": {"Close": 90.0, "EMA20": 100.0},
+        }
+
+        result = strategy.evaluate(pd.Timestamp("2025-01-02"), observed_market, PortfolioStub())
+
+        self.assertEqual(strategy.holding_tickers, ("QQQ", "BND"))
+        self.assertEqual(strategy.observation_tickers, ("SPY",))
+        self.assertEqual(strategy.required_tickers, ("QQQ", "BND", "SPY"))
+        self.assertEqual(result["target"], {"QQQ": 0.5, "BND": 0.5})
+        self.assertNotIn("SPY", result["target"])
+
     def test_retirement_allocation_yaml_matches_python_transition_path(self):
         declarative = DeclarativeStrategy.from_yaml(
             PROJECT_ROOT / "strategies" / "01_allocation.yaml"
