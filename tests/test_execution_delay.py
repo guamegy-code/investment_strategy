@@ -91,6 +91,25 @@ class ExecutionDelayTests(unittest.TestCase):
         self.assertEqual(event["ExecutionDays"], 1)
         self.assertEqual(event["PreWeights"], {"QQQ": 0.6, "BND": 0.4})
 
+    def test_same_target_does_not_restart_active_execution(self):
+        portfolio = Portfolio()
+        target = {"QQQ": 0.7, "BND": 0.3}
+        portfolio.start_rebalance(target, days=5, date=pd.Timestamp("2024-01-02"))
+        portfolio.update(
+            {"QQQ": 1.0, "BND": 1.0},
+            date=pd.Timestamp("2024-01-03"),
+        )
+
+        started = portfolio.start_rebalance(
+            target,
+            days=5,
+            date=pd.Timestamp("2024-01-03"),
+        )
+
+        self.assertFalse(started)
+        self.assertEqual(portfolio.remaining_days, 4)
+        self.assertEqual(len(portfolio.get_rebalances()), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

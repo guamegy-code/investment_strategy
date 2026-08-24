@@ -211,6 +211,7 @@ def build_bundle(
     definition_paths: dict[str, Path] = {}
     for path in sorted((*strategy_dir.glob("*.yaml"), *strategy_dir.glob("*.yml"))):
         definition = yaml.safe_load(path.read_text(encoding="utf-8"))
+        definition["_yaml_file"] = path.name
         strategies.append(definition)
         strategy_id = str((definition.get("strategy") or {}).get("id") or "")
         if strategy_id:

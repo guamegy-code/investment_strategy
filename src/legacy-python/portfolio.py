@@ -50,8 +50,10 @@ class Portfolio:
     def is_same_target(self, target, tol=1e-6):
         if self.pending_target is None:
             return False
-        for ticker in target:
-            if abs(self.pending_target[ticker] - target[ticker]) > tol:
+        for ticker in set(self.pending_target) | set(target):
+            if abs(
+                self.pending_target.get(ticker, 0.0) - target.get(ticker, 0.0)
+            ) > tol:
                 return False
         return True
 
@@ -59,6 +61,8 @@ class Portfolio:
     # 분할 리밸런싱 시작
     # ==================================================
     def start_rebalance(self, target, days=5, date=None, reason=None):
+        if self.is_same_target(target):
+            return False
         self.pending_target = deepcopy(target)
         self.remaining_days = days
         self.total_days = days
@@ -69,6 +73,7 @@ class Portfolio:
             "Reason": reason,
         }
         self.rebalances.append(self.active_rebalance)
+        return True
 
     # ==================================================
     # 분할 리밸런싱 실행

@@ -199,7 +199,8 @@ class Backtest:
     # ==================================================
     def get_prices(self, row, field="Close"):
         prices = {}
-        for ticker in self.tickers:
+        holding_tickers = getattr(self.strategy, "holding_tickers", self.tickers)
+        for ticker in holding_tickers:
             column = f"{ticker}_{field}"
             prices[ticker] = row.get(column, row[f"{ticker}_Close"])
         return prices

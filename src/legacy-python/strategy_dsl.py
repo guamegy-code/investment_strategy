@@ -402,12 +402,23 @@ def _validate_definition(raw: Any, source: str) -> dict[str, Any]:
     if "target" not in definition:
         raise StrategyDefinitionError("target is required")
     assets = _require_mapping(definition.get("assets", {}), "assets")
-    _reject_unknown(assets, {"required", "risk"}, "assets")
+    _reject_unknown(assets, {"required", "observations", "risk"}, "assets")
     required = assets.get("required")
     if not isinstance(required, list) or not required:
         raise StrategyDefinitionError("assets.required must be a non-empty list")
     if len({str(item) for item in required}) != len(required):
         raise StrategyDefinitionError("assets.required must not contain duplicates")
+    observations = assets.get("observations", [])
+    if not isinstance(observations, list):
+        raise StrategyDefinitionError("assets.observations must be a list")
+    if len({str(item) for item in observations}) != len(observations):
+        raise StrategyDefinitionError("assets.observations must not contain duplicates")
+    overlap = sorted({str(item) for item in required} & {str(item) for item in observations})
+    if overlap:
+        raise StrategyDefinitionError(
+            "assets.observations must not overlap assets.required: "
+            + ", ".join(overlap)
+        )
     state = _require_mapping(definition.get("state", {}), "state")
     for name, config in state.items():
         config = _require_mapping(config, f"state.{name}")
@@ -533,7 +544,13 @@ class DeclarativeStrategy:
         self.operators = operators or DEFAULT_OPERATOR_REGISTRY
 
         assets = self.definition["assets"]
-        self.required_tickers = tuple(str(item) for item in assets["required"])
+        self.holding_tickers = tuple(str(item) for item in assets["required"])
+        self.observation_tickers = tuple(
+            str(item) for item in assets.get("observations", [])
+        )
+        self.required_tickers = tuple(
+            dict.fromkeys((*self.holding_tickers, *self.observation_tickers))
+        )
         self.required_market_fields = _required_market_fields(
             self.definition, self.required_tickers
         )
@@ -593,9 +610,9 @@ class DeclarativeStrategy:
         target: Mapping[str, float] | None = None,
     ) -> dict[str, Any]:
         prices = {
-            ticker: observations.get("Close")
-            for ticker, observations in market.items()
-            if observations.get("Close") is not None
+            ticker: market[ticker].get("Close")
+            for ticker in self.holding_tickers
+            if ticker in market and market[ticker].get("Close") is not None
         }
         weights = portfolio.weights(prices) if prices else {}
         context = {
@@ -698,9 +715,9 @@ class DeclarativeStrategy:
                 )
             )
             target[str(ticker)] = value
-        if set(target) != set(self.required_tickers):
-            missing = sorted(set(self.required_tickers) - set(target))
-            extra = sorted(set(target) - set(self.required_tickers))
+        if set(target) != set(self.holding_tickers):
+            missing = sorted(set(self.holding_tickers) - set(target))
+            extra = sorted(set(target) - set(self.holding_tickers))
             raise StrategyDefinitionError(
                 f"target assets must match assets.required; missing={missing}, extra={extra}"
             )
@@ -865,7 +882,11 @@ class ProductMappedStrategy:
         )
         if not source_tickers:
             raise StrategyDefinitionError("source strategy must declare required_tickers")
-        unknown_sources = sorted(set(self.products) - set(source_tickers))
+        source_holding_tickers = tuple(
+            str(ticker)
+            for ticker in getattr(source_strategy, "holding_tickers", source_tickers)
+        )
+        unknown_sources = sorted(set(self.products) - set(source_holding_tickers))
         if unknown_sources:
             raise StrategyDefinitionError(
                 "products contains assets not used by the source strategy: "
@@ -876,6 +897,15 @@ class ProductMappedStrategy:
             for configured_products in self.products.values()
             for product in configured_products
         )
+        self.observation_tickers = tuple(
+            str(ticker)
+            for ticker in getattr(source_strategy, "observation_tickers", ())
+        )
+        self.holding_tickers = tuple(dict.fromkeys(
+            product
+            for source_asset in source_holding_tickers
+            for product in self.products.get(source_asset, {source_asset: 1.0})
+        ))
         self.required_tickers = tuple(dict.fromkeys((*source_tickers, *product_tickers)))
         fx_rates = {
             rate
