@@ -25,6 +25,7 @@
 | 2026-08-22 | TDF2050 프록시와 자산배분 | 프록시는 연구용으로 허용하고 생산 위험 비중과 단순 TDF/BIL 구조 유지 | TDF 전략 계열의 근거 | [TDF2050 프록시와 자산배분 실험](tdf2050-allocation-experiments.md) |
 | 2026-08-24 | Gate SPY | QQQ 약세 후 SPY 확인을 채택하고 추가 신용·버퍼·단계형 안전자산은 기각 | 전략 12~14에 반영 | [Gate SPY 전략 실험](gate-spy-experiments.md) |
 | 2026-08-25 | VXN, 신용, CNN Fear & Greed, 극단공포 회복 | 시험한 시장 상황 지표를 모두 기각하거나 데이터 부족으로 중단 | 없음 | [시장 상황 지표 실험](market-condition-signal-experiments.md) |
+| 2026-08-28 | 15번 사전 BEAR 방어와 리밸런싱 | 사전 경보 BIL 100%, 확정 BEAR TDF 20%, 7.5%p 허용폭을 채택 | 전략 15 버전 2에 반영 | [15번 사전 BEAR 방어 및 리밸런싱 개선](band-7030-tdf-state-bil-experiments.md) |
 
 ## 관리 원칙
 

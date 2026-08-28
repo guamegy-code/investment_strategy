@@ -1,0 +1,132 @@
+strategy:
+  # 70/30 TDF 밴드에 네 상태 BIL 방어를 결합한 전략이다.
+  id: band-7030-tdf-state-bil
+  name: 70/30 TDF State BIL
+  version: 2
+  dsl_version: 1
+  enabled: true
+
+assets:
+  required: [QQQ, TDF2050_PROXY, BIL]
+  observations: [SPY]
+  risk: [QQQ]
+
+variables:
+  risk_off_score: >
+    count(
+      QQQ.close < QQQ.ema20,
+      QQQ.close < QQQ.ema55,
+      QQQ.ema20 < QQQ.ema55,
+      QQQ.roc5 < 0,
+      QQQ.roc20 < 0,
+      QQQ.ema20_slope5 < 0
+    )
+
+  recovery_score: >
+    count(
+      QQQ.close > QQQ.ema20,
+      QQQ.close > QQQ.ema55,
+      QQQ.ema20 > QQQ.ema55,
+      QQQ.roc5 > 0,
+      QQQ.roc20 > 0,
+      QQQ.ema20_slope5 > 0
+    )
+
+  structural_bear: >
+    variables.risk_off_score >= 5
+    and QQQ.close < QQQ.ema20
+    and QQQ.ema20 < QQQ.ema55
+    and QQQ.ema55 < QQQ.ema200
+    and QQQ.roc60 < 0
+    and QQQ.ema200_slope20 < 0
+
+  bull_reentry_allowed: >
+    QQQ.close > QQQ.ema55
+    and QQQ.roc60 > 0
+
+state:
+  # 최신 Gate SPY의 네 상태 전이 규칙을 재사용한다.
+  market_mode:
+    initial: UNINITIALIZED
+    rules:
+      - when: state.market_mode == 'UNINITIALIZED' and variables.structural_bear
+        set: BEAR
+      - when: state.market_mode == 'UNINITIALIZED' and variables.risk_off_score >= 5
+        set: CAUTION
+      - when: state.market_mode == 'UNINITIALIZED'
+        set: BULL
+
+      - when: state.market_mode == 'BULL' and variables.structural_bear
+        set: BEAR
+        confirm: 10
+      - when: >
+          state.market_mode == 'BULL'
+          and QQQ.close < QQQ.ema20
+          and variables.risk_off_score >= 3
+          and SPY.close < SPY.ema20
+          and SPY.roc5 <= -1
+        set: CAUTION
+        confirm: 1
+
+      - when: state.market_mode == 'CAUTION' and variables.structural_bear
+        set: BEAR
+        confirm: 10
+      - when: state.market_mode == 'CAUTION' and variables.recovery_score >= 4
+        set: BULL
+        confirm: 3
+
+      - when: state.market_mode == 'BEAR' and variables.recovery_score >= 3
+        set: RECOVERY
+        confirm: 3
+
+      - when: state.market_mode == 'RECOVERY' and variables.structural_bear
+        set: BEAR
+        confirm: 10
+      - when: >
+          state.market_mode == 'RECOVERY'
+          and variables.recovery_score >= 4
+          and variables.bull_reentry_allowed
+        set: BULL
+        confirm: 3
+      - when: state.market_mode == 'RECOVERY' and variables.risk_off_score >= 5
+        set: CAUTION
+        confirm: 3
+
+target:
+  # 10일 BEAR 확인을 기다리는 동안 포트폴리오 전체를 BIL로 이동한다.
+  # 확인 전에 structural_bear가 해제되면 다음 1일 실행에서
+  # 기본 상태 목표의 원래 비중으로 복원한다.
+  - when: >
+      state.market_mode != 'BEAR'
+      and variables.structural_bear
+    weights:
+      QQQ: 0%
+      TDF2050_PROXY: 0%
+      BIL: 100%
+
+  # BEAR가 확정되면 TDF 슬리브 20%를 다시 편입한다.
+  - when: state.market_mode == 'BEAR'
+    weights:
+      QQQ: 0%
+      TDF2050_PROXY: 20%
+      BIL: 80%
+
+  # RECOVERY에서는 QQQ를 60%로 복원하고 나머지 10%는 BIL에 둔다.
+  - when: state.market_mode == 'RECOVERY'
+    weights:
+      QQQ: 60%
+      TDF2050_PROXY: 30%
+      BIL: 10%
+
+  # BULL과 CAUTION에서는 기존 band-7030-tdf 비중을 유지한다.
+  - weights:
+      QQQ: 70%
+      TDF2050_PROXY: 30%
+      BIL: 0%
+
+rebalance:
+  - check: daily
+    when: target_deviation() >= 7.5%
+
+execution:
+  days: 1
