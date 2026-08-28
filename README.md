@@ -30,6 +30,7 @@ docs/             전략 DSL, 운영 및 사용자 안내
 ## 문서
 
 - [전략 DSL](docs/strategy-dsl.md)
+- [YAML 전략 안내](docs/strategy.md)
 - [Cloudflare 데이터 프록시 및 배포](docs/data-proxy.md)
 - [Google Apps Script 알림 설정](docs/google-apps-script/README.md)
 - [전략 사용자용 전략 검토 및 알림 설정](docs/strategy-user-guide.md)

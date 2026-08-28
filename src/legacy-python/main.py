@@ -48,6 +48,7 @@ PREFERRED_STRATEGY_ORDER = (
     "dsl:profit-band-tdf2050",
     "dsl:band-7030",
     "dsl:band-7030-tdf",
+    "dsl:band-7030-tdf-state-bil",
     "dsl:kodex-nasdaq",
     "dsl:time-nasdaq",
     "dsl:koact-nasdaq",

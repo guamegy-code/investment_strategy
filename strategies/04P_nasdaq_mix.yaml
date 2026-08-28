@@ -9,8 +9,8 @@ source: profit-band-vxus
 
 products:
   QQQ:
-    379810.KS: 50%  # Kodex
-    426030.KS: 30%  # Time
-    0015B0.KS: 20%  # KoAct
+    379810.KS: 50%  # 코덱스
+    426030.KS: 30%  # 타임
+    0015B0.KS: 20%  # 코액트
   BND: {BND: 100%}
   BIL: {BIL: 100%}

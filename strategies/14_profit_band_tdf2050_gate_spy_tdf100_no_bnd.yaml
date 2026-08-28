@@ -1,5 +1,5 @@
 strategy:
-  # Gate SPY with a TDF/BIL-only safe sleeve.
+  # TDF/BIL로만 안전 슬리브를 구성하는 Gate SPY 전략이다.
   id: profit-band-tdf2050-gate-spy-tdf100-no-bnd
   name: Profit Band TDF 2050 Gate SPY TDF 100 No BND
   version: 1
@@ -54,7 +54,7 @@ variables:
     and portfolio.weight.QQQ < parameters.upper_risk_weight
 
 state:
-  # These are the VXUS2 four-state transition rules.
+  # VXUS2의 네 상태 전이 규칙을 그대로 사용한다.
   market_mode:
     initial: UNINITIALIZED
     rules:
@@ -68,8 +68,8 @@ state:
       - when: state.market_mode == 'BULL' and variables.structural_bear
         set: BEAR
         confirm: 10
-      # First stage: QQQ must be below its short trend with at least three
-      # existing risk-off observations. Second stage: SPY confirms weakness.
+      # 1단계: QQQ가 단기 추세 아래이고 기존 위험회피 조건을 3개 이상
+      # 충족해야 한다. 2단계: SPY가 약세를 확인한다.
       - when: >
           state.market_mode == 'BULL'
           and QQQ.close < QQQ.ema20
@@ -118,7 +118,7 @@ state:
       - {when: state.market_mode == 'RECOVERY', set: 3}
       - {when: state.market_mode == 'BULL', set: 5}
 
-  # Restore the entire non-QQQ sleeve to TDF after a confirmed recovery.
+  # 회복이 확인되면 비-QQQ 슬리브 전체를 TDF로 복원한다.
   safe_tdf_share:
     initial: 100%
     rules:
@@ -136,7 +136,7 @@ state:
         set: "= state.safe_tdf_share"
 
 target:
-  # Preserve QQQ gains in BULL, and in CAUTION only up to the 75% cap.
+  # BULL에서는 QQQ 수익 비중을 보존하고 CAUTION에서는 75% 상한까지만 허용한다.
   - when: >
       (
         state.market_mode == 'BULL'
