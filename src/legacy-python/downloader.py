@@ -22,6 +22,50 @@ from config import (
 from indicators import Indicator
 
 
+KRW_ADJUSTED_SUFFIX = "_KRW"
+
+
+def _load_saved_prices(data_dir: Path, ticker: str) -> pd.DataFrame:
+    """Read the OHLC source used to build a synthetic KRW price series."""
+    frame = pd.read_csv(data_dir / f"{ticker}.csv", index_col="Date", parse_dates=True)
+    frame.index = pd.to_datetime(frame.index).tz_localize(None)
+    return frame.sort_index()
+
+
+def _build_krw_adjusted_asset(ticker: str, output_dir: Path) -> pd.DataFrame:
+    """Create a KRW total-return proxy from an investable foreign asset.
+
+    The Korean-listed assets already trade in KRW.  For US and global ETFs we
+    explicitly apply the daily USD/KRW close so their signals and portfolio
+    values are on the same currency basis as Strategy 16's Korean assets.
+    """
+    base_ticker = ticker.removesuffix(KRW_ADJUSTED_SUFFIX)
+    if not base_ticker:
+        raise ValueError(f"invalid KRW-adjusted ticker: {ticker}")
+    ensure_data_files((base_ticker, "KRW=X"), data_dir=output_dir)
+    base = _load_saved_prices(output_dir, base_ticker)
+    fx = _load_saved_prices(output_dir, "KRW=X")["Close"].rename("FX")
+    source_columns = ["Open", "High", "Low", "Close"]
+    if not set(source_columns).issubset(base.columns):
+        raise ValueError(f"{base_ticker} is missing OHLC source columns")
+
+    combined = base[source_columns].join(fx, how="left")
+    # The FX series does not quote every Korean/US holiday.  A preceding
+    # published FX close is the last observable conversion rate; never fill
+    # the beginning, where no rate was known yet.
+    combined["FX"] = combined["FX"].ffill()
+    combined = combined.dropna(subset=["FX"])
+    adjusted = combined[source_columns].mul(combined["FX"], axis=0)
+    adjusted["Volume"] = base.loc[adjusted.index, "Volume"] if "Volume" in base else 0
+    adjusted.index.name = "Date"
+    adjusted = Indicator.add_indicators(adjusted)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    filename = output_dir / f"{ticker}.csv"
+    adjusted.to_csv(filename)
+    print(f"Built KRW-adjusted proxy: {filename}")
+    return adjusted
+
+
 def download_one(ticker: str, output_dir=DATA_DIR) -> pd.DataFrame:
     """
     ETF 하나 다운로드
@@ -32,6 +76,11 @@ def download_one(ticker: str, output_dir=DATA_DIR) -> pd.DataFrame:
         TDF_PROXY_TICKER,
         build_tdf2050_proxy,
     )
+
+    output_dir = Path(output_dir)
+
+    if ticker.endswith(KRW_ADJUSTED_SUFFIX):
+        return _build_krw_adjusted_asset(ticker, output_dir)
 
     if ticker == TDF_PROXY_TICKER:
         ensure_data_files(TDF_PROXY_COMPONENT_WEIGHTS, data_dir=output_dir)
@@ -61,7 +110,6 @@ def download_one(ticker: str, output_dir=DATA_DIR) -> pd.DataFrame:
 
     # 보조지표 추가
     df = Indicator.add_indicators(df)    
-    output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     filename = output_dir / f"{ticker}.csv"
     df.to_csv(filename)
@@ -90,8 +138,14 @@ def _needs_indicator_refresh(path, fields):
     columns = {str(column).upper(): column for column in frame.columns}
     if not fields.issubset(columns):
         return True
-    first = first_rows.iloc[0]
-    return any(pd.isna(first[columns[field]]) for field in fields)
+    # Some valid assets (notably newer Korean ETFs and USD/KRW) have no
+    # history before the requested backtest start.  They cannot have a
+    # 252-day indicator on the very first common date, but rebuilding the
+    # same file cannot create that unavailable history.  Accept the file once
+    # a later usable row exists; Backtest.load_data will begin at that common
+    # indicator-ready date.  A file with no usable row at all still refreshes.
+    required_columns = [columns[field] for field in fields]
+    return first_rows.dropna(subset=required_columns).empty
 
 
 def ensure_data_files(

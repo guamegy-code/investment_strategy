@@ -4,7 +4,7 @@ strategy:
   name: Profit Band TDF 2050 Gate SPY
   version: 1
   dsl_version: 1
-  enabled: true
+  enabled: false
 
 assets:
   required: [QQQ, TDF2050_PROXY, BND, BIL]

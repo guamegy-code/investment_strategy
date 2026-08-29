@@ -11,6 +11,7 @@ from attribution import RetirementAllocationAttribution
 from chart import draw_chart
 from config import END_DATE, FX_RATE_TICKERS, RESULT_DIR, START_DATE
 from downloader import ensure_data_files
+from general_comparison import write_general_comparison_reports
 from runner import Runner
 from rebalance_service import DEFAULT_STRATEGY_CATALOG
 from strategy_dsl import load_strategy_directory
@@ -49,6 +50,7 @@ PREFERRED_STRATEGY_ORDER = (
     "dsl:band-7030",
     "dsl:band-7030-tdf",
     "dsl:band-7030-tdf-state-bil",
+    "dsl:state-conditioned-cross-asset-rotation",
     "dsl:kodex-nasdaq",
     "dsl:time-nasdaq",
     "dsl:koact-nasdaq",
@@ -214,7 +216,14 @@ def execute_strategy_suite():
     results, calculated = run_with_result_cache(runner)
     if calculated:
         save_results(calculated, all_results=results)
+    write_general_comparison_reports(results, RESULT_DIR)
     return runner, results
+
+
+def publish_strategy_results(changed, merged):
+    """Persist changed histories and refresh the canonical comparison."""
+    save_results(changed, all_results=merged)
+    write_general_comparison_reports(merged, RESULT_DIR)
 
 
 def execute_strategies(
@@ -289,9 +298,7 @@ def main(argv=None):
             executor=lambda strategies: execute_strategies(
                 strategies, cache_results=True
             ),
-            publisher=lambda changed, merged: save_results(
-                changed, all_results=merged
-            ),
+            publisher=publish_strategy_results,
         )
 
         result_store = ReloadableStrategyResults(

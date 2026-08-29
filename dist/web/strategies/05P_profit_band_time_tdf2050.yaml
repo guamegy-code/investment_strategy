@@ -3,7 +3,7 @@ strategy:
   name: "Profit Band TIME + KODEX TDF2050 (VXUS)"
   version: 1
   dsl_version: 1
-  enabled: true
+  enabled: false
 
 source: profit-band-vxus-v2
 

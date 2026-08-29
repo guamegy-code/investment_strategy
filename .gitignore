@@ -12,6 +12,7 @@ data_extended/*.csv
 data_multimarket/*.csv
 data_risk_assets/*.csv
 data_probability_signals/*.csv
+data_cross_asset_rotation/*.csv
 
 # Results
 results/*

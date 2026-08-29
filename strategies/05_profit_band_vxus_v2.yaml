@@ -4,7 +4,7 @@ strategy:
   name: Profit Band VXUS V2
   version: 1
   dsl_version: 1
-  enabled: true
+  enabled: false
 
 assets:
   required: [QQQ, BND, BIL, VXUS]

@@ -11,6 +11,9 @@ id = "72f4477a122b418b98b65bfc4ee4138e"
 [vars]
 # URL of the static site's strategies/manifest.json.
 STRATEGY_MANIFEST_URL = "https://investment-strategy-3zy.pages.dev/strategies/manifest.json"
+# The Worker reads a ticker-specific gzip shard only when Yahoo and KV cannot
+# serve a request. Browsers never fetch the full archive in hosted/on-demand mode.
+MARKET_DATA_FALLBACK_BASE_URL = "https://investment-strategy-3zy.pages.dev/market-data/"
 
 # Set this separately; never commit the value:
 #   npx wrangler secret put NOTIFICATION_API_KEY

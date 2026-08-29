@@ -4,13 +4,37 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from downloader import ensure_data_files  # noqa: E402
+from downloader import _build_krw_adjusted_asset, ensure_data_files  # noqa: E402
 
 
 class EnsureDataFilesTests(unittest.TestCase):
+    def test_krw_adjusted_asset_uses_underlying_ohlc_and_fx_close(self):
+        with tempfile.TemporaryDirectory() as directory:
+            data_dir = Path(directory)
+            dates = pd.date_range("2025-01-02", periods=3, freq="D")
+            pd.DataFrame({
+                "Open": [10.0, 11.0, 12.0],
+                "High": [11.0, 12.0, 13.0],
+                "Low": [9.0, 10.0, 11.0],
+                "Close": [10.5, 11.5, 12.5],
+                "Volume": [100, 200, 300],
+            }, index=dates).rename_axis("Date").to_csv(data_dir / "QQQ.csv")
+            pd.DataFrame({"Close": [1300.0, 1310.0, 1320.0]}, index=dates).rename_axis(
+                "Date"
+            ).to_csv(data_dir / "KRW=X.csv")
+
+            with patch("downloader.ensure_data_files") as ensure:
+                result = _build_krw_adjusted_asset("QQQ_KRW", data_dir)
+
+            ensure.assert_called_once_with(("QQQ", "KRW=X"), data_dir=data_dir)
+            self.assertEqual(result["Close"].tolist(), [13650.0, 15065.0, 16500.0])
+            self.assertEqual(result["Volume"].tolist(), [100, 200, 300])
+            self.assertTrue((data_dir / "QQQ_KRW.csv").is_file())
+
     def test_existing_files_are_not_downloaded(self):
         with tempfile.TemporaryDirectory() as directory:
             data_dir = Path(directory)

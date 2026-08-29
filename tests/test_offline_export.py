@@ -35,6 +35,76 @@ class OfflineExportTests(unittest.TestCase):
         self.assertIn(declaration, runtime)
         self.assertLess(runtime.index(declaration), runtime.index("async function runDashboard()"))
 
+    def test_dashboard_discards_superseded_runs_and_clears_empty_selection(self):
+        runtime = (WEB_SOURCE_DIR / "app.js").read_text(encoding="utf-8")
+        coordinated = runtime.split(
+            "let dashboardRunRevision=0,dashboardRunTimer=null;", 1
+        )[1]
+
+        guard = "if(revision!==dashboardRunRevision)return false;"
+        commit = "dashboardResults=new Map(completed.map"
+        self.assertIn("const revision=++dashboardRunRevision;", coordinated)
+        self.assertIn(guard, coordinated)
+        self.assertLess(coordinated.index(guard), coordinated.index(commit))
+        self.assertIn("function scheduleDashboardRun()", coordinated)
+        self.assertIn("void runDashboard(revision);", coordinated)
+        self.assertIn("input.onchange=()=>{saveUiState();scheduleDashboardRun();};", runtime)
+        self.assertIn("clearDashboardVisuals();", coordinated)
+        self.assertIn("const committed=await periodAwareRunDashboard();", coordinated)
+
+    def test_hosted_site_skips_the_full_market_archive_in_the_browser(self):
+        runtime = (WEB_SOURCE_DIR / "app.js").read_text(encoding="utf-8")
+        load_data = runtime.split("async function loadData()", 1)[1].split(
+            "async function loadPrecomputedResults()", 1
+        )[0]
+
+        hosted_guard = "if (bundle.static_site && proxyUrl)"
+        archive_fetch = "fetch(bundle.data_url)"
+        self.assertIn(hosted_guard, load_data)
+        self.assertIn(archive_fetch, load_data)
+        self.assertLess(load_data.index(hosted_guard), load_data.index(archive_fetch))
+        self.assertIn("fetch(endpoint,{cache:'no-store'})", runtime)
+
+    def test_dashboard_restores_saved_selection_before_the_list_is_visible(self):
+        runtime = (WEB_SOURCE_DIR / "app.js").read_text(encoding="utf-8")
+        restoration = runtime.split("const stateRestoringDashboardSetup=setupDashboard;", 1)[1].split(
+            "async function bootstrapDashboard()", 1
+        )[0]
+
+        self.assertIn("selectedIds=Array.isArray(state.strategyIds)?new Set(state.strategyIds):null", restoration)
+        self.assertIn("list.style.visibility='hidden';", restoration)
+        self.assertIn("input.checked=selectedIds.has(input.value)", restoration)
+        self.assertIn("if(state.analysisStart)$('start-date').value=state.analysisStart;", restoration)
+        self.assertIn("if(state.analysisEnd)$('end-date').value=state.analysisEnd;", restoration)
+        self.assertLess(restoration.index("input.checked=selectedIds.has(input.value)"), restoration.index("list.style.visibility='';"))
+        self.assertIn("if(!end.value||end.value<first||end.value>last)end.value=last;", runtime)
+
+    def test_charts_zoom_with_the_wheel_only_when_the_pointer_is_over_a_plot(self):
+        runtime = (WEB_SOURCE_DIR / "app.js").read_text(encoding="utf-8")
+
+        self.assertIn("scrollZoom:true", runtime)
+        self.assertNotIn("scrollZoom:false", runtime)
+
+    def test_comparison_chart_keeps_each_strategy_color_when_selection_changes(self):
+        runtime = (WEB_SOURCE_DIR / "app.js").read_text(encoding="utf-8")
+        renderer = runtime.split("renderAnalysis=function()", 1)[1].split(
+            "renderDetail=function()", 1
+        )[0]
+
+        self.assertIn("const strategyChartColors=new Map();", runtime)
+        self.assertIn("!strategyChartColors.has(id)", runtime)
+        self.assertIn("color:strategyChartColor(def.strategy.id)", renderer)
+        self.assertNotIn("color:dashPalette[index", renderer)
+
+    def test_browser_defers_mapped_risk_product_mix_above_70_percent(self):
+        runtime = (WEB_SOURCE_DIR / "app.js").read_text(encoding="utf-8")
+
+        self.assertIn("function mapProductTarget", runtime)
+        self.assertIn("currentWeight>riskCap+1e-8&&weight>riskCap+1e-8", runtime)
+        self.assertIn(
+            "target=mapProductTarget(signal.target,def,source,actual)", runtime
+        )
+
     def test_static_site_rebuilds_the_tdf_proxy_from_market_components(self):
         runtime = (WEB_SOURCE_DIR / "app.js").read_text(encoding="utf-8")
 
@@ -326,6 +396,48 @@ class OfflineExportTests(unittest.TestCase):
             self.assertTrue(sidecar.is_file())
             self.assertIn('"data_url": "offline.market-data.json.gz"', document)
             self.assertNotIn('"data": "H4sI', document)
+
+    def test_static_site_can_include_market_data_fallback(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            data_dir = root / "data"
+            strategy_dir = root / "strategies"
+            data_dir.mkdir()
+            strategy_dir.mkdir()
+            (data_dir / "SPY.csv").write_text(
+                "Date,Open,High,Low,Close,Volume\n"
+                "2024-01-02,100,103,99,102,1000\n",
+                encoding="utf-8",
+            )
+            (strategy_dir / "sample.yaml").write_text(
+                "strategy:\n  id: sample\n  name: Sample\n  version: 1\n"
+                "assets:\n  required: [SPY]\n"
+                "target:\n  - weights:\n      SPY: 100%\n",
+                encoding="utf-8",
+            )
+
+            output = export_static_site(
+                root / "site",
+                strategy_dir=strategy_dir,
+                data_dir=data_dir,
+            )
+            document = output.read_text(encoding="utf-8")
+            sidecar = root / "site" / "market-data.json.gz"
+            ticker_fallback = root / "site" / "market-data" / "U1BZ.csv.gz"
+
+            self.assertTrue(sidecar.is_file())
+            self.assertEqual(json.loads(gzip.decompress(sidecar.read_bytes())), {
+                "SPY": "Date,Open,High,Low,Close,Volume\n"
+                "2024-01-02,100,103,99,102,1000\n",
+            })
+            self.assertIn('"data_url": "./market-data.json.gz"', document)
+            self.assertEqual(
+                gzip.decompress(ticker_fallback.read_bytes()).decode("utf-8").splitlines(),
+                [
+                    "Date,Open,High,Low,Close,Volume",
+                    "2024-01-02,100,103,99,102,1000",
+                ],
+            )
 
     @unittest.skipUnless(
         os.environ.get("RUN_OFFLINE_BROWSER_TESTS")
