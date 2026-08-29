@@ -16,6 +16,7 @@ const MAX_PRIVATE_STRATEGIES = 20;
 const MAX_PRIVATE_STRATEGY_BYTES = 100_000;
 const NOTIFICATION_TAIL_ROWS = 320;
 const NOTIFICATION_LOOKBACK_DAYS = 500;
+const RECENT_CACHE_ROWS = 10;
 const YAHOO_CHART_HOSTS = ["query1.finance.yahoo.com", "query2.finance.yahoo.com"];
 const YAHOO_HEADERS = {
   Accept: "application/json,text/plain,*/*",
@@ -186,6 +187,21 @@ async function loadFallbackTicker(env, ticker) {
   return fallbackCsvRows(await new Response(stream).text());
 }
 
+function historicalObjectKey(ticker) {
+  return `history/${fallbackTickerSlug(ticker)}.csv.gz`;
+}
+
+async function loadHistoricalTicker(env, ticker, loadFallbackTicker = null) {
+  const object = env.MARKET_HISTORY
+    ? await env.MARKET_HISTORY.get(historicalObjectKey(ticker))
+    : null;
+  if (object?.body) {
+    const stream = object.body.pipeThrough(new DecompressionStream("gzip"));
+    return fallbackCsvRows(await new Response(stream).text());
+  }
+  return loadFallbackTicker ? loadFallbackTicker(ticker) : [];
+}
+
 export function createFallbackTickerLoader(env) {
   const loads = new Map();
   return (ticker) => {
@@ -194,9 +210,18 @@ export function createFallbackTickerLoader(env) {
   };
 }
 
-async function savePriceRows(env, ctx, ticker, rows) {
+function samePriceRows(left, right) {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+async function saveRecentPriceRows(env, ctx, ticker, baseRows, rows) {
   if (!env.MARKET_DATA) return;
-  const write = env.MARKET_DATA.put(`prices:${ticker}`, JSON.stringify(rows))
+  const baseByDate = new Map(baseRows.map(row => [row.date, row]));
+  const recent = rows.filter(row => !samePriceRows(baseByDate.get(row.date), row)).slice(-RECENT_CACHE_ROWS);
+  const key = `recent-prices:${ticker}`;
+  const existing = JSON.parse(await env.MARKET_DATA.get(key) || "null") || [];
+  if (samePriceRows(existing, recent)) return;
+  const write = env.MARKET_DATA.put(key, JSON.stringify(recent))
     .catch((error) => console.warn(JSON.stringify({
       event: "market_data_cache_write_failed",
       ticker,
@@ -230,10 +255,13 @@ export async function loadPriceRange(env, ctx, ticker, start, end, loadFallbackT
     if (!rows.length) throw new Error(`${ticker}: no overlapping KRW conversion data available`);
     return {rows, stale: base.stale || fx.stale};
   }
-  const existing = env.MARKET_DATA
-    ? JSON.parse(await env.MARKET_DATA.get(`prices:${ticker}`) || "null")
-    : null;
-  let normalized = Array.isArray(existing) ? existing : [];
+  const [baseRows, recentRows] = await Promise.all([
+    loadHistoricalTicker(env, ticker, loadFallbackTicker),
+    env.MARKET_DATA
+      ? env.MARKET_DATA.get(`recent-prices:${ticker}`).then(value => JSON.parse(value || "null"))
+      : null,
+  ]);
+  let normalized = mergePriceRows(baseRows, Array.isArray(recentRows) ? recentRows : []);
   let stale = false;
   const earliest = normalized.reduce((date, row) => !date || row.date < date ? row.date : date, "");
   const latest = normalized.reduce((date, row) => row.date > date ? row.date : date, "");
@@ -243,21 +271,26 @@ export async function loadPriceRange(env, ctx, ticker, start, end, loadFallbackT
     const earliestSecond = Math.floor(Date.parse(earliest) / 1000);
     const latestSecond = Math.floor(Date.parse(latest) / 1000);
     if (start < earliestSecond) segments.push([start, Math.min(end, earliestSecond)]);
-    if (latestSecond < end) segments.push([Math.max(start, latestSecond), end]);
+    const endDate = new Date(end * 1000).toISOString().slice(0, 10);
+    if (latest < endDate) segments.push([Math.max(start, latestSecond), end]);
   }
   let fallbackRows = null;
   for (const [segmentStart, segmentEnd] of segments) {
     if (segmentStart >= segmentEnd) continue;
     try {
       const incoming = await loadTicker(ticker, segmentStart, segmentEnd);
-      normalized = mergePriceRows(normalized, incoming);
-      await savePriceRows(env, ctx, ticker, normalized);
+      const merged = mergePriceRows(normalized, incoming);
+      if (!samePriceRows(normalized, merged)) {
+        normalized = merged;
+        await saveRecentPriceRows(env, ctx, ticker, baseRows, normalized);
+      }
     } catch (error) {
       if (loadFallbackTicker) {
         fallbackRows ||= await loadFallbackTicker(ticker);
-        normalized = mergePriceRows(normalized, fallbackRows);
-        if (rowsWithinRange(normalized, start, end).length) {
-          await savePriceRows(env, ctx, ticker, normalized);
+        const merged = mergePriceRows(normalized, fallbackRows);
+        if (!samePriceRows(normalized, merged)) {
+          normalized = merged;
+          await saveRecentPriceRows(env, ctx, ticker, baseRows, normalized);
         }
       }
       if (!rowsWithinRange(normalized, start, end).length) throw error;
@@ -321,20 +354,6 @@ function mergeRows(existing, incoming) {
   return addIndicators([...merged.values()].sort((left, right) => left.Date.localeCompare(right.Date)));
 }
 
-async function cachedTicker(env, ticker) {
-  if (!env.MARKET_DATA) throw new Error("MARKET_DATA KV binding is not configured");
-  return JSON.parse(await env.MARKET_DATA.get(`ticker:${ticker}`) || "null");
-}
-
-async function refreshTicker(env, ticker) {
-  const existing = await cachedTicker(env, ticker);
-  const latest = (existing || []).reduce((date, row) => row.Date > date ? row.Date : date, "");
-  const rows = await loadTicker(ticker, latest ? Math.floor(Date.parse(latest) / 1000) : Date.UTC(2010, 0, 1) / 1000, Math.floor(Date.now() / 1000));
-  const normalized = mergeRows(existing, rows.map(row => ({Date: row.date, Open: row.open, High: row.high, Low: row.low, Close: row.close, Volume: row.volume})));
-  await env.MARKET_DATA.put(`ticker:${ticker}`, JSON.stringify(normalized));
-  return normalized;
-}
-
 async function refreshNotificationTicker(env, ticker) {
   if (!env.MARKET_DATA) throw new Error("MARKET_DATA KV binding is not configured");
   const key = `notification-tail:${ticker}`;
@@ -343,7 +362,7 @@ async function refreshNotificationTicker(env, ticker) {
   const start = latest ? Math.floor(Date.parse(latest) / 1000) : Math.floor((Date.now() - NOTIFICATION_LOOKBACK_DAYS * 86400000) / 1000);
   const incoming = await loadTicker(ticker, start, Math.floor(Date.now() / 1000));
   const rows = mergeRows(existing, incoming.map(row => ({Date: row.date, Open: row.open, High: row.high, Low: row.low, Close: row.close, Volume: row.volume}))).slice(-NOTIFICATION_TAIL_ROWS);
-  await env.MARKET_DATA.put(key, JSON.stringify(rows));
+  if (!samePriceRows(existing, rows)) await env.MARKET_DATA.put(key, JSON.stringify(rows));
   return rows;
 }
 
@@ -353,7 +372,9 @@ async function notificationSnapshot(env, id) {
 }
 
 async function saveNotificationSnapshot(env, id, snapshot) {
-  await env.MARKET_DATA.put(`notification-state:${id}`, JSON.stringify(snapshot));
+  const key = `notification-state:${id}`;
+  const existing = await env.MARKET_DATA.get(key);
+  if (existing !== JSON.stringify(snapshot)) await env.MARKET_DATA.put(key, JSON.stringify(snapshot));
 }
 
 async function notificationEvaluation(request, env) {
@@ -464,6 +485,9 @@ export default {
     if (request.method !== "GET" || url.pathname !== "/prices") {
       return response({error: "Use GET /prices?tickers=QQQ,BND&start=2010-01-01"}, 404);
     }
+    const edgeCache = globalThis.caches?.default;
+    const cached = edgeCache ? await edgeCache.match(request) : null;
+    if (cached) return cached;
     try {
       const tickers = parseTickers(url.searchParams.get("tickers"));
       const end = unixSeconds(url.searchParams.get("end"), Date.now());
@@ -478,12 +502,14 @@ export default {
       ]));
       const staleTickers = loaded.filter(([, result]) => result.stale).map(([ticker]) => ticker);
       const entries = loaded.map(([ticker, result]) => [ticker, result.rows]);
-      return response({
+      const payload = response({
         provider: "yahoo-finance",
         fetched_at: new Date().toISOString(),
         stale_tickers: staleTickers,
         data: Object.fromEntries(entries),
       });
+      if (edgeCache && ctx) ctx.waitUntil(edgeCache.put(request, payload.clone()));
+      return payload;
     } catch (error) {
       return response({error: error instanceof Error ? error.message : "data request failed"}, 400);
     }

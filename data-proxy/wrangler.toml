@@ -8,6 +8,12 @@ compatibility_date = "2026-08-15"
 binding = "MARKET_DATA"
 id = "72f4477a122b418b98b65bfc4ee4138e"
 
+# Enable R2 in the Cloudflare dashboard, then restore this binding to use
+# `investment-strategy-market-history` as the long-term gzip price archive.
+# [[r2_buckets]]
+# binding = "MARKET_HISTORY"
+# bucket_name = "investment-strategy-market-history"
+
 [vars]
 # URL of the static site's strategies/manifest.json.
 STRATEGY_MANIFEST_URL = "https://investment-strategy-3zy.pages.dev/strategies/manifest.json"
