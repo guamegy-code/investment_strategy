@@ -34,10 +34,30 @@ _PRODUCT_FX_RATE_BY_SUFFIX = {
 }
 _MARKET_MODES = {"BULL", "CAUTION", "BEAR", "RECOVERY"}
 _UNINITIALIZED_MARKET_MODE = "UNINITIALIZED"
+_SIMPLE_ROTATION_ASSET_CLASSES = {
+    "GLD": "GOLD",
+    "069500.KS": "EQUITY",
+    "VEA": "EQUITY",
+    "VWO": "EQUITY",
+}
+_SIMPLE_ROTATION_DEFAULTS = {
+    "top_n": 2,
+    "max_single_sleeve_share": 0.50,
+    "max_gold_sleeve_share": 0.30,
+    "max_equity_sleeve_share": 0.30,
+    "switch_score_margin": 3.0,
+    "minimum_hold_periods": 3,
+    "minimum_weight_change": 0.10,
+}
+_ROTATION_RISK_CAP = 0.70
 
 
 def _percentage_expression(text: str) -> str:
     return _PERCENT_LITERAL.sub(lambda match: f"({match.group(1)}/100)", text)
+
+
+def _is_krw_ticker(ticker: str) -> bool:
+    return str(ticker).upper().endswith((".KS", ".KQ"))
 
 
 def _number(value: Any, *, field: str) -> float:
@@ -67,6 +87,38 @@ def _state_literal(value: Any) -> Any:
     ):
         return _number(value, field="state value")
     return deepcopy(value)
+
+
+def _normalize_simple_rotation(definition: dict[str, Any]) -> None:
+    """Expand the author-facing rotation shorthand into the engine schema."""
+
+    rotation = definition.get("rotation")
+    if not isinstance(rotation, Mapping) or "replace" not in rotation:
+        return
+    allowed = {"replace", "review", "assets"}
+    unknown = sorted(set(rotation) - allowed)
+    if unknown:
+        raise StrategyDefinitionError(
+            "simple rotation contains unsupported keys: " + ", ".join(unknown)
+        )
+    assets = rotation.get("assets")
+    if not isinstance(assets, list) or not assets or not all(
+        isinstance(ticker, str) and ticker for ticker in assets
+    ):
+        raise StrategyDefinitionError("rotation.assets must be a non-empty ticker list")
+    definition["rotation"] = {
+        "sleeve": str(rotation["replace"]),
+        "check": str(rotation.get("review", "monthly")),
+        "candidates": [
+            {
+                "ticker": ticker,
+                "group": ticker,
+                "asset_class": _SIMPLE_ROTATION_ASSET_CLASSES.get(ticker, "BOND"),
+            }
+            for ticker in assets
+        ],
+        **_SIMPLE_ROTATION_DEFAULTS,
+    }
 
 
 class _Namespace:
@@ -351,11 +403,12 @@ def _required_market_fields(
 
 def _validate_definition(raw: Any, source: str) -> dict[str, Any]:
     definition = _require_mapping(raw, source)
+    _normalize_simple_rotation(definition)
     _reject_unknown(
         definition,
         {
             "strategy", "assets", "parameters", "variables", "state",
-            "target", "rebalance", "execution", "rotation", "valuation", "source", "products",
+            "target", "rebalance", "execution", "rotation", "source", "products",
         },
         "strategy definition",
     )
@@ -421,6 +474,16 @@ def _validate_definition(raw: Any, source: str) -> dict[str, Any]:
         raise StrategyDefinitionError("assets.required must be a non-empty list")
     if len({str(item) for item in required}) != len(required):
         raise StrategyDefinitionError("assets.required must not contain duplicates")
+    risk = assets.get("risk", [])
+    if isinstance(risk, str):
+        risk = [risk]
+    if not isinstance(risk, list):
+        raise StrategyDefinitionError("assets.risk must be a list")
+    unknown_risk = sorted({str(item) for item in risk} - {str(item) for item in required})
+    if unknown_risk:
+        raise StrategyDefinitionError(
+            "assets.risk must be configured assets: " + ", ".join(unknown_risk)
+        )
     observations = assets.get("observations", [])
     if not isinstance(observations, list):
         raise StrategyDefinitionError("assets.observations must be a list")
@@ -432,32 +495,6 @@ def _validate_definition(raw: Any, source: str) -> dict[str, Any]:
             "assets.observations must not overlap assets.required: "
             + ", ".join(overlap)
         )
-    valuation = definition.get("valuation")
-    if valuation is not None:
-        valuation = _require_mapping(valuation, "valuation")
-        _reject_unknown(
-            valuation,
-            {"currency", "fx_ticker", "foreign_assets", "signal_currency"},
-            "valuation",
-        )
-        if str(valuation.get("currency", "")) != "KRW":
-            raise StrategyDefinitionError("valuation.currency must be KRW")
-        if not str(valuation.get("fx_ticker", "")):
-            raise StrategyDefinitionError("valuation.fx_ticker is required")
-        if valuation.get("signal_currency", "KRW") not in {"LOCAL", "KRW"}:
-            raise StrategyDefinitionError(
-                "valuation.signal_currency must be LOCAL or KRW"
-            )
-        foreign_assets = valuation.get("foreign_assets")
-        if not isinstance(foreign_assets, list) or not foreign_assets:
-            raise StrategyDefinitionError("valuation.foreign_assets must be a non-empty list")
-        available_assets = {str(item) for item in (*required, *observations)}
-        unknown_assets = sorted({str(item) for item in foreign_assets} - available_assets)
-        if unknown_assets:
-            raise StrategyDefinitionError(
-                "valuation.foreign_assets must be configured assets: "
-                + ", ".join(unknown_assets)
-            )
     rotation = definition.get("rotation")
     if rotation is not None:
         rotation = _require_mapping(rotation, "rotation")
@@ -664,12 +701,19 @@ class DeclarativeStrategy:
         self.observation_tickers = tuple(
             str(item) for item in assets.get("observations", [])
         )
-        valuation = self.definition.get("valuation", {})
-        self.valuation_currency = valuation.get("currency")
-        self.valuation_fx_ticker = valuation.get("fx_ticker")
-        self.valuation_signal_currency = valuation.get("signal_currency", "KRW")
+        # Cross-asset rotation uses local prices for signals and KRW values for
+        # portfolio weights.  This is an engine default, not YAML input.
+        rotation_config = self.definition.get("rotation")
         self.foreign_asset_tickers = tuple(
-            str(item) for item in valuation.get("foreign_assets", ())
+            ticker for ticker in self.holding_tickers
+            if ticker != "KRW=X" and not _is_krw_ticker(ticker)
+        ) if rotation_config else ()
+        self.valuation_currency = "KRW" if self.foreign_asset_tickers else None
+        self.valuation_fx_ticker = (
+            "KRW=X" if self.foreign_asset_tickers else None
+        )
+        self.valuation_signal_currency = (
+            "LOCAL" if self.foreign_asset_tickers else "KRW"
         )
         self.required_tickers = tuple(
             dict.fromkeys((
@@ -686,7 +730,11 @@ class DeclarativeStrategy:
         self.risk_asset_tickers = tuple(str(item) for item in risk)
 
         self.parameters = deepcopy(self.definition.get("parameters", {}))
-        self.rotation = deepcopy(self.definition.get("rotation"))
+        self.rotation = deepcopy(rotation_config)
+        self.rotation_candidate_tickers = tuple(
+            str(candidate["ticker"])
+            for candidate in (self.rotation or {}).get("candidates", [])
+        )
         self._state_values = {
             name: _state_literal(config["initial"])
             for name, config in self.definition.get("state", {}).items()
@@ -1130,9 +1178,49 @@ class DeclarativeStrategy:
         for candidate in self.rotation["candidates"]:
             ticker = str(candidate["ticker"])
             adjusted[ticker] = sleeve_weight * self._rotation_mix.get(ticker, 0.0)
+        adjusted, risk_cap_applied = self._apply_rotation_risk_cap(adjusted, sleeve)
+        if risk_cap_applied:
+            explanation = (explanation or "자동 자산 교체") + (
+                "; 위험자산 합계가 70%를 넘지 않도록 초과분을 "
+                f"{sleeve}에 유지"
+            )
+            if self.rotation_decision is not None:
+                self.rotation_decision["explanation"] = explanation
+                self.rotation_decision["risk_cap"] = _ROTATION_RISK_CAP
+                self.rotation_decision["risk_weight"] = sum(
+                    adjusted.get(ticker, 0.0) for ticker in self.risk_asset_tickers
+                )
         if abs(sum(adjusted.values()) - 1.0) > 1e-8:
             raise StrategyDefinitionError("rotation target weights must sum to 100%")
         return adjusted, reviewed, changed, explanation
+
+    def _apply_rotation_risk_cap(
+        self, target: Mapping[str, float], sleeve: str
+    ) -> tuple[dict[str, float], bool]:
+        """Keep a rotation from lifting declared risk assets above 70%."""
+
+        adjusted = dict(target)
+        risk_assets = set(self.risk_asset_tickers)
+        risk_weight = sum(adjusted.get(ticker, 0.0) for ticker in risk_assets)
+        if risk_weight <= _ROTATION_RISK_CAP + 1e-12:
+            return adjusted, False
+        assert self.rotation is not None
+        rotation_risk_assets = [
+            str(candidate["ticker"])
+            for candidate in self.rotation["candidates"]
+            if str(candidate["ticker"]) in risk_assets
+        ]
+        reducible = sum(adjusted.get(ticker, 0.0) for ticker in rotation_risk_assets)
+        excess = risk_weight - _ROTATION_RISK_CAP
+        if reducible + 1e-12 < excess:
+            raise StrategyDefinitionError(
+                "base target risk assets exceed the 70% rotation risk limit"
+            )
+        scale = max(0.0, (reducible - excess) / reducible)
+        for ticker in rotation_risk_assets:
+            adjusted[ticker] = adjusted.get(ticker, 0.0) * scale
+        adjusted[sleeve] = adjusted.get(sleeve, 0.0) + excess
+        return adjusted, True
 
     @staticmethod
     def _period(date: Any, schedule: str) -> Any:

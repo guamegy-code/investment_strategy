@@ -484,6 +484,10 @@ def rebalance_marker_events(history, trades, rebalances, risk_assets=("QQQ",)):
         trade_dates = trades["Date"].drop_duplicates().sort_values()
         execution_events = []
         for index, rebalance in enumerate(ordered_rebalances):
+            recorded_execution = rebalance.get("ExecutionDate")
+            if recorded_execution is not None:
+                execution_events.append((pd.Timestamp(recorded_execution), rebalance))
+                continue
             signal_date = pd.Timestamp(rebalance["Date"])
             next_signal = (
                 pd.Timestamp(ordered_rebalances[index + 1]["Date"])
