@@ -1,17 +1,25 @@
 strategy:
   id: state-conditioned-cross-asset-rotation
   name: State-conditioned cross-asset rotation
-  version: 2
+  version: 3
   dsl_version: 1
   enabled: true
 
 assets:
-  # Keep the original tickers.  USD assets are converted to KRW in memory
-  # before indicators and portfolio values are calculated.
+  # Keep the original tickers. Signals use each asset's local price; portfolio
+  # values are converted to KRW in memory.
   required:
-    [QQQ, TDF2050_PROXY, BIL,
-     GLD, SHY, IEF,
-     114100.KS, 148070.KS, 069500.KS, VEA, VWO]
+    - QQQ
+    - TDF2050_PROXY
+    - BIL
+    - GLD
+    - SHY
+    - IEF
+    - 114100.KS
+    - 148070.KS
+    - 069500.KS
+    - VEA
+    - VWO
   observations: [SPY]
   risk: [QQQ]
 
