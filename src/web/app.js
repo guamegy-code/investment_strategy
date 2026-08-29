@@ -401,7 +401,7 @@ renderDetail=function(){
   const base=history[0].value,returns=history.map(row=>(row.value/base-1)*100),items=productDetailAssets(def,Object.keys(history[0].weights||{})),payload=productDetailPayload(history,returns,items),traces=[];
   for(const item of items)traces.push({x:history.map(row=>row.date),y:history.map((row,index)=>Number(row.weights?.[item.ticker]||0)*returns[index]),name:productDetailLabel(item),stackgroup:'portfolio-return',mode:'lines',line:{width:.4},hoverinfo:'skip'});
   traces.push({x:history.map(row=>row.date),y:returns,name:'누적 수익률',showlegend:false,xaxis:'x',yaxis:'y',line:{color:'#182433',width:1.2},customdata:payload,hoverinfo:'none'});
-  const hasTargets=history.some(row=>row.target),events=history.map((row,index)=>({row,index})).filter(({row,index})=>hasTargets?(row.target&&Object.keys(row.target).some(ticker=>Math.abs(Number(row.target[ticker]||0)-Number((row.preWeights||row.weights||{})[ticker]||0))>=.001)):(index>0&&items.some(item=>Math.abs(Number(row.weights?.[item.ticker]||0)-Number(history[index-1].weights?.[item.ticker]||0))>=.02)));
+  const events=history.map((row,index)=>({row,index})).filter(({row})=>Boolean(row.target));
   if(events.length)traces.push({x:events.map(item=>item.row.date),y:events.map(item=>returns[item.index]),name:'리밸런싱 실행',xaxis:'x',yaxis:'y',mode:'markers',marker:{symbol:'diamond',size:9,color:'#F23645',line:{color:'#fff',width:1}},hoverinfo:'skip'});
   const layout=chartLayout('누적 수익률',{slider:true,selector:true,height:620,start:history[0].date,end:history.at(-1).date});
   layout.xaxis.rangeselector={...layout.xaxis.rangeselector,x:0,xanchor:'left'};
@@ -512,7 +512,7 @@ renderIndicators=async function(){await visibleYIndicatorRenderer();bindVisibleY
 // Imported strategies use this single preparation path: download, calculate,
 // validate and cache. It intentionally sits after the dashboard compatibility
 // wrappers above, so existing chart behavior is left unchanged.
-const BROWSER_ENGINE_VERSION = '2026-08-29.2';
+const BROWSER_ENGINE_VERSION = '2026-08-29.3';
 const FX_TICKER_BY_SUFFIX = {'.KS': 'KRW=X', '.KQ': 'KRW=X'};
 const TDF2050_PROXY_COMPONENT_WEIGHTS = {SPY:.4081,VXUS:.3339,BND:.258};
 const KRW_ADJUSTED_SUFFIX = '_KRW';
