@@ -13,7 +13,9 @@ for directory in (DATA_DIR, EXTENDED_DATA_DIR, RESULT_DIR):
 
 TICKERS = ["QQQ", "BND", "GLD", "BIL", "QLD", "SPY"]
 FX_RATE_TICKERS = ["KRW=X"]
-START_DATE = "2012-01-01"
+GENERAL_COMPARISON_START_DATE = "2012-01-03"
+# Backward-compatible alias used by the production strategy runner.
+START_DATE = GENERAL_COMPARISON_START_DATE
 # 지표 계산용 선행 데이터. 실제 백테스트는 START_DATE부터 시작한다.
 DATA_START_DATE = "2010-01-01"
 EXTENDED_START_DATE = "1999-03-10"

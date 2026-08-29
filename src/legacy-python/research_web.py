@@ -55,6 +55,9 @@ PRODUCT_DISPLAY_NAMES = {
     "379810.KS": "KODEX 미국나스닥100",
     "426030.KS": "TIME 미국나스닥100액티브",
     "0015B0.KS": "KoAct 미국나스닥성장액티브",
+    "069500.KS": "KODEX 200 (069500.KS)",
+    "114100.KS": "KODEX 국고채 3년 (114100.KS)",
+    "148070.KS": "KOSEF 국고채 10년 (148070.KS)",
 }
 HOVER_FIGURE_SPACE = "\u2007"
 
@@ -282,7 +285,9 @@ def _apply_chart_style(figure: go.Figure, **layout) -> go.Figure:
         margin={"l": 56, "r": 20, "t": 48, "b": 54, "autoexpand": True},
         legend={
             "orientation": "h", "y": 1.02, "x": 0, "yanchor": "bottom",
-            "font": {"size": 12}, "title": None,
+            # Plotly reverses legends for stacked traces unless this is explicit.
+            # Keep the legend in the strategy's asset declaration order.
+            "traceorder": "normal", "font": {"size": 12}, "title": None,
         },
         hoverlabel={
             "bgcolor": "rgba(255,255,255,0.96)", "font": {
@@ -649,7 +654,10 @@ def _allocation_display_frame(
 ) -> tuple[pd.DataFrame, dict[str, str]]:
     """Hide signal-only indexes and label their mapped trade products."""
     frame = _weight_change_frame(history) if compact else _weight_frame(history)
-    labels: dict[str, str] = {}
+    labels: dict[str, str] = {
+        ticker: PRODUCT_DISPLAY_NAMES.get(ticker, ticker)
+        for ticker in frame.columns
+    }
     mapping = getattr(strategy, "asset_mapping", {}) or {}
     for index_asset, product_mix in mapping.items():
         products = tuple(product_mix)
@@ -680,7 +688,10 @@ def _rebalance_change_text(event: dict[str, Any], strategy: Any) -> str:
         for index_asset, product_mix in mapping.items()
         if index_asset not in product_mix
     }
-    labels = {}
+    labels = {
+        ticker: PRODUCT_DISPLAY_NAMES.get(ticker, ticker)
+        for ticker in target
+    }
     for index_asset, product_mix in mapping.items():
         is_replaced = index_asset not in product_mix
         for product in product_mix:

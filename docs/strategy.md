@@ -29,6 +29,7 @@
 | `13_profit_band_tdf2050_gate_spy_tdf100.yaml` | `profit-band-tdf2050-gate-spy-tdf100` | 예 | 12에서 비위험 슬리브를 회복 후 전부 TDF로 복원 |
 | `14_profit_band_tdf2050_gate_spy_tdf100_no_bnd.yaml` | `profit-band-tdf2050-gate-spy-tdf100-no-bnd` | 예 | 13에서 BND를 빼고 TDF/BIL만 사용하는 전용 단순형 |
 | `15_band_7030_tdf_state_bil.yaml` | `band-7030-tdf-state-bil` | 예 | 70/30 밴드에 사전 BEAR 현금화와 상태별 TDF/BIL 배분을 결합한 방어형 |
+| `16_state_conditioned_cross_asset_rotation.yaml` | `state-conditioned-cross-asset-rotation` | 예 | Strategy 15의 QQQ/TDF 비중을 보존하고 BIL 슬리브만 자동 교차자산으로 대체 |
 
 다음 네 파일은 독립 규칙이 아니라 `source` 전략의 신호·상태·리밸런싱을 그대로 사용해 실제
 상품만 바꾸는 매핑입니다. 자세한 매핑은 [국내 상품 매핑](#국내-상품-매핑)에 있습니다.
@@ -185,6 +186,32 @@ SPY ROC5가 -1% 이하이면 1일 확인으로 CAUTION에 들어갑니다. 즉 Q
 
 채택 근거와 비교 결과는 [15번 사전 BEAR 방어 및 리밸런싱 개선](research/band-7030-tdf-state-bil-experiments.md)에
 기록합니다.
+
+### 16 — State-conditioned Cross-asset Rotation
+
+`16_state_conditioned_cross_asset_rotation.yaml`은 Strategy 15를 대체하지 않는 별도 전략입니다.
+QQQ/TDF의 상태별 기본 비중은 15와 동일하게 BULL·CAUTION 70%/30%, 사전 BEAR 확인 대기
+구간 70%/30%, BEAR 0%/20%/BIL 80%, RECOVERY 60%/30%/BIL 10%를 유지합니다.
+BEAR 확정 전 `structural_bear` 신호만으로 BIL 100%로 이동하던 예외는 상태 확인 규칙과
+충돌하고 과매매를 만들었기 때문에 제거했습니다.
+
+- BIL 비중이 있을 때만 매월 첫 평가일에 후보를 자동 검토합니다. 후보는 금, 미국 단기·중기채,
+  국내 단기·중기채, KOSPI 200, 선진국·신흥국 주식입니다.
+- 가격이 EMA200 위이고 현지 통화 기준 3개월 수익률이 BIL보다 높은 후보만 적격입니다. 적격 후보는
+  BIL 대비 3·6·12개월 초과수익률의 50%/30%/20% 가중 점수로 순위를 정합니다.
+- 자산군별 상한(종목 50%, 금 30%, 주식 합계 30%)과 역변동성 비중을 적용한 뒤, 남은 몫은
+  BIL에 남깁니다. QQQ와 TDF의 기본 목표 비중을 침범하지 않습니다.
+- 종목 선택과 매매 판단은 완전 자동입니다. 월간 `RotationDecision` 기록에는 후보별 적격/탈락
+  사유, 점수, 이전·새 선택, 최종 비중과 교체 설명이 남아 결과를 사람이 검토할 수 있습니다.
+- 신규 후보는 기존 보유 후보보다 종합점수가 3점 이상 높아야 교체할 수 있고, 기존 후보는
+  최소 3회 월간 검토 동안 유지합니다. 계산 비중 차이가 10%p 미만이면 기존 비중을 유지하며,
+  BIL 슬리브가 0%가 되어도 선택은 휴면 상태로 기억합니다.
+- 추세·모멘텀 신호는 각 자산의 현지 통화 가격으로 계산합니다. 실제 보유 가격·포트폴리오
+  성과·목표 편차는 실행 시점에 `KRW=X`를 적용한 원화 기준으로 계산합니다. 종목별 `_KRW`
+  파일은 만들지 않습니다.
+
+초기 PoC의 수익률 개선만으로 Strategy 15를 바꾸지는 않았으며, 이 전략의 검증 근거와 한계는
+[상태 조건부 교차자산 로테이션 PoC](research/state-conditioned-cross-asset-rotation-poc.md)에 기록합니다.
 
 ## VXUS 수익 밴드 계열
 

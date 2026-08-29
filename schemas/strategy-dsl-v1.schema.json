@@ -28,10 +28,22 @@
       "required": ["required"],
       "properties": {
         "required": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string"}},
+        "observations": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
         "risk": {"oneOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}}]}
       }
     },
     "parameters": {"type": "object"},
+    "valuation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["currency", "fx_ticker", "foreign_assets"],
+      "properties": {
+        "currency": {"const": "KRW"},
+        "fx_ticker": {"type": "string", "minLength": 1},
+        "signal_currency": {"enum": ["LOCAL", "KRW"]},
+        "foreign_assets": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string"}}
+      }
+    },
     "variables": {"type": "object"},
     "state": {
       "type": "object",
@@ -89,6 +101,36 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {"days": {"type": ["string", "integer"]}}
+    },
+    "rotation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sleeve", "candidates"],
+      "properties": {
+        "sleeve": {"type": "string", "minLength": 1},
+        "check": {"enum": ["daily", "weekly", "monthly", "quarterly"]},
+        "top_n": {"type": "integer", "minimum": 1},
+        "max_single_sleeve_share": {"type": ["string", "number"]},
+        "max_gold_sleeve_share": {"type": ["string", "number"]},
+        "max_equity_sleeve_share": {"type": ["string", "number"]},
+        "switch_score_margin": {"type": ["string", "number"]},
+        "minimum_hold_periods": {"type": "integer", "minimum": 0},
+        "minimum_weight_change": {"type": ["string", "number"]},
+        "candidates": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["ticker", "group", "asset_class"],
+            "properties": {
+              "ticker": {"type": "string", "minLength": 1},
+              "group": {"type": "string", "minLength": 1},
+              "asset_class": {"enum": ["BOND", "EQUITY", "GOLD"]}
+            }
+          }
+        }
+      }
     },
     "source": {
       "type": "string",

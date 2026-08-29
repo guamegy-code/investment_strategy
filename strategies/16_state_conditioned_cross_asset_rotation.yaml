@@ -1,0 +1,175 @@
+strategy:
+  id: state-conditioned-cross-asset-rotation
+  name: State-conditioned cross-asset rotation
+  version: 2
+  dsl_version: 1
+  enabled: true
+
+assets:
+  # Keep the original tickers.  USD assets are converted to KRW in memory
+  # before indicators and portfolio values are calculated.
+  required:
+    [QQQ, TDF2050_PROXY, BIL,
+     GLD, SHY, IEF,
+     114100.KS, 148070.KS, 069500.KS, VEA, VWO]
+  observations: [SPY]
+  risk: [QQQ]
+
+valuation:
+  currency: KRW
+  fx_ticker: KRW=X
+  foreign_assets: [QQQ, TDF2050_PROXY, BIL, GLD, SHY, IEF, VEA, VWO, SPY]
+  signal_currency: LOCAL
+
+variables:
+  risk_off_score: >
+    count(
+      QQQ.close < QQQ.ema20,
+      QQQ.close < QQQ.ema55,
+      QQQ.ema20 < QQQ.ema55,
+      QQQ.roc5 < 0,
+      QQQ.roc20 < 0,
+      QQQ.ema20_slope5 < 0
+    )
+
+  recovery_score: >
+    count(
+      QQQ.close > QQQ.ema20,
+      QQQ.close > QQQ.ema55,
+      QQQ.ema20 > QQQ.ema55,
+      QQQ.roc5 > 0,
+      QQQ.roc20 > 0,
+      QQQ.ema20_slope5 > 0
+    )
+
+  structural_bear: >
+    variables.risk_off_score >= 5
+    and QQQ.close < QQQ.ema20
+    and QQQ.ema20 < QQQ.ema55
+    and QQQ.ema55 < QQQ.ema200
+    and QQQ.roc60 < 0
+    and QQQ.ema200_slope20 < 0
+
+  bull_reentry_allowed: >
+    QQQ.close > QQQ.ema55
+    and QQQ.roc60 > 0
+
+state:
+  market_mode:
+    initial: UNINITIALIZED
+    rules:
+      - when: state.market_mode == 'UNINITIALIZED' and variables.structural_bear
+        set: BEAR
+      - when: state.market_mode == 'UNINITIALIZED' and variables.risk_off_score >= 5
+        set: CAUTION
+      - when: state.market_mode == 'UNINITIALIZED'
+        set: BULL
+
+      - when: state.market_mode == 'BULL' and variables.structural_bear
+        set: BEAR
+        confirm: 10
+      - when: >
+          state.market_mode == 'BULL'
+          and QQQ.close < QQQ.ema20
+          and variables.risk_off_score >= 3
+          and SPY.close < SPY.ema20
+          and SPY.roc5 <= -1
+        set: CAUTION
+
+      - when: state.market_mode == 'CAUTION' and variables.structural_bear
+        set: BEAR
+        confirm: 10
+      - when: state.market_mode == 'CAUTION' and variables.recovery_score >= 4
+        set: BULL
+        confirm: 3
+
+      - when: state.market_mode == 'BEAR' and variables.recovery_score >= 3
+        set: RECOVERY
+        confirm: 5
+
+      - when: state.market_mode == 'RECOVERY' and variables.structural_bear
+        set: BEAR
+        confirm: 10
+      - when: >
+          state.market_mode == 'RECOVERY'
+          and variables.recovery_score >= 4
+          and variables.bull_reentry_allowed
+        set: BULL
+        confirm: 10
+      - when: state.market_mode == 'RECOVERY' and variables.risk_off_score >= 5
+        set: CAUTION
+        confirm: 3
+
+target:
+  # The QQQ/TDF state allocation is intentionally identical to Strategy 15.
+  # Only the BIL sleeve below is eligible for automatic substitution.
+  - when: state.market_mode == 'BEAR'
+    weights:
+      QQQ: 0%
+      TDF2050_PROXY: 20%
+      BIL: 80%
+      GLD: 0%
+      SHY: 0%
+      IEF: 0%
+      114100.KS: 0%
+      148070.KS: 0%
+      069500.KS: 0%
+      VEA: 0%
+      VWO: 0%
+
+  - when: state.market_mode == 'RECOVERY'
+    weights:
+      QQQ: 60%
+      TDF2050_PROXY: 30%
+      BIL: 10%
+      GLD: 0%
+      SHY: 0%
+      IEF: 0%
+      114100.KS: 0%
+      148070.KS: 0%
+      069500.KS: 0%
+      VEA: 0%
+      VWO: 0%
+
+  - weights:
+      QQQ: 70%
+      TDF2050_PROXY: 30%
+      BIL: 0%
+      GLD: 0%
+      SHY: 0%
+      IEF: 0%
+      114100.KS: 0%
+      148070.KS: 0%
+      069500.KS: 0%
+      VEA: 0%
+      VWO: 0%
+
+rotation:
+  # Run automatically on the first trading day of each month while the BIL
+  # sleeve exists. It never changes QQQ or TDF weights.
+  sleeve: BIL
+  check: monthly
+  candidates:
+    - {ticker: GLD, group: GOLD, asset_class: GOLD}
+    - {ticker: SHY, group: US_SHORT_BOND, asset_class: BOND}
+    - {ticker: IEF, group: US_INTERMEDIATE_BOND, asset_class: BOND}
+    - {ticker: 114100.KS, group: KR_SHORT_BOND, asset_class: BOND}
+    - {ticker: 148070.KS, group: KR_INTERMEDIATE_BOND, asset_class: BOND}
+    - {ticker: 069500.KS, group: KR_EQUITY, asset_class: EQUITY}
+    - {ticker: VEA, group: DEVELOPED_EQUITY, asset_class: EQUITY}
+    - {ticker: VWO, group: EM_EQUITY, asset_class: EQUITY}
+  top_n: 2
+  max_single_sleeve_share: 50%
+  max_gold_sleeve_share: 30%
+  max_equity_sleeve_share: 30%
+  # Keep an eligible incumbent unless a challenger is materially stronger.
+  switch_score_margin: 3
+  minimum_hold_periods: 3
+  minimum_weight_change: 10%
+
+rebalance:
+  - check: daily
+    when: target_deviation() >= 7.5%
+
+execution:
+  days: 1

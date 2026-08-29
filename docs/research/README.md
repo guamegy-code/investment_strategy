@@ -25,7 +25,12 @@
 | 2026-08-22 | TDF2050 프록시와 자산배분 | 프록시는 연구용으로 허용하고 생산 위험 비중과 단순 TDF/BIL 구조 유지 | TDF 전략 계열의 근거 | [TDF2050 프록시와 자산배분 실험](tdf2050-allocation-experiments.md) |
 | 2026-08-24 | Gate SPY | QQQ 약세 후 SPY 확인을 채택하고 추가 신용·버퍼·단계형 안전자산은 기각 | 전략 12~14에 반영 | [Gate SPY 전략 실험](gate-spy-experiments.md) |
 | 2026-08-25 | VXN, 신용, CNN Fear & Greed, 극단공포 회복 | 시험한 시장 상황 지표를 모두 기각하거나 데이터 부족으로 중단 | 없음 | [시장 상황 지표 실험](market-condition-signal-experiments.md) |
+| 2026-08-26 | 상태 조건부 연속 배분 PoC | CAUTION 최대 5%p 조정은 일관된 소폭 위험 감소와 소폭 수익 희생, 10%p는 기각 | 생산 변경 없음, 5%p는 위험 예산형 그림자 후보 | [상태 조건부 연속 배분 PoC](state-conditioned-continuous-overlay-poc.md) |
+| 2026-08-26 | 상태/연속 전략 앙상블 PoC | 연속 10% 혼합은 작은 위험 개선과 더 작은 수익 희생, 20%는 기각 | 생산 변경 없음, 10%는 효율적 그림자 후보 | [상태/연속 전략 앙상블 PoC](state-continuous-ensemble-poc.md) |
+| 2026-08-28 | 네 상태 정보 충족성 PoC | 연속 정보는 수익률 예측에 일부 증분이 있으나, 하방위험 개선은 두 OOS 구간에서 재현되지 않음 | 생산 변경 없음 | [네 상태 정보 충족성 PoC](state-sufficiency-poc.md) |
 | 2026-08-28 | 15번 사전 BEAR 방어와 리밸런싱 | 사전 경보 BIL 100%, 확정 BEAR TDF 20%, 7.5%p 허용폭을 채택 | 전략 15 버전 2에 반영 | [15번 사전 BEAR 방어 및 리밸런싱 개선](band-7030-tdf-state-bil-experiments.md) |
+| 2026-08-29 | 엄격한 DEFENSIVE_CAUTION 5%p 감축 PoC | 동일한 2012-01-03 이후 구간에서도 전략 14·15 모두 승격 실패, 전략 15에서는 CAGR -0.661%p와 리밸런싱 27→135회의 대가가 발생 | 생산 변경 없음 | [엄격한 DEFENSIVE_CAUTION 5%p 감축 PoC](defensive-caution-overlay-poc.md) |
+| 2026-08-29 | 상태 조건부 크로스애셋 로테이션 PoC | 원화 기준 CAGR은 +0.510%p였지만 Strategy 15 대체 기준에는 미달 | Strategy 15 유지, 별도 Strategy 16 자동 로테이션으로 운용·관찰 | [상태 조건부 크로스애셋 로테이션 PoC](state-conditioned-cross-asset-rotation-poc.md) |
 
 ## 관리 원칙
 

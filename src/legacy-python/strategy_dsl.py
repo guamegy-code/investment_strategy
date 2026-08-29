@@ -330,6 +330,19 @@ def _required_market_fields(
 
     for section in ("variables", "state", "target", "rebalance", "execution"):
         inspect(definition.get(section, {}))
+    rotation = definition.get("rotation")
+    if isinstance(rotation, Mapping):
+        sleeve = str(rotation.get("sleeve", ""))
+        if sleeve in found:
+            found[sleeve].update({"ROC60", "ROC120", "ROC252"})
+        for candidate in rotation.get("candidates", []):
+            if not isinstance(candidate, Mapping):
+                continue
+            ticker = str(candidate.get("ticker", ""))
+            if ticker in found:
+                found[ticker].update({
+                    "CLOSE", "EMA200", "ROC60", "ROC120", "ROC252", "VOL60",
+                })
     return {
         ticker: tuple(sorted(fields))
         for ticker, fields in found.items()
@@ -342,7 +355,7 @@ def _validate_definition(raw: Any, source: str) -> dict[str, Any]:
         definition,
         {
             "strategy", "assets", "parameters", "variables", "state",
-            "target", "rebalance", "execution", "source", "products",
+            "target", "rebalance", "execution", "rotation", "valuation", "source", "products",
         },
         "strategy definition",
     )
@@ -419,6 +432,109 @@ def _validate_definition(raw: Any, source: str) -> dict[str, Any]:
             "assets.observations must not overlap assets.required: "
             + ", ".join(overlap)
         )
+    valuation = definition.get("valuation")
+    if valuation is not None:
+        valuation = _require_mapping(valuation, "valuation")
+        _reject_unknown(
+            valuation,
+            {"currency", "fx_ticker", "foreign_assets", "signal_currency"},
+            "valuation",
+        )
+        if str(valuation.get("currency", "")) != "KRW":
+            raise StrategyDefinitionError("valuation.currency must be KRW")
+        if not str(valuation.get("fx_ticker", "")):
+            raise StrategyDefinitionError("valuation.fx_ticker is required")
+        if valuation.get("signal_currency", "KRW") not in {"LOCAL", "KRW"}:
+            raise StrategyDefinitionError(
+                "valuation.signal_currency must be LOCAL or KRW"
+            )
+        foreign_assets = valuation.get("foreign_assets")
+        if not isinstance(foreign_assets, list) or not foreign_assets:
+            raise StrategyDefinitionError("valuation.foreign_assets must be a non-empty list")
+        available_assets = {str(item) for item in (*required, *observations)}
+        unknown_assets = sorted({str(item) for item in foreign_assets} - available_assets)
+        if unknown_assets:
+            raise StrategyDefinitionError(
+                "valuation.foreign_assets must be configured assets: "
+                + ", ".join(unknown_assets)
+            )
+    rotation = definition.get("rotation")
+    if rotation is not None:
+        rotation = _require_mapping(rotation, "rotation")
+        _reject_unknown(
+            rotation,
+            {
+                "sleeve", "check", "candidates", "top_n",
+                "max_single_sleeve_share", "max_gold_sleeve_share",
+                "max_equity_sleeve_share", "switch_score_margin",
+                "minimum_hold_periods", "minimum_weight_change",
+            },
+            "rotation",
+        )
+        sleeve = str(rotation.get("sleeve", ""))
+        if sleeve not in {str(item) for item in required}:
+            raise StrategyDefinitionError(
+                "rotation.sleeve must be one of assets.required"
+            )
+        check = rotation.get("check", "monthly")
+        if check not in {"daily", "weekly", "monthly", "quarterly"}:
+            raise StrategyDefinitionError("rotation.check has an unsupported period")
+        candidates = rotation.get("candidates")
+        if not isinstance(candidates, list) or not candidates:
+            raise StrategyDefinitionError("rotation.candidates must be a non-empty list")
+        candidate_tickers = []
+        for index, candidate in enumerate(candidates):
+            candidate = _require_mapping(candidate, f"rotation.candidates[{index}]")
+            _reject_unknown(
+                candidate, {"ticker", "group", "asset_class"},
+                f"rotation.candidates[{index}]",
+            )
+            ticker = str(candidate.get("ticker", ""))
+            if ticker not in {str(item) for item in required}:
+                raise StrategyDefinitionError(
+                    f"rotation.candidates[{index}].ticker must be in assets.required"
+                )
+            if ticker == sleeve:
+                raise StrategyDefinitionError("rotation.sleeve cannot be a candidate")
+            if not str(candidate.get("group", "")):
+                raise StrategyDefinitionError(
+                    f"rotation.candidates[{index}].group is required"
+                )
+            if str(candidate.get("asset_class", "")) not in {"BOND", "EQUITY", "GOLD"}:
+                raise StrategyDefinitionError(
+                    f"rotation.candidates[{index}].asset_class must be BOND, EQUITY, or GOLD"
+                )
+            candidate_tickers.append(ticker)
+        if len(set(candidate_tickers)) != len(candidate_tickers):
+            raise StrategyDefinitionError("rotation.candidates must not repeat a ticker")
+        top_n = int(rotation.get("top_n", 2))
+        if top_n < 1 or top_n > len(candidate_tickers):
+            raise StrategyDefinitionError("rotation.top_n must be within candidate count")
+        for field, default in (
+            ("max_single_sleeve_share", 0.50),
+            ("max_gold_sleeve_share", 0.30),
+            ("max_equity_sleeve_share", 0.30),
+        ):
+            value = _number(rotation.get(field, default), field=f"rotation.{field}")
+            if value <= 0.0 or value > 1.0:
+                raise StrategyDefinitionError(f"rotation.{field} must be in (0, 1]")
+        switch_margin = _number(
+            rotation.get("switch_score_margin", 0.0),
+            field="rotation.switch_score_margin",
+        )
+        if switch_margin < 0.0:
+            raise StrategyDefinitionError("rotation.switch_score_margin must be non-negative")
+        minimum_hold = int(rotation.get("minimum_hold_periods", 0))
+        if minimum_hold < 0:
+            raise StrategyDefinitionError("rotation.minimum_hold_periods must be non-negative")
+        minimum_weight_change = _number(
+            rotation.get("minimum_weight_change", 0.0),
+            field="rotation.minimum_weight_change",
+        )
+        if minimum_weight_change < 0.0 or minimum_weight_change > 1.0:
+            raise StrategyDefinitionError(
+                "rotation.minimum_weight_change must be in [0, 1]"
+            )
     state = _require_mapping(definition.get("state", {}), "state")
     for name, config in state.items():
         config = _require_mapping(config, f"state.{name}")
@@ -548,8 +664,18 @@ class DeclarativeStrategy:
         self.observation_tickers = tuple(
             str(item) for item in assets.get("observations", [])
         )
+        valuation = self.definition.get("valuation", {})
+        self.valuation_currency = valuation.get("currency")
+        self.valuation_fx_ticker = valuation.get("fx_ticker")
+        self.valuation_signal_currency = valuation.get("signal_currency", "KRW")
+        self.foreign_asset_tickers = tuple(
+            str(item) for item in valuation.get("foreign_assets", ())
+        )
         self.required_tickers = tuple(
-            dict.fromkeys((*self.holding_tickers, *self.observation_tickers))
+            dict.fromkeys((
+                *self.holding_tickers, *self.observation_tickers,
+                *((self.valuation_fx_ticker,) if self.valuation_fx_ticker else ()),
+            ))
         )
         self.required_market_fields = _required_market_fields(
             self.definition, self.required_tickers
@@ -560,6 +686,7 @@ class DeclarativeStrategy:
         self.risk_asset_tickers = tuple(str(item) for item in risk)
 
         self.parameters = deepcopy(self.definition.get("parameters", {}))
+        self.rotation = deepcopy(self.definition.get("rotation"))
         self._state_values = {
             name: _state_literal(config["initial"])
             for name, config in self.definition.get("state", {}).items()
@@ -572,6 +699,12 @@ class DeclarativeStrategy:
         self._evaluated_once = False
         self.variables: dict[str, Any] = {}
         self.target: dict[str, float] | None = None
+        self.rotation_decision: dict[str, Any] | None = None
+        self._rotation_last_period: Any = None
+        self._rotation_active = False
+        self._rotation_mix: dict[str, float] = {}
+        self._rotation_selected: tuple[str, ...] = ()
+        self._rotation_hold_periods = 0
         self.state = self._representative_state(allow_uninitialized=True)
 
     def __getattr__(self, name: str) -> Any:
@@ -728,6 +861,280 @@ class DeclarativeStrategy:
         return target
 
     @staticmethod
+    def _rotation_number(value: Any) -> float | None:
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            return None
+        return number if isfinite(number) else None
+
+    def _rotation_selection(
+        self, market: Mapping[str, Any]
+    ) -> tuple[dict[str, float], tuple[str, ...], dict[str, Any]]:
+        """Choose up to two eligible assets without forcing a risk position."""
+
+        assert self.rotation is not None
+        sleeve = str(self.rotation["sleeve"])
+        cash = market[sleeve]
+        cash_values = {
+            field: self._rotation_number(cash.get(field))
+            for field in ("ROC60", "ROC120", "ROC252")
+        }
+        candidate_details: dict[str, Any] = {}
+        if any(value is None for value in cash_values.values()):
+            return {sleeve: 1.0}, (), candidate_details
+
+        group_winners: dict[str, tuple[float, Mapping[str, Any]]] = {}
+        for candidate in self.rotation["candidates"]:
+            ticker = str(candidate["ticker"])
+            observation = market[ticker]
+            values = {
+                field: self._rotation_number(observation.get(field))
+                for field in ("Close", "EMA200", "ROC60", "ROC120", "ROC252", "VOL60")
+            }
+            reasons = []
+            if any(value is None for value in values.values()):
+                reasons.append("필수 추세 지표 부족")
+            elif values["Close"] <= values["EMA200"]:
+                reasons.append("가격이 EMA200 아래")
+            elif values["ROC60"] <= cash_values["ROC60"]:
+                reasons.append("3개월 수익률이 현금 슬리브 이하")
+            elif values["VOL60"] <= 0.0:
+                reasons.append("변동성 계산 불가")
+            if reasons:
+                candidate_details[ticker] = {
+                    "eligible": False,
+                    "reasons": reasons,
+                }
+                continue
+            score = (
+                0.50 * (values["ROC60"] - cash_values["ROC60"])
+                + 0.30 * (values["ROC120"] - cash_values["ROC120"])
+                + 0.20 * (values["ROC252"] - cash_values["ROC252"])
+            )
+            detail = {
+                "eligible": True,
+                "score": score,
+                "volatility": values["VOL60"],
+                "roc60_excess": values["ROC60"] - cash_values["ROC60"],
+                "roc120_excess": values["ROC120"] - cash_values["ROC120"],
+                "roc252_excess": values["ROC252"] - cash_values["ROC252"],
+                "reasons": ["EMA200 상단", "3개월 수익률 현금 초과"],
+            }
+            candidate_details[ticker] = detail
+            group = str(candidate["group"])
+            previous = group_winners.get(group)
+            if previous is None or score > previous[0]:
+                group_winners[group] = (score, candidate)
+
+        top_n = int(self.rotation.get("top_n", 2))
+        switch_margin = _number(
+            self.rotation.get("switch_score_margin", 0.0),
+            field="rotation.switch_score_margin",
+        )
+        minimum_hold = int(self.rotation.get("minimum_hold_periods", 0))
+        incumbent = set(self._rotation_selected)
+        ranked = sorted(
+            group_winners.values(),
+            key=lambda item: (
+                item[0]
+                + (switch_margin if str(item[1]["ticker"]) in incumbent else 0.0)
+            ),
+            reverse=True,
+        )
+        eligible_config = {
+            str(candidate["ticker"]): candidate for _, candidate in ranked
+        }
+        locked = []
+        if self._rotation_hold_periods < minimum_hold:
+            locked = [
+                eligible_config[ticker]
+                for ticker in self._rotation_selected
+                if ticker in eligible_config
+            ][:top_n]
+        selected_config = list(locked)
+        for _, candidate in ranked:
+            if len(selected_config) >= top_n:
+                break
+            if str(candidate["ticker"]) not in {
+                str(item["ticker"]) for item in selected_config
+            }:
+                selected_config.append(candidate)
+        selected_tickers = {str(candidate["ticker"]) for candidate in selected_config}
+        group_winner_tickers = {
+            str(candidate["ticker"])
+            for _, candidate in group_winners.values()
+        }
+        for ticker, detail in candidate_details.items():
+            if not detail["eligible"]:
+                continue
+            detail["selection_status"] = (
+                "선택"
+                if ticker in selected_tickers
+                else "같은 그룹 내 점수 열위"
+                if ticker not in group_winner_tickers
+                else "상위 선택 수 밖"
+            )
+        if not selected_config:
+            return {sleeve: 1.0}, (), candidate_details
+
+        selected = tuple(str(candidate["ticker"]) for candidate in selected_config)
+        inverse_volatility = {
+            ticker: 1.0 / float(candidate_details[ticker]["volatility"])
+            for ticker in selected
+        }
+        total_inverse_volatility = sum(inverse_volatility.values())
+        max_single = _number(
+            self.rotation.get("max_single_sleeve_share", 0.50),
+            field="rotation.max_single_sleeve_share",
+        )
+        max_gold = _number(
+            self.rotation.get("max_gold_sleeve_share", 0.30),
+            field="rotation.max_gold_sleeve_share",
+        )
+        max_equity = _number(
+            self.rotation.get("max_equity_sleeve_share", 0.30),
+            field="rotation.max_equity_sleeve_share",
+        )
+        mix: dict[str, float] = {}
+        allocated = 0.0
+        equity_allocated = 0.0
+        for candidate in selected_config:
+            ticker = str(candidate["ticker"])
+            capacity = max_single
+            asset_class = str(candidate["asset_class"])
+            if asset_class == "GOLD":
+                capacity = min(capacity, max_gold)
+            elif asset_class == "EQUITY":
+                capacity = min(capacity, max(0.0, max_equity - equity_allocated))
+            share = min(inverse_volatility[ticker] / total_inverse_volatility, capacity)
+            if share <= 1e-12:
+                continue
+            mix[ticker] = share
+            allocated += share
+            if asset_class == "EQUITY":
+                equity_allocated += share
+        mix[sleeve] = max(0.0, 1.0 - allocated)
+        return mix, tuple(mix_ticker for mix_ticker in selected if mix_ticker in mix), candidate_details
+
+    def _rotation_explanation(
+        self,
+        sleeve: str,
+        previous: tuple[str, ...],
+        selected: tuple[str, ...],
+        mix: Mapping[str, float],
+        details: Mapping[str, Any],
+    ) -> str:
+        previous_text = ", ".join(previous) if previous else sleeve
+        if not selected:
+            return (
+                f"자동 자산 검토: 적격 후보 없음 — {sleeve} 유지 "
+                "(EMA200 상단 및 3개월 현금 초과 조건 필요)"
+            )
+        selected_text = ", ".join(selected)
+        weights = ", ".join(
+            f"{ticker} {mix[ticker] * 100:.1f}%"
+            for ticker in selected
+        )
+        scores = ", ".join(
+            f"{ticker} 점수 {details[ticker]['score']:.2f}"
+            for ticker in selected
+        )
+        return (
+            f"자동 자산 교체: {previous_text} → {selected_text}; "
+            f"배분={weights}; 근거=EMA200 상단·3개월 현금 초과·복합 모멘텀 ({scores})"
+        )
+
+    def _apply_rotation(
+        self,
+        date: Any,
+        target: Mapping[str, float],
+        market: Mapping[str, Any],
+    ) -> tuple[dict[str, float], bool, bool, str | None]:
+        """Replace only the configured cash sleeve and retain every base target."""
+
+        assert self.rotation is not None
+        sleeve = str(self.rotation["sleeve"])
+        sleeve_weight = float(target[sleeve])
+        active = sleeve_weight > 1e-12
+        reviewed = False
+        changed = False
+        explanation = None
+        if active:
+            period = self._period(date, str(self.rotation.get("check", "monthly")))
+            if self._rotation_last_period is None or period != self._rotation_last_period:
+                previous = self._rotation_selected
+                mix, selected, details = self._rotation_selection(market)
+                selection_changed = selected != previous
+                minimum_weight_change = _number(
+                    self.rotation.get("minimum_weight_change", 0.0),
+                    field="rotation.minimum_weight_change",
+                )
+                weight_change = max(
+                    (
+                        abs(mix.get(ticker, 0.0) - self._rotation_mix.get(ticker, 0.0))
+                        for ticker in set(mix) | set(self._rotation_mix)
+                    ),
+                    default=0.0,
+                )
+                changed = selection_changed or weight_change > max(
+                    minimum_weight_change, 1e-12
+                )
+                if not selection_changed and not changed and self._rotation_mix:
+                    mix = dict(self._rotation_mix)
+                self._rotation_hold_periods = (
+                    self._rotation_hold_periods + 1
+                    if not selection_changed and previous
+                    else 1 if selected else 0
+                )
+                self._rotation_mix = mix
+                self._rotation_selected = selected
+                self._rotation_last_period = period
+                self._rotation_active = True
+                reviewed = True
+                explanation = self._rotation_explanation(
+                    sleeve, previous, selected, mix, details
+                )
+                self.rotation_decision = {
+                    "date": str(date),
+                    "reviewed": True,
+                    "sleeve": sleeve,
+                    "sleeve_weight": sleeve_weight,
+                    "previous_selected": previous,
+                    "selected": selected,
+                    "mix": dict(mix),
+                    "candidates": details,
+                    "explanation": explanation,
+                }
+        elif self._rotation_active:
+            previous = self._rotation_selected
+            changed = False
+            self._rotation_active = False
+            explanation = f"자동 자산 교체 종료: 전략 기본 목표에 따라 {sleeve} 슬리브가 0%"
+            self.rotation_decision = {
+                "date": str(date),
+                "reviewed": False,
+                "sleeve": sleeve,
+                "sleeve_weight": sleeve_weight,
+                "previous_selected": previous,
+                "selected": previous,
+                "mix": dict(self._rotation_mix),
+                "candidates": {},
+                "explanation": explanation,
+            }
+
+        if not active:
+            return dict(target), reviewed, changed, explanation
+        adjusted = dict(target)
+        adjusted[sleeve] = sleeve_weight * self._rotation_mix.get(sleeve, 0.0)
+        for candidate in self.rotation["candidates"]:
+            ticker = str(candidate["ticker"])
+            adjusted[ticker] = sleeve_weight * self._rotation_mix.get(ticker, 0.0)
+        if abs(sum(adjusted.values()) - 1.0) > 1e-8:
+            raise StrategyDefinitionError("rotation target weights must sum to 100%")
+        return adjusted, reviewed, changed, explanation
+
+    @staticmethod
     def _period(date: Any, schedule: str) -> Any:
         if schedule == "daily":
             return date
@@ -799,9 +1206,26 @@ class DeclarativeStrategy:
         self._calculate_variables(market, portfolio)
         self._update_state(date, market, portfolio)
         target = self._target_weights(market, portfolio)
+        rotation_reviewed = False
+        rotation_changed = False
+        rotation_reason = None
+        if self.rotation is not None:
+            target, rotation_reviewed, rotation_changed, rotation_reason = (
+                self._apply_rotation(date, target, market)
+            )
         rebalance, reason, rule_days = self._should_rebalance(
             date, market, portfolio, target
         )
+        if rotation_changed:
+            rebalance = True
+            reason = (
+                f"{reason} | {rotation_reason}" if reason else rotation_reason
+            )
+        elif rotation_reviewed and reason is None:
+            # No trade is necessary if the automatic review keeps the same
+            # mix, but retaining the audit message makes that decision visible
+            # to API callers and daily history consumers.
+            reason = rotation_reason
         self.target = target
         self._evaluated_once = True
         return {
@@ -844,6 +1268,10 @@ class _MappedPortfolioView:
                     for product in mapped
                 )
         return result
+
+    @property
+    def actual_weights(self) -> dict[str, float]:
+        return dict(self._actual_weights)
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._portfolio, name)
@@ -924,6 +1352,11 @@ class ProductMappedStrategy:
             str(ticker)
             for ticker in getattr(source_strategy, "risk_asset_tickers", ())
         )
+        self.source_risk_asset_tickers = source_risk
+        source_parameters = getattr(source_strategy, "parameters", {})
+        self.risk_product_rebalance_cap = float(
+            source_parameters.get("canonical_risk_weight", 0.70)
+        )
         self.risk_asset_tickers = tuple(dict.fromkeys(
             product
             for source_asset in source_risk
@@ -937,15 +1370,39 @@ class ProductMappedStrategy:
             raise AttributeError(name)
         return getattr(source, name)
 
-    def _map_target(self, source_target: Mapping[str, Any]) -> dict[str, float]:
+    def _map_target(
+        self,
+        source_target: Mapping[str, Any],
+        actual_weights: Mapping[str, Any] | None = None,
+    ) -> dict[str, float]:
         mapped_target: dict[str, float] = {}
+        actual_weights = actual_weights or {}
         for source_asset, raw_weight in source_target.items():
             weight = _number(raw_weight, field=f"source target.{source_asset}")
             configured_products = self.products.get(
                 str(source_asset), {str(source_asset): 1.0}
             )
+            current_source_weight = sum(
+                float(actual_weights.get(product, 0.0))
+                for product in configured_products
+            )
+            preserve_product_mix = (
+                len(configured_products) > 1
+                and str(source_asset) in self.source_risk_asset_tickers
+                and current_source_weight > self.risk_product_rebalance_cap + 1e-8
+                and weight > self.risk_product_rebalance_cap + 1e-8
+            )
+            product_shares = (
+                {
+                    product: float(actual_weights.get(product, 0.0))
+                    / current_source_weight
+                    for product in configured_products
+                }
+                if preserve_product_mix
+                else configured_products
+            )
             allocated = 0.0
-            items = list(configured_products.items())
+            items = list(product_shares.items())
             for index, (product, share) in enumerate(items):
                 product_weight = (
                     round(weight - allocated, 10)
@@ -968,7 +1425,8 @@ class ProductMappedStrategy:
         if not isinstance(source_signal, Mapping):
             raise StrategyDefinitionError("source strategy evaluation must be a mapping")
         mapped_target = self._map_target(
-            _require_mapping(source_signal.get("target"), "source target")
+            _require_mapping(source_signal.get("target"), "source target"),
+            source_portfolio.actual_weights,
         )
         self.target = mapped_target
         return {

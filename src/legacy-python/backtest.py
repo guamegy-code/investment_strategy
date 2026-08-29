@@ -151,29 +151,71 @@ class Backtest:
             )
         return df
 
+    def _apply_valuation(self, frames):
+        """Convert configured foreign assets in memory; never create _KRW CSVs."""
+        foreign_assets = tuple(getattr(self.strategy, "foreign_asset_tickers", ()))
+        fx_ticker = getattr(self.strategy, "valuation_fx_ticker", None)
+        if not foreign_assets:
+            return frames
+        if not fx_ticker or fx_ticker not in frames:
+            raise ValueError("valuation requires an available FX price series")
+        all_dates = pd.DatetimeIndex([])
+        for frame in frames.values():
+            all_dates = all_dates.union(frame.index)
+        fx = frames[fx_ticker]["Close"].reindex(all_dates).sort_index().ffill()
+        for ticker in foreign_assets:
+            if ticker not in frames:
+                raise ValueError(f"valuation foreign asset is unavailable: {ticker}")
+            frame = frames[ticker].copy()
+            rate = fx.reindex(frame.index).ffill()
+            # FX may begin a few sessions after an ETF.  Those rows cannot be
+            # valued in KRW and are simply part of indicator warm-up.
+            frame = frame.loc[rate.notna()].copy()
+            rate = rate.loc[frame.index]
+            for column in ("Open", "High", "Low", "Close"):
+                if column in frame:
+                    frame[column] = frame[column] * rate
+            frames[ticker] = Indicator.add_indicators(frame)
+        return frames
+
 
     # ==================================================
     # 전체 데이터 병합
     # ==================================================
-    def load_data(self):
+    @staticmethod
+    def _merge_frames(frames, tickers):
         merged = None
-        for ticker in self.tickers:
-            df = self.load_one(ticker)
-            df = df.add_prefix(f"{ticker}_")
-            if merged is None:
-                merged = df
-            else:
-                merged = merged.join(df, how="inner")
+        for ticker in tickers:
+            frame = frames[ticker].add_prefix(f"{ticker}_")
+            merged = frame if merged is None else merged.join(frame, how="inner")
         merged.sort_index(inplace=True)
+        return merged
+
+    def load_data(self):
+        frames = {}
+        for ticker in self.tickers:
+            frames[ticker] = self.load_one(ticker)
+        local_market = self._merge_frames(frames, self.tickers)
+        valued_frames = self._apply_valuation(dict(frames))
+        merged = self._merge_frames(valued_frames, self.tickers)
         if self.start_date is not None:
             merged = merged.loc[merged.index >= self.start_date]
+            local_market = local_market.loc[local_market.index >= self.start_date]
         if self.end_date is not None:
             merged = merged.loc[merged.index <= self.end_date]
+            local_market = local_market.loc[local_market.index <= self.end_date]
+        common_index = merged.index.intersection(local_market.index)
+        merged = merged.loc[common_index]
+        local_market = local_market.loc[common_index]
         required_fields = getattr(
             self.strategy, "required_market_fields", {}
         )
+        signal_currency = getattr(
+            self.strategy, "valuation_signal_currency", "KRW"
+        )
+        readiness_source = local_market if signal_currency == "LOCAL" else merged
         columns_by_name = {
-            str(column).casefold(): column for column in merged.columns
+            str(column).casefold(): column for column in readiness_source.columns
         }
         readiness_columns = []
         for ticker, fields in required_fields.items():
@@ -186,11 +228,14 @@ class Backtest:
                     )
                 readiness_columns.append(column)
         if readiness_columns:
-            merged = merged.dropna(subset=readiness_columns)
+            valid_index = readiness_source.dropna(subset=readiness_columns).index
+            merged = merged.loc[valid_index]
+            local_market = local_market.loc[valid_index]
         if merged.empty:
             raise ValueError(
                 "No overlapping market data in the configured backtest period"
             )
+        self.market_data = local_market if signal_currency == "LOCAL" else merged
         return merged
 
 
@@ -275,7 +320,7 @@ class Backtest:
             self.portfolio.update(open_prices, date=date)
 
             prices = self.get_prices(row, field="Close")
-            market = self.get_market(row)
+            market = self.get_market(self.market_data.loc[date])
             step = self.strategy_engine.advance(
                 MarketSnapshot(date, market), self.portfolio
             )
@@ -306,6 +351,11 @@ class Backtest:
             state = getattr(self.strategy, "state", None)
             if hasattr(state, "value"):
                 state = state.value
+            rotation_decision = getattr(self.strategy, "rotation_decision", None)
+            if not isinstance(rotation_decision, dict) or rotation_decision.get(
+                "date"
+            ) != str(date):
+                rotation_decision = None
             self.portfolio.record(
                 date,
                 prices,
@@ -314,6 +364,7 @@ class Backtest:
                     "RiskOffScore": getattr(self.strategy, "risk_off_score", None),
                     "RecoveryScore": getattr(self.strategy, "recovery_score", None),
                     "SafeAsset": getattr(self.strategy, "safe_asset", None),
+                    "RotationDecision": rotation_decision,
                 },
             )
 

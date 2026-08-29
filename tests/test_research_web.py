@@ -181,6 +181,7 @@ class ResearchWebTests(unittest.TestCase):
         self.assertEqual([round(value, 6) for value in performance.data[0].y], [0.0, 10.0, 21.0])
         self.assertEqual(min(drawdown.data[0].y), 0.0)
         self.assertEqual({trace.name for trace in allocation.data}, {"QQQ", "BIL"})
+        self.assertEqual(allocation.layout.legend.traceorder, "normal")
         self.assertEqual(rebalances.data[1].name, "리밸런싱")
         self.assertEqual(len(rebalances.data[1].x), 1)
         self.assertIn("70.00%", rebalances.data[1].text[0])
@@ -260,6 +261,23 @@ class ResearchWebTests(unittest.TestCase):
 
         self.assertEqual(len(allocation.data[0].x), 2)
 
+    def test_korean_etf_codes_have_readable_chart_labels(self):
+        result = make_result(AlphaStrategy(), [100, 101, 102])
+        result["history"]["Weights"] = [
+            {"069500.KS": 0.4, "114100.KS": 0.3, "148070.KS": 0.3},
+        ] * 3
+
+        figure = ResearchViewModel((result,)).allocation_figure("AlphaStrategy")
+
+        self.assertEqual(
+            [trace.name for trace in figure.data],
+            [
+                "KODEX 200 (069500.KS)",
+                "KODEX 국고채 3년 (114100.KS)",
+                "KOSEF 국고채 10년 (148070.KS)",
+            ],
+        )
+
     def test_detail_charts_use_horizontal_time_navigation(self):
         allocation = self.view.allocation_figure("AlphaStrategy")
         rebalances = self.view.rebalance_figure("AlphaStrategy")
@@ -324,6 +342,7 @@ class ResearchWebTests(unittest.TestCase):
             "누적 수익률 (%)",
         )
         self.assertEqual(combined.data[0].hoverinfo, "skip")
+        self.assertEqual(combined.layout.legend.traceorder, "normal")
         self.assertEqual(combined.data[1].hoverinfo, "skip")
         self.assertEqual(combined.data[3].hoverinfo, "skip")
         regular_hover = combined.data[2].customdata[0]
@@ -378,7 +397,7 @@ class ResearchWebTests(unittest.TestCase):
 
     def test_detail_chart_cursor_matches_pan_and_range_actions(self):
         stylesheet = (
-            Path(__file__).parents[1] / "src" / "assets" / "research_web.css"
+            Path(__file__).parents[1] / "src" / "legacy-python" / "assets" / "research_web.css"
         ).read_text(encoding="utf-8")
 
         self.assertIn(".research-detail-graph .nsewdrag", stylesheet)
@@ -408,7 +427,7 @@ class ResearchWebTests(unittest.TestCase):
 
     def test_indicator_matrix_uses_internal_scrolling_without_overlap(self):
         stylesheet = (
-            Path(__file__).parents[1] / "src" / "assets" / "research_web.css"
+            Path(__file__).parents[1] / "src" / "legacy-python" / "assets" / "research_web.css"
         ).read_text(encoding="utf-8")
 
         self.assertIn(".research-indicator-matrix-scroll", stylesheet)
@@ -906,7 +925,7 @@ class ResearchWebTests(unittest.TestCase):
             )
             self.assertIn("zoom2d", graph.config["modeBarButtonsToRemove"])
         source = (
-            Path(__file__).parents[1] / "src" / "research_web.py"
+            Path(__file__).parents[1] / "src" / "legacy-python" / "research_web.py"
         ).read_text(encoding="utf-8")
         self.assertIn("(traceFor(point).meta || {}).isStrategySeries", source)
         self.assertIn(

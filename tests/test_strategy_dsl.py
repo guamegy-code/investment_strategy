@@ -128,6 +128,55 @@ def product_market():
     }
 
 
+def rotation_definition():
+    return {
+        "strategy": {"id": "rotation", "name": "Rotation", "version": 1},
+        "assets": {
+            "required": ["QQQ", "TDF", "BIL", "GLD", "SHY", "KOSPI"],
+            "risk": ["QQQ"],
+        },
+        "target": [{"weights": {
+            "QQQ": "0%", "TDF": "20%", "BIL": "80%",
+            "GLD": "0%", "SHY": "0%", "KOSPI": "0%",
+        }}],
+        "rotation": {
+            "sleeve": "BIL",
+            "check": "monthly",
+            "candidates": [
+                {"ticker": "GLD", "group": "gold", "asset_class": "GOLD"},
+                {"ticker": "SHY", "group": "short", "asset_class": "BOND"},
+                {"ticker": "KOSPI", "group": "equity", "asset_class": "EQUITY"},
+            ],
+            "top_n": 2,
+            "max_single_sleeve_share": "50%",
+            "max_gold_sleeve_share": "30%",
+            "max_equity_sleeve_share": "30%",
+        },
+        "execution": {"days": 1},
+    }
+
+
+def rotation_market(*, shy_eligible=True, kospi_eligible=False):
+    def candidate(roc60, roc120, roc252, volatility, *, eligible=True):
+        return {
+            "Close": 110.0 if eligible else 90.0,
+            "EMA200": 100.0,
+            "ROC60": roc60,
+            "ROC120": roc120,
+            "ROC252": roc252,
+            "VOL60": volatility,
+        }
+
+    return {
+        "QQQ": {"Close": 100.0},
+        "TDF": {"Close": 100.0},
+        "BIL": {"Close": 100.0, "ROC60": 1.0, "ROC120": 2.0, "ROC252": 3.0},
+        "GLD": candidate(8.0, 11.0, 16.0, 0.15),
+        "SHY": candidate(5.0, 7.0, 9.0, 0.05, eligible=shy_eligible),
+        "KOSPI": candidate(7.0, 9.0, 13.0, 0.20, eligible=kospi_eligible),
+    }
+
+
 class DeclarativeStrategyTests(unittest.TestCase):
     def test_static_retirement_yaml_matches_python_market_state_path(self):
         declarative = DeclarativeStrategy.from_yaml(
@@ -682,6 +731,89 @@ class DeclarativeStrategyTests(unittest.TestCase):
         ):
             DeclarativeStrategy(invalid)
 
+    def test_rotation_replaces_only_the_bil_sleeve_and_records_the_reason(self):
+        strategy = DeclarativeStrategy(rotation_definition())
+
+        signal = strategy.evaluate(
+            pd.Timestamp("2025-01-02"), rotation_market(), PortfolioStub()
+        )
+
+        self.assertTrue(signal["rebalance"])
+        self.assertEqual(signal["target"]["QQQ"], 0.0)
+        self.assertEqual(signal["target"]["TDF"], 0.20)
+        self.assertAlmostEqual(signal["target"]["GLD"], 0.20)
+        self.assertAlmostEqual(signal["target"]["SHY"], 0.40)
+        self.assertAlmostEqual(signal["target"]["BIL"], 0.20)
+        self.assertEqual(strategy.rotation_decision["selected"], ("GLD", "SHY"))
+        self.assertEqual(
+            strategy.rotation_decision["candidates"]["GLD"]["selection_status"],
+            "선택",
+        )
+        self.assertFalse(strategy.rotation_decision["candidates"]["KOSPI"]["eligible"])
+        self.assertIn("자동 자산 교체", signal["reason"])
+
+    def test_rotation_reviews_monthly_and_forces_a_trade_when_selection_changes(self):
+        strategy = DeclarativeStrategy(rotation_definition())
+        portfolio = PortfolioStub()
+        strategy.evaluate(pd.Timestamp("2025-01-02"), rotation_market(), portfolio)
+
+        unchanged = strategy.evaluate(
+            pd.Timestamp("2025-01-03"), rotation_market(), portfolio
+        )
+        changed = strategy.evaluate(
+            pd.Timestamp("2025-02-03"),
+            rotation_market(shy_eligible=False, kospi_eligible=True),
+            portfolio,
+        )
+
+        self.assertFalse(unchanged["rebalance"])
+        self.assertIsNone(unchanged["reason"])
+        self.assertTrue(changed["rebalance"])
+        self.assertEqual(changed["target"]["QQQ"], 0.0)
+        self.assertEqual(changed["target"]["TDF"], 0.20)
+        self.assertAlmostEqual(changed["target"]["GLD"], 0.24)
+        self.assertAlmostEqual(changed["target"]["KOSPI"], 0.24)
+        self.assertAlmostEqual(changed["target"]["BIL"], 0.32)
+        self.assertEqual(strategy.rotation_decision["previous_selected"], ("GLD", "SHY"))
+        self.assertEqual(strategy.rotation_decision["selected"], ("GLD", "KOSPI"))
+
+    def test_rotation_keeps_incumbent_when_challenger_advantage_is_small(self):
+        configured = rotation_definition()
+        configured["rotation"]["switch_score_margin"] = 3.0
+        strategy = DeclarativeStrategy(configured)
+        portfolio = PortfolioStub()
+        strategy.evaluate(pd.Timestamp("2025-01-02"), rotation_market(), portfolio)
+        next_market = rotation_market(kospi_eligible=True)
+        next_market["KOSPI"].update({"ROC60": 6.0, "ROC120": 8.0, "ROC252": 10.0})
+
+        signal = strategy.evaluate(pd.Timestamp("2025-02-03"), next_market, portfolio)
+
+        self.assertEqual(strategy.rotation_decision["selected"], ("GLD", "SHY"))
+        self.assertFalse(signal["rebalance"])
+
+    def test_rotation_selection_sleeps_instead_of_resetting_with_zero_sleeve(self):
+        strategy = DeclarativeStrategy(rotation_definition())
+        selected_target = strategy._target_weights(rotation_market(), PortfolioStub())
+        strategy._apply_rotation(
+            pd.Timestamp("2025-01-02"), selected_target, rotation_market()
+        )
+        dormant_target = {ticker: 0.0 for ticker in strategy.holding_tickers}
+        dormant_target["QQQ"] = 1.0
+
+        strategy._apply_rotation(
+            pd.Timestamp("2025-01-03"), dormant_target, rotation_market()
+        )
+
+        self.assertEqual(strategy._rotation_selected, ("GLD", "SHY"))
+        self.assertIsNotNone(strategy._rotation_last_period)
+
+    def test_rotation_candidate_must_be_a_required_holding(self):
+        invalid = rotation_definition()
+        invalid["rotation"]["candidates"][0]["ticker"] = "MISSING"
+
+        with self.assertRaisesRegex(StrategyDefinitionError, "must be in assets.required"):
+            DeclarativeStrategy(invalid)
+
     def test_product_mapping_splits_one_source_asset_across_products(self):
         source = DeclarativeStrategy(definition(
             rebalance=[{"when": "target_deviation() >= 5%"}]
@@ -715,6 +847,76 @@ class DeclarativeStrategyTests(unittest.TestCase):
         self.assertEqual(
             strategy.risk_asset_tickers, ("PRODUCT_A", "PRODUCT_B")
         )
+
+    def test_product_mapping_defers_risk_sleeve_rebalancing_above_70_percent(self):
+        class SourceStrategy:
+            required_tickers = ("QQQ", "BND")
+            holding_tickers = required_tickers
+            risk_asset_tickers = ("QQQ",)
+            parameters = {"canonical_risk_weight": 0.70}
+
+            def evaluate(self, date, market, portfolio):
+                return {
+                    "rebalance": True,
+                    "target": {"QQQ": 0.76, "BND": 0.24},
+                    "days": 1,
+                }
+
+        configured = product_definition(products={
+            "QQQ": {"PRODUCT_A": "50%", "PRODUCT_B": "50%"},
+            "BND": {"PRODUCT_C": "100%"},
+        })
+        strategy = ProductMappedStrategy(configured, SourceStrategy())
+        portfolio = PortfolioStub({
+            "PRODUCT_A": 0.50,
+            "PRODUCT_B": 0.26,
+            "PRODUCT_C": 0.24,
+        })
+
+        signal = strategy.evaluate(
+            pd.Timestamp("2025-01-02"), product_market(), portfolio
+        )
+
+        self.assertEqual(signal["target"], {
+            "PRODUCT_A": 0.50,
+            "PRODUCT_B": 0.26,
+            "PRODUCT_C": 0.24,
+        })
+
+    def test_product_mapping_restores_configured_mix_at_70_percent(self):
+        class SourceStrategy:
+            required_tickers = ("QQQ", "BND")
+            holding_tickers = required_tickers
+            risk_asset_tickers = ("QQQ",)
+            parameters = {"canonical_risk_weight": 0.70}
+
+            def evaluate(self, date, market, portfolio):
+                return {
+                    "rebalance": True,
+                    "target": {"QQQ": 0.70, "BND": 0.30},
+                    "days": 1,
+                }
+
+        configured = product_definition(products={
+            "QQQ": {"PRODUCT_A": "50%", "PRODUCT_B": "50%"},
+            "BND": {"PRODUCT_C": "100%"},
+        })
+        strategy = ProductMappedStrategy(configured, SourceStrategy())
+        portfolio = PortfolioStub({
+            "PRODUCT_A": 0.50,
+            "PRODUCT_B": 0.26,
+            "PRODUCT_C": 0.24,
+        })
+
+        signal = strategy.evaluate(
+            pd.Timestamp("2025-01-02"), product_market(), portfolio
+        )
+
+        self.assertEqual(signal["target"], {
+            "PRODUCT_A": 0.35,
+            "PRODUCT_B": 0.35,
+            "PRODUCT_C": 0.30,
+        })
 
     def test_state_check_evaluates_only_once_per_period(self):
         strategy = DeclarativeStrategy(definition(

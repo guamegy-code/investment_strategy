@@ -45,6 +45,7 @@ execution:
 | `strategy` | `enabled` | 자동 로딩 여부, 기본값 `true` | 아니요 |
 | 최상위 | `assets` | 전략에서 사용하는 종목 정보 | 예 |
 | `assets` | `required` | 가격과 지표가 필요한 종목 목록 | 예 |
+| `assets` | `observations` | 신호에는 쓰지만 목표 비중에는 넣지 않는 관찰 종목 목록 | 아니요 |
 | `assets` | `risk` | 위험자산으로 표시할 종목 또는 종목 목록 | 아니요 |
 | 최상위 | `parameters` | 실행 중 변하지 않는 사용자 정의 값 | 아니요 |
 | 최상위 | `variables` | 평가일마다 계산하는 사용자 정의 값 | 아니요 |
@@ -66,6 +67,11 @@ execution:
 | `rebalance[]` | `days` | 이 규칙이 실행될 때의 분할 실행일수 | 아니요 |
 | 최상위 | `execution` | 리밸런싱 실행 설정 | 아니요 |
 | `execution` | `days` | 분할 실행일수, 기본값 `1` | 아니요 |
+| 최상위 | `rotation` | 현금 슬리브만 자동 대체하는 교차자산 선택 규칙 | 아니요 |
+| `rotation` | `sleeve` | 대체할 기준 현금/안전자산 티커 | 예 |
+| `rotation` | `candidates` | 점수화할 후보 자산·그룹·자산군 | 예 |
+| `rotation` | `check` | 후보 재평가 주기, 기본값 `monthly` | 아니요 |
+| `rotation` | `top_n` | 그룹별 1위 중 최종 선택 수 | 아니요 |
 | 최상위 | `source` | 실제 상품 매핑에 사용할 기존 전략 ID | 상품 매핑 시 예 |
 | 최상위 | `products` | 기준 종목과 실제 상품의 매핑 | 상품 매핑 시 예 |
 
@@ -80,6 +86,19 @@ execution:
 Yahoo Finance 티커가 아닌 합성 자산입니다. 필요한 경우 `SPY` 40.81%, `VXUS` 33.39%,
 `BND` 25.80%를 월별 리밸런싱한 가격 흐름으로 동적으로 계산합니다. 실제 TDF 상품 가격으로
 대체하지 않으며, 실제 TDF의 액티브 운용·국내채권·글라이드패스를 그대로 재현하지는 않습니다.
+
+서로 다른 통화의 자산을 함께 보유하는 전략은 `valuation`으로 평가 통화를 지정할 수 있습니다.
+`signal_currency: LOCAL`이면 추세·모멘텀 신호는 각 자산의 현지 통화 가격을 사용하고,
+보유 가격·목표 편차·성과만 실행 시점에 원화로 환산합니다. 환산은 메모리에서 수행하므로
+종목별 `_KRW` CSV를 만들 필요가 없습니다.
+
+```yaml
+valuation:
+  currency: KRW
+  fx_ticker: KRW=X
+  foreign_assets: [QQQ, BIL, GLD]
+  signal_currency: LOCAL
+```
 
 상태 변수의 이름과 값은 전략 작성자가 정의한다.
 
@@ -243,6 +262,44 @@ target:
 목표도 같은 형식을 사용한다. 조건이 있는 항목은 위에 두고, `when`이 없는 기본
 목표는 마지막에 둔다. 나머지 비중은 `1 - state.risk_level`처럼 계산할 수 있다.
 최종 비중은 음수가 아니어야 하고 합계가 정확히 100%여야 한다.
+
+## 자동 교차자산 로테이션
+
+`rotation`은 기본 목표에서 지정한 현금/안전자산 슬리브만 후보 자산으로 자동 대체한다.
+사람이 종목을 고르거나 매월 승인하지 않는다. 기본 `target`에서 후보는 모두 0%로 두고,
+엔진이 슬리브 비중 안에서만 대체 비중을 계산하므로 QQQ·TDF 등 나머지 목표 비중은 바뀌지
+않는다.
+
+```yaml
+rotation:
+  sleeve: BIL
+  check: monthly
+  candidates:
+    - {ticker: GLD, group: GOLD, asset_class: GOLD}
+    - {ticker: IEF, group: US_INTERMEDIATE_BOND, asset_class: BOND}
+    - {ticker: 069500.KS, group: KR_EQUITY, asset_class: EQUITY}
+  top_n: 2
+  max_single_sleeve_share: 50%
+  max_gold_sleeve_share: 30%
+  max_equity_sleeve_share: 30%
+  switch_score_margin: 3
+  minimum_hold_periods: 3
+  minimum_weight_change: 10%
+```
+
+평가일에는 각 후보가 (1) 가격이 EMA200 위, (2) 3개월 수익률이 `sleeve`보다 높음,
+(3) 3·6·12개월 수익률과 60일 변동성이 모두 계산 가능함을 확인한다. 적격 후보는
+`0.5 × 3개월 초과수익률 + 0.3 × 6개월 초과수익률 + 0.2 × 12개월 초과수익률`로 점수화한다.
+같은 `group`에서는 1위만 남기고 상위 `top_n`을 선택한다. 선택 비중은 역변동성으로 계산한
+뒤 단일 종목·금·주식 자산군 상한을 적용하며, 남은 비중은 원래 `sleeve`에 둔다.
+
+`switch_score_margin`은 기존 자산에 부여하는 유지 우대 점수다. `minimum_hold_periods` 동안
+적격인 기존 자산을 우선 유지하고, `minimum_weight_change`보다 작은 계산 비중 변화는 매매하지
+않는다. 슬리브 비중이 잠시 0%가 되면 선택을 삭제하지 않고 휴면 상태로 보존한다.
+
+검토 주기에 선택 또는 비중이 달라지면 자동으로 리밸런싱한다. 일별 기록의
+`RotationDecision`에는 적격/탈락 사유, 각 후보 점수, 이전·새 선택, 최종 비중 및 사람이
+읽을 수 있는 설명이 남는다. 따라서 자동 집행이지만 결과를 사후 검증할 수 있다.
 
 ## 리밸런싱과 실행
 

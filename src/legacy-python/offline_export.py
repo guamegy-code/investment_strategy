@@ -341,8 +341,9 @@ def export_static_site(
     *,
     strategy_dir: Path = PROJECT_ROOT / "strategies",
     data_proxy: str | None = None,
+    data_dir: Path | None = None,
 ) -> Path:
-    """Write a small static web bundle that downloads market data on demand."""
+    """Write a Pages bundle with optional local market-data fallback."""
     strategies_dir = output_dir / "strategies"
     assets_dir = output_dir / "assets"
     strategies_dir.mkdir(parents=True, exist_ok=True)
@@ -383,12 +384,28 @@ def export_static_site(
     if legacy_tdf_proxy.is_file():
         legacy_tdf_proxy.unlink()
 
+    data_url = ""
+    market_data_version = "on-demand-v2"
+    if data_dir is not None:
+        compressed = _compressed_market_data(data_dir)
+        (output_dir / "market-data.json.gz").write_bytes(compressed)
+        fallback_dir = output_dir / "market-data"
+        if fallback_dir.exists():
+            shutil.rmtree(fallback_dir)
+        fallback_dir.mkdir()
+        for source in sorted(data_dir.glob("*.csv")):
+            slug = base64.urlsafe_b64encode(source.stem.encode("ascii")).decode("ascii").rstrip("=")
+            with gzip.open(fallback_dir / f"{slug}.csv.gz", "wb", compresslevel=9) as target:
+                target.write(source.read_bytes())
+        data_url = "./market-data.json.gz"
+        market_data_version = hashlib.sha256(compressed).hexdigest()[:16]
+
     bundle = json.dumps({
         "strategies": [],
         "precomputed_results": "",
         "data": "",
-        "data_url": "",
-        "market_data_version": "on-demand-v1",
+        "data_url": data_url,
+        "market_data_version": market_data_version,
         "data_proxy": data_proxy or "",
         "strategy_manifest_url": "./strategies/manifest.json",
         "static_site": True,
@@ -445,7 +462,11 @@ def main(argv=None) -> None:
         print(f"Created editable web sources: {WEB_SOURCE_DIR}")
         return
     if args.static_site:
-        path = export_static_site(args.static_site, data_proxy=args.data_proxy)
+        path = export_static_site(
+            args.static_site,
+            data_proxy=args.data_proxy,
+            data_dir=DATA_DIR,
+        )
         print(f"Created static strategy site: {path}")
         return
     path = export_html(
