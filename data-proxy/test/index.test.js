@@ -223,6 +223,96 @@ test("runtime rotation changes only the configured BIL sleeve", () => {
   assert.match(history.at(-1).reason, /자동 자산 교체/);
 });
 
+test("rebalance deviation is checked against the final rotated target", () => {
+  const definition = {
+    strategy: {id: "rotation-rebalance", name: "Rotation rebalance", version: 1},
+    assets: {required: ["TDF", "BIL", "GLD"]},
+    target: [{weights: {TDF: "20%", BIL: "80%", GLD: "0%"}}],
+    rotation: {
+      sleeve: "BIL", check: "monthly", top_n: 1,
+      max_single_sleeve_share: "50%", max_gold_sleeve_share: "30%",
+      candidates: [{ticker: "GLD", group: "gold", asset_class: "GOLD"}],
+    },
+    rebalance: [{check: "daily", when: "target_deviation() >= 7.5%"}],
+    execution: {days: 1},
+  };
+  const dates = ["2025-01-02", "2025-01-03", "2025-01-06"];
+  const rows = values => dates.map(Date => ({
+    Date, Open: 100, High: 100, Low: 100, Volume: 1, ...values,
+  }));
+  const data = {
+    TDF: rows({Close: 100}),
+    BIL: rows({Close: 100, ROC60: 1, ROC120: 2, ROC252: 3}),
+    GLD: rows({
+      Close: 110, EMA200: 100, ROC60: 8, ROC120: 11, ROC252: 16, VOL60: .15,
+    }),
+  };
+
+  const history = runStrategy([definition], definition, data);
+
+  assert.equal(history.filter(row => row.target).length, 1);
+  const target = history.find(row => row.target).target;
+  assert.equal(target.TDF, .2);
+  assert.ok(Math.abs(target.BIL - .56) < 1e-12);
+  assert.equal(target.GLD, .24);
+});
+
+test("LOCAL signals calculate deviation with KRW valuation weights", () => {
+  const definition = {
+    strategy: {id: "mixed-deviation", name: "Mixed deviation", version: 1},
+    assets: {required: ["QQQ", "KOSPI"]},
+    valuation: {
+      currency: "KRW", fx_ticker: "KRW=X",
+      foreign_assets: ["QQQ"], signal_currency: "LOCAL",
+    },
+    target: [{weights: {QQQ: "50%", KOSPI: "50%"}}],
+    rebalance: [{check: "daily", when: "target_deviation() >= 7.5%"}],
+    execution: {days: 1},
+  };
+  const dates = ["2025-01-02", "2025-01-03", "2025-01-06"];
+  const rows = price => dates.map(Date => ({
+    Date, Open: price, High: price, Low: price, Close: price, Volume: 1,
+  }));
+  const data = {QQQ: rows(100), KOSPI: rows(100), "KRW=X": rows(10)};
+
+  const history = runStrategy([definition], definition, data);
+
+  assert.equal(history.filter(row => row.target).length, 1);
+});
+
+test("rotation keeps incumbent assets when the monthly weight change is small", () => {
+  const definition = {
+    strategy: {id: "stable-rotation", name: "Stable rotation", version: 1},
+    assets: {required: ["BIL", "GLD", "SHY"]},
+    target: [{weights: {BIL: "100%", GLD: "0%", SHY: "0%"}}],
+    rotation: {
+      sleeve: "BIL", check: "monthly", top_n: 2,
+      max_single_sleeve_share: "100%", max_gold_sleeve_share: "100%",
+      minimum_weight_change: "10%", switch_score_margin: "3%",
+      candidates: [
+        {ticker: "GLD", group: "gold", asset_class: "GOLD"},
+        {ticker: "SHY", group: "short", asset_class: "BOND"},
+      ],
+    },
+    execution: {days: 1},
+  };
+  const dates = ["2025-01-02", "2025-01-03", "2025-02-03", "2025-02-04"];
+  const rows = (volatility) => dates.map((Date, index) => ({
+    Date, Open: 100, High: 100, Low: 100, Close: 100, Volume: 1,
+    EMA200: 90, ROC60: 8, ROC120: 10, ROC252: 12,
+    VOL60: index < 2 ? volatility[0] : volatility[1],
+  }));
+  const data = {
+    BIL: rows([.01, .01]).map(row => ({...row, ROC60: 1, ROC120: 2, ROC252: 3})),
+    GLD: rows([.10, .11]),
+    SHY: rows([.20, .19]),
+  };
+
+  const history = runStrategy([definition], definition, data);
+
+  assert.equal(history.filter(row => row.target).length, 1);
+});
+
 test("KRW-adjusted strategy assets include their USD source and FX dependency", () => {
   const definition = {
     strategy: {id: "krw", name: "KRW", version: 1},

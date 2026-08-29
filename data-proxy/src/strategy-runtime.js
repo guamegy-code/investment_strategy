@@ -75,8 +75,104 @@ function requiredMarketFields(def){const fields={};const add=(ticker,...names)=>
 export function mapProductTarget(sourceTarget,def,source,actual){const target={},riskAssets=new Set(source.assets?.risk||[]),riskCap=Number(source.parameters?.canonical_risk_weight??.70);for(const[asset,weight]of Object.entries(sourceTarget)){const products=def.products?.[asset]||{[asset]:1},items=Object.entries(products),currentWeight=items.reduce((sum,[product])=>sum+(actual[product]||0),0),preserveMix=items.length>1&&riskAssets.has(asset)&&currentWeight>riskCap+1e-8&&weight>riskCap+1e-8;let allocated=0;for(const[index,[product,configuredShare]]of items.entries()){const share=preserveMix?(actual[product]||0)/currentWeight:pct(configuredShare),productWeight=index===items.length-1?weight-allocated:weight*share;target[product]=(target[product]||0)+productWeight;allocated+=productWeight;}}return target;}
 function preparedRows(calculation,tickers,data,fields,afterDate=''){const valued=applyValuation(calculation,data),signals=calculation.valuation?.signal_currency==='LOCAL'?data:valued,valuedByDate=new Map(recordsFor(tickers,valued).map(row=>[row.date,row.market]));return recordsFor(tickers,signals).filter(row=>row.date>afterDate&&valuedByDate.has(row.date)&&tickers.every(ticker=>[...(fields[ticker]||[])].every(field=>Number.isFinite(Number(row.market[ticker][field]))))).map(row=>({...row,valuationMarket:valuedByDate.get(row.date)}));}
 function resolve(def,all){if(!def.source)return new Declarative(def);const source=all.get(def.source),runtime=new Declarative(source);return{snapshot:()=>runtime.snapshot(),restore:snapshot=>runtime.restore(snapshot),step(date,market,portfolio){const actual=portfolio.weights(Object.fromEntries(Object.entries(market).map(([t,row])=>[t,row.close]))),virtual={weights:()=>Object.fromEntries((source.assets.required||[]).map(asset=>[asset,Object.keys(def.products?.[asset]||{[asset]:1}).reduce((sum,product)=>sum+(actual[product]||0),0)]))},signal=runtime.step(date,market,virtual),target=mapProductTarget(signal.target,def,source,actual);return{...signal,target};}};}
+function installRotationStability(StrategyClass){
+  const baseStep=StrategyClass.prototype.step;
+  if(baseStep.__rotationStabilityInstalled)return StrategyClass;
+  function step(date,market,portfolio){
+    const rotation=this.def.rotation,previousSelected=[...(this.rotationSelected||[])],previousMix={...(this.rotationMix||{})},previousHold=Number(this.rotationHoldPeriods||0),signal=baseStep.call(this,date,market,portfolio),decision=this.rotationDecision;
+    if(!rotation||!decision?.reviewed||decision.date!==date){if(rotation&&!this.rotationActive)this.rotationHoldPeriods=0;return signal;}
+    let selected=[...decision.selected],mix={...decision.mix};
+    const sameAssets=selected.length===previousSelected.length&&selected.every(ticker=>previousSelected.includes(ticker));
+    if(sameAssets)selected=[...previousSelected];
+    let selectionChanged=selected.length!==previousSelected.length||selected.some(ticker=>!previousSelected.includes(ticker));
+    const allIncumbentsEligible=previousSelected.length>0&&previousSelected.every(ticker=>decision.candidates?.[ticker]?.eligible);
+    if(selectionChanged&&allIncumbentsEligible){
+      const minimumHold=Number(rotation.minimum_hold_periods||0),margin=pct(rotation.switch_score_margin||0),entrants=selected.filter(ticker=>!previousSelected.includes(ticker)),departures=previousSelected.filter(ticker=>!selected.includes(ticker)),bestEntrant=Math.max(...entrants.map(ticker=>Number(decision.candidates?.[ticker]?.score??-Infinity))),weakestDeparture=Math.min(...departures.map(ticker=>Number(decision.candidates?.[ticker]?.score??Infinity)));
+      if(previousHold<minimumHold||bestEntrant-weakestDeparture<=margin){selected=[...previousSelected];mix={...previousMix};selectionChanged=false;}
+    }
+    const minimumWeightChange=pct(rotation.minimum_weight_change||0),tickers=[...new Set([...Object.keys(previousMix),...Object.keys(mix)])],weightChange=Math.max(...tickers.map(ticker=>Math.abs(Number(mix[ticker]||0)-Number(previousMix[ticker]||0))),0);
+    const changed=selectionChanged||weightChange>Math.max(minimumWeightChange,1e-12);
+    if(!selectionChanged&&!changed&&Object.keys(previousMix).length)mix={...previousMix};
+    this.rotationSelected=selected;this.rotationMix=mix;this.rotationHoldPeriods=!selectionChanged&&previousSelected.length?previousHold+1:selected.length?1:0;
+    const sleeve=String(rotation.sleeve),sleeveWeight=Number(decision.sleeve_weight||0),explanation=changed?rotationExplanation(sleeve,previousSelected,selected,mix,decision.candidates):`자동 자산 교체 검토: 변경 폭이 기준(${(minimumWeightChange*100).toFixed(1)}%p) 이하여서 기존 구성 유지`;
+    this.rotationDecision={...decision,selected:[...selected],mix:{...mix},explanation};
+    const target={...signal.target,[sleeve]:sleeveWeight*(mix[sleeve]||0)};
+    for(const candidate of rotation.candidates||[])target[String(candidate.ticker)]=sleeveWeight*(mix[String(candidate.ticker)]||0);
+    const declarative=String(signal.reason||'').split(/\s*\|\s*/).find(part=>/^DECLARATIVE_RULE_\d+$/.test(part))||null,reason=[declarative,changed?explanation:null].filter(Boolean).join(' | ')||null;
+    return{...signal,target,rebalance:Boolean(declarative)||changed,reason};
+  }
+  step.__rotationStabilityInstalled=true;StrategyClass.prototype.step=step;
+  const baseSnapshot=StrategyClass.prototype.snapshot,baseRestore=StrategyClass.prototype.restore;
+  if(baseSnapshot)StrategyClass.prototype.snapshot=function(){return{...baseSnapshot.call(this),rotationHoldPeriods:Number(this.rotationHoldPeriods||0)};};
+  if(baseRestore)StrategyClass.prototype.restore=function(snapshot){baseRestore.call(this,snapshot);this.rotationHoldPeriods=Number(snapshot?.rotationHoldPeriods||0);};
+  return StrategyClass;
+}
+function installFinalTargetRebalance(StrategyClass){
+  const baseStep=StrategyClass.prototype.step;
+  if(baseStep.__finalTargetRebalanceInstalled)return StrategyClass;
+  function step(date,market,portfolio){
+    const signal=baseStep.call(this,date,market,portfolio),match=String(signal.reason||'').match(/^DECLARATIVE_RULE_(\d+)(?:\s*\|\s*(.*))?$/);
+    if(!match)return signal;
+    const rule=this.def.rebalance?.[Number(match[1])-1];
+    if(!rule||evaluate(rule.when,this.context(market,portfolio,signal.target)))return signal;
+    const remainingReason=match[2]||null;
+    return{...signal,rebalance:Boolean(remainingReason),reason:remainingReason};
+  }
+  step.__finalTargetRebalanceInstalled=true;
+  StrategyClass.prototype.step=step;
+  return StrategyClass;
+}
+installRotationStability(Declarative);
+installFinalTargetRebalance(Declarative);
+
+function valuationWeightPortfolio(portfolio,valuationMarket){
+  const prices=Object.fromEntries(Object.entries(valuationMarket).map(([ticker,row])=>[ticker,row.close]));
+  return{weights:()=>portfolio.weights(prices)};
+}
+
 export function strategyTickers(definitions,definition){return dependencies(definition,new Map(definitions.map(def=>[def.strategy.id,def])));}
-export function runStrategy(definitions,definition,data){const all=new Map(definitions.map(def=>[def.strategy.id,def])),tickers=dependencies(definition,all),calculation=definition.source?all.get(definition.source):definition,fields=requiredMarketFields(calculation),rows=preparedRows(calculation,tickers,data,fields);if(!rows.length)throw Error('No common market-data period remains after indicator warm-up.');const runtime=resolve(definition,all),portfolio=new Portfolio();for(const row of rows){const opens=Object.fromEntries(Object.entries(row.valuationMarket).map(([t,v])=>[t,v.open]));portfolio.update(opens,row.date);const signal=runtime.step(row.date,row.market,portfolio);if(!portfolio.history.length)portfolio.start(signal.target,signal.days,row.date,signal.reason||'INITIAL');else if(signal.rebalance)portfolio.start(signal.target,signal.days,row.date,signal.reason||'RULE');portfolio.record(row.date,Object.fromEntries(Object.entries(row.valuationMarket).map(([t,v])=>[t,v.close])),signal.state);}const events=new Map(portfolio.rebalances.map(event=>[event.ExecutionDate||event.Date,event]));return portfolio.history.map(row=>events.has(row.date)?{...row,target:events.get(row.date).Target,executionDays:events.get(row.date).ExecutionDays,reason:events.get(row.date).Reason}:row);}
-export function strategySnapshot(definitions,definition,data){const all=new Map(definitions.map(def=>[def.strategy.id,def])),tickers=dependencies(definition,all),calculation=definition.source?all.get(definition.source):definition,fields=requiredMarketFields(calculation),rows=preparedRows(calculation,tickers,data,fields);if(!rows.length)throw Error('No common market-data period remains after indicator warm-up.');const runtime=resolve(definition,all),portfolio=new Portfolio();let last;for(const row of rows){const opens=Object.fromEntries(Object.entries(row.valuationMarket).map(([ticker,value])=>[ticker,value.open]));portfolio.update(opens,row.date);const signal=runtime.step(row.date,row.market,portfolio);if(!last)portfolio.start(signal.target,signal.days,row.date,'INITIAL');else if(signal.rebalance)portfolio.start(signal.target,signal.days,row.date,'RULE');const prices=Object.fromEntries(Object.entries(row.valuationMarket).map(([ticker,value])=>[ticker,value.close]));portfolio.record(row.date,prices,signal.state);last={date:row.date,prices};}return{...last,portfolio:portfolioSnapshot(portfolio),runtime:runtime.snapshot()};}
-export function runStrategyIncremental(definitions,definition,data,snapshot){const all=new Map(definitions.map(def=>[def.strategy.id,def])),tickers=dependencies(definition,all),calculation=definition.source?all.get(definition.source):definition,fields=requiredMarketFields(calculation),rows=preparedRows(calculation,tickers,data,fields,snapshot.date),runtime=resolve(definition,all),portfolio=restorePortfolio(snapshot.portfolio);runtime.restore(snapshot.runtime);const history=[];for(const row of rows){const opens=Object.fromEntries(Object.entries(row.valuationMarket).map(([ticker,value])=>[ticker,value.open]));portfolio.update(opens,row.date);const signal=runtime.step(row.date,row.market,portfolio);if(signal.rebalance)portfolio.start(signal.target,signal.days,row.date,signal.reason||'RULE');const prices=Object.fromEntries(Object.entries(row.valuationMarket).map(([ticker,value])=>[ticker,value.close]));portfolio.record(row.date,prices,signal.state);history.push({date:row.date,weights:portfolio.weights(prices),state:signal.state,target:signal.rebalance?signal.target:null,executionDays:signal.rebalance?signal.days:null,reason:signal.rebalance?(signal.reason||'RULE'):null});snapshot={date:row.date,prices,portfolio:portfolioSnapshot(portfolio),runtime:runtime.snapshot()};}return{history,snapshot};}
+export function runStrategy(definitions,definition,data){
+  const all=new Map(definitions.map(def=>[def.strategy.id,def])),tickers=dependencies(definition,all),calculation=definition.source?all.get(definition.source):definition,fields=requiredMarketFields(calculation),rows=preparedRows(calculation,tickers,data,fields);
+  if(!rows.length)throw Error('No common market-data period remains after indicator warm-up.');
+  const runtime=resolve(definition,all),portfolio=new Portfolio();
+  for(const row of rows){
+    const opens=Object.fromEntries(Object.entries(row.valuationMarket).map(([t,v])=>[t,v.open]));
+    portfolio.update(opens,row.date);
+    const signal=runtime.step(row.date,row.market,valuationWeightPortfolio(portfolio,row.valuationMarket));
+    if(!portfolio.history.length)portfolio.start(signal.target,signal.days,row.date,signal.reason||'INITIAL');
+    else if(signal.rebalance)portfolio.start(signal.target,signal.days,row.date,signal.reason||'RULE');
+    portfolio.record(row.date,Object.fromEntries(Object.entries(row.valuationMarket).map(([t,v])=>[t,v.close])),signal.state);
+  }
+  const events=new Map(portfolio.rebalances.map(event=>[event.ExecutionDate||event.Date,event]));
+  return portfolio.history.map(row=>events.has(row.date)?{...row,target:events.get(row.date).Target,executionDays:events.get(row.date).ExecutionDays,reason:events.get(row.date).Reason}:row);
+}
+export function strategySnapshot(definitions,definition,data){
+  const all=new Map(definitions.map(def=>[def.strategy.id,def])),tickers=dependencies(definition,all),calculation=definition.source?all.get(definition.source):definition,fields=requiredMarketFields(calculation),rows=preparedRows(calculation,tickers,data,fields);
+  if(!rows.length)throw Error('No common market-data period remains after indicator warm-up.');
+  const runtime=resolve(definition,all),portfolio=new Portfolio();let last;
+  for(const row of rows){
+    const opens=Object.fromEntries(Object.entries(row.valuationMarket).map(([ticker,value])=>[ticker,value.open]));
+    portfolio.update(opens,row.date);
+    const signal=runtime.step(row.date,row.market,valuationWeightPortfolio(portfolio,row.valuationMarket));
+    if(!last)portfolio.start(signal.target,signal.days,row.date,'INITIAL');else if(signal.rebalance)portfolio.start(signal.target,signal.days,row.date,'RULE');
+    const prices=Object.fromEntries(Object.entries(row.valuationMarket).map(([ticker,value])=>[ticker,value.close]));
+    portfolio.record(row.date,prices,signal.state);last={date:row.date,prices};
+  }
+  return{...last,portfolio:portfolioSnapshot(portfolio),runtime:runtime.snapshot()};
+}
+export function runStrategyIncremental(definitions,definition,data,snapshot){
+  const all=new Map(definitions.map(def=>[def.strategy.id,def])),tickers=dependencies(definition,all),calculation=definition.source?all.get(definition.source):definition,fields=requiredMarketFields(calculation),rows=preparedRows(calculation,tickers,data,fields,snapshot.date),runtime=resolve(definition,all),portfolio=restorePortfolio(snapshot.portfolio);
+  runtime.restore(snapshot.runtime);const history=[];
+  for(const row of rows){
+    const opens=Object.fromEntries(Object.entries(row.valuationMarket).map(([ticker,value])=>[ticker,value.open]));
+    portfolio.update(opens,row.date);
+    const signal=runtime.step(row.date,row.market,valuationWeightPortfolio(portfolio,row.valuationMarket));
+    if(signal.rebalance)portfolio.start(signal.target,signal.days,row.date,signal.reason||'RULE');
+    const prices=Object.fromEntries(Object.entries(row.valuationMarket).map(([ticker,value])=>[ticker,value.close]));
+    portfolio.record(row.date,prices,signal.state);
+    history.push({date:row.date,weights:portfolio.weights(prices),state:signal.state,target:signal.rebalance?signal.target:null,executionDays:signal.rebalance?signal.days:null,reason:signal.rebalance?(signal.reason||'RULE'):null});
+    snapshot={date:row.date,prices,portfolio:portfolioSnapshot(portfolio),runtime:runtime.snapshot()};
+  }
+  return{history,snapshot};
+}
 export function buildTdf2050Proxy(components){const tickers=Object.keys(TDF2050_PROXY_COMPONENT_WEIGHTS),maps=Object.fromEntries(tickers.map(t=>[t,new Map(components[t].map(row=>[row.Date,row]))])),dates=[...maps[tickers[0]].keys()].filter(date=>tickers.every(t=>maps[t].has(date))).sort(),weights={...TDF2050_PROXY_COMPONENT_WEIGHTS},target={...weights},out=[];let previous=null,value=100,month='';for(let i=1;i<dates.length;i++){const date=dates[i],market=Object.fromEntries(tickers.map(t=>[t,maps[t].get(dates[i-1])])),nextMonth=date.slice(0,7);if(!previous){out.push({Date:date,Open:100,High:100,Low:100,Close:100,Volume:0});previous=market;month=nextMonth;continue;}if(month!==nextMonth)Object.assign(weights,target);const price=field=>value*tickers.reduce((sum,t)=>sum+weights[t]*Number(market[t][field])/Number(previous[t].Close),0),open=price('Open'),close=price('Close');out.push({Date:date,Open:open,High:Math.max(price('High'),open,close),Low:Math.min(price('Low'),open,close),Close:close,Volume:0});const contributions=Object.fromEntries(tickers.map(t=>[t,weights[t]*Number(market[t].Close)/Number(previous[t].Close)])),total=Object.values(contributions).reduce((a,b)=>a+b,0);for(const t of tickers)weights[t]=contributions[t]/total;previous=market;value=close;month=nextMonth;}return addIndicators(out);}

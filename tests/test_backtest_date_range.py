@@ -7,7 +7,8 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from backtest import Backtest
+from backtest import Backtest, _ValuationAwarePortfolio
+from portfolio import Portfolio
 from runner import Runner
 
 
@@ -29,6 +30,19 @@ class MarketFieldBacktest(InMemoryBacktest):
 
 
 class BacktestDateRangeTests(unittest.TestCase):
+    def test_local_signal_portfolio_weights_use_valuation_prices(self):
+        portfolio = Portfolio()
+        portfolio.cash = 0.0
+        portfolio.positions = {"QQQ": 0.0005, "KOSPI": 0.005}
+        view = _ValuationAwarePortfolio(
+            portfolio, {"QQQ": 1000.0, "KOSPI": 100.0}
+        )
+
+        weights = view.weights({"QQQ": 100.0, "KOSPI": 100.0})
+
+        self.assertAlmostEqual(weights["QQQ"], 0.5)
+        self.assertAlmostEqual(weights["KOSPI"], 0.5)
+
     def test_market_snapshot_includes_disparity60(self):
         backtest = MarketFieldBacktest(
             DummyStrategy(), tickers=("QQQ",), start_date="2012-01-01"
