@@ -18,6 +18,20 @@ from portfolio import Portfolio
 from strategy_domain import MarketSnapshot, StrategyEngine, StrategyEvaluation
 
 
+class _ValuationAwarePortfolio:
+    """Expose portfolio weights at valuation prices while signals stay local."""
+
+    def __init__(self, portfolio, prices):
+        self._portfolio = portfolio
+        self._prices = prices
+
+    def weights(self, _signal_prices):
+        return self._portfolio.weights(self._prices)
+
+    def __getattr__(self, name):
+        return getattr(self._portfolio, name)
+
+
 class Backtest:
 
     def __init__(
@@ -321,8 +335,15 @@ class Backtest:
 
             prices = self.get_prices(row, field="Close")
             market = self.get_market(self.market_data.loc[date])
+            evaluation_portfolio = self.portfolio
+            if getattr(
+                self.strategy, "valuation_signal_currency", "KRW"
+            ) == "LOCAL":
+                evaluation_portfolio = _ValuationAwarePortfolio(
+                    self.portfolio, prices
+                )
             step = self.strategy_engine.advance(
-                MarketSnapshot(date, market), self.portfolio
+                MarketSnapshot(date, market), evaluation_portfolio
             )
             signal = step.evaluation
             self.last_evaluation = signal
