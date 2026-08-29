@@ -1,13 +1,11 @@
 strategy:
   id: state-conditioned-cross-asset-rotation
   name: State-conditioned cross-asset rotation
-  version: 3
+  version: 5
   dsl_version: 1
   enabled: true
 
 assets:
-  # Keep the original tickers. Signals use each asset's local price; portfolio
-  # values are converted to KRW in memory.
   required:
     - QQQ
     - TDF2050_PROXY
@@ -21,13 +19,8 @@ assets:
     - VEA
     - VWO
   observations: [SPY]
-  risk: [QQQ]
-
-valuation:
-  currency: KRW
-  fx_ticker: KRW=X
-  foreign_assets: [QQQ, TDF2050_PROXY, BIL, GLD, SHY, IEF, VEA, VWO, SPY]
-  signal_currency: LOCAL
+  # 주식성 자산의 합계는 로테이션 후에도 70%를 넘지 않는다.
+  risk: [QQQ, 069500.KS, VEA, VWO]
 
 variables:
   risk_off_score: >
@@ -109,8 +102,8 @@ state:
         confirm: 3
 
 target:
-  # The QQQ/TDF state allocation is intentionally identical to Strategy 15.
-  # Only the BIL sleeve below is eligible for automatic substitution.
+  # QQQ/TDF의 국면별 비중은 전략 15와 동일하게 유지한다.
+  # 아래 BIL 비중만 자동 대체 대상이다.
   - when: state.market_mode == 'BEAR'
     weights:
       QQQ: 0%
@@ -153,27 +146,11 @@ target:
       VWO: 0%
 
 rotation:
-  # Run automatically on the first trading day of each month while the BIL
-  # sleeve exists. It never changes QQQ or TDF weights.
-  sleeve: BIL
-  check: monthly
-  candidates:
-    - {ticker: GLD, group: GOLD, asset_class: GOLD}
-    - {ticker: SHY, group: US_SHORT_BOND, asset_class: BOND}
-    - {ticker: IEF, group: US_INTERMEDIATE_BOND, asset_class: BOND}
-    - {ticker: 114100.KS, group: KR_SHORT_BOND, asset_class: BOND}
-    - {ticker: 148070.KS, group: KR_INTERMEDIATE_BOND, asset_class: BOND}
-    - {ticker: 069500.KS, group: KR_EQUITY, asset_class: EQUITY}
-    - {ticker: VEA, group: DEVELOPED_EQUITY, asset_class: EQUITY}
-    - {ticker: VWO, group: EM_EQUITY, asset_class: EQUITY}
-  top_n: 2
-  max_single_sleeve_share: 50%
-  max_gold_sleeve_share: 30%
-  max_equity_sleeve_share: 30%
-  # Keep an eligible incumbent unless a challenger is materially stronger.
-  switch_score_margin: 3
-  minimum_hold_periods: 3
-  minimum_weight_change: 10%
+  # 이 안전자산 비중만 대체한다. QQQ와 TDF 비중은 여기서 바꾸지 않는다.
+  replace: BIL
+  review: monthly
+  # 장기 지표가 준비된 자산부터 자동으로 비교 대상에 포함한다.
+  assets: [GLD, SHY, IEF, 114100.KS, 148070.KS, 069500.KS, VEA, VWO]
 
 rebalance:
   - check: daily

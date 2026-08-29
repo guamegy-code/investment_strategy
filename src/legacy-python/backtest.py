@@ -166,7 +166,7 @@ class Backtest:
         return df
 
     def _apply_valuation(self, frames):
-        """Convert configured foreign assets in memory; never create _KRW CSVs."""
+        """Convert automatically detected foreign assets in memory; no _KRW CSVs."""
         foreign_assets = tuple(getattr(self.strategy, "foreign_asset_tickers", ()))
         fx_ticker = getattr(self.strategy, "valuation_fx_ticker", None)
         if not foreign_assets:
@@ -197,11 +197,23 @@ class Backtest:
     # 전체 데이터 병합
     # ==================================================
     @staticmethod
-    def _merge_frames(frames, tickers):
+    def _merge_frames(frames, tickers, optional_tickers=()):
+        optional = set(optional_tickers)
+        required_tickers = [ticker for ticker in tickers if ticker not in optional]
+        if not required_tickers:
+            raise ValueError("at least one required market-data ticker is needed")
         merged = None
-        for ticker in tickers:
+        for ticker in required_tickers:
             frame = frames[ticker].add_prefix(f"{ticker}_")
             merged = frame if merged is None else merged.join(frame, how="inner")
+        for ticker in tickers:
+            if ticker not in optional:
+                continue
+            frame = frames[ticker].add_prefix(f"{ticker}_")
+            # A rotation candidate becomes eligible only after its own history
+            # is ready.  Forward-fill non-trading days, but never invent data
+            # before the instrument's first available observation.
+            merged = merged.join(frame, how="left").ffill()
         merged.sort_index(inplace=True)
         return merged
 
@@ -209,9 +221,16 @@ class Backtest:
         frames = {}
         for ticker in self.tickers:
             frames[ticker] = self.load_one(ticker)
-        local_market = self._merge_frames(frames, self.tickers)
+        optional_tickers = tuple(getattr(
+            self.strategy, "rotation_candidate_tickers", ()
+        ))
+        local_market = self._merge_frames(
+            frames, self.tickers, optional_tickers
+        )
         valued_frames = self._apply_valuation(dict(frames))
-        merged = self._merge_frames(valued_frames, self.tickers)
+        merged = self._merge_frames(
+            valued_frames, self.tickers, optional_tickers
+        )
         if self.start_date is not None:
             merged = merged.loc[merged.index >= self.start_date]
             local_market = local_market.loc[local_market.index >= self.start_date]
@@ -232,7 +251,10 @@ class Backtest:
             str(column).casefold(): column for column in readiness_source.columns
         }
         readiness_columns = []
+        optional = set(optional_tickers)
         for ticker, fields in required_fields.items():
+            if ticker in optional:
+                continue
             for field in fields:
                 expected = f"{ticker}_{field}".casefold()
                 column = columns_by_name.get(expected)
@@ -261,7 +283,9 @@ class Backtest:
         holding_tickers = getattr(self.strategy, "holding_tickers", self.tickers)
         for ticker in holding_tickers:
             column = f"{ticker}_{field}"
-            prices[ticker] = row.get(column, row[f"{ticker}_Close"])
+            price = row.get(column, row[f"{ticker}_Close"])
+            if pd.notna(price):
+                prices[ticker] = price
         return prices
 
  

@@ -871,9 +871,9 @@ class ResearchViewModel:
         )
         weights = weights.reindex(indexed.index).ffill().fillna(0.0)
         events = [
-            (pd.Timestamp(event.get("ExecutionDate") or event["Date"]), event)
+            (pd.Timestamp(event["ExecutionDate"]), event)
             for event in result.get("rebalances", [])
-            if event.get("Date")
+            if event.get("ExecutionDate") is not None
         ]
         if start:
             events = [

@@ -143,6 +143,34 @@ function installFinalTargetRebalance(StrategyClass){const baseStep=StrategyClass
 installRotation(Declarative);
 installRotationStability(Declarative);
 installFinalTargetRebalance(Declarative);
+function applyRotationRiskCap(def,target){
+  const rotation=def.rotation,riskAssets=new Set(def.assets?.risk||[]),cap=.70;
+  if(!rotation||!riskAssets.size)return {target,capped:false};
+  const riskWeight=[...riskAssets].reduce((sum,ticker)=>sum+Number(target[ticker]||0),0);
+  if(riskWeight<=cap+1e-12)return {target,capped:false};
+  const rotationRiskAssets=(rotation.candidates||[]).map(candidate=>String(candidate.ticker)).filter(ticker=>riskAssets.has(ticker));
+  const reducible=rotationRiskAssets.reduce((sum,ticker)=>sum+Number(target[ticker]||0),0),excess=riskWeight-cap;
+  if(reducible+1e-12<excess)throw Error('기본 목표 위험자산이 로테이션 위험 한도 70%를 초과합니다.');
+  const adjusted={...target},scale=Math.max(0,(reducible-excess)/reducible);
+  for(const ticker of rotationRiskAssets)adjusted[ticker]=Number(adjusted[ticker]||0)*scale;
+  adjusted[String(rotation.sleeve)]=Number(adjusted[String(rotation.sleeve)]||0)+excess;
+  return {target:adjusted,capped:true};
+}
+function installRotationRiskCap(StrategyClass){
+  const baseStep=StrategyClass.prototype.step;
+  function step(date,market,portfolio){
+    const signal=baseStep.call(this,date,market,portfolio),result=applyRotationRiskCap(this.def,signal.target);
+    const riskAssets=this.def.assets?.risk||[];
+    if(!result.capped)return signal;
+    const riskWeight=riskAssets.reduce((sum,ticker)=>sum+Number(result.target[ticker]||0),0);
+    if(this.rotationDecision)this.rotationDecision={...this.rotationDecision,risk_cap:.70,risk_weight:riskWeight};
+    const notes=[];
+    if(result.capped)notes.push('위험자산 합계가 70%를 넘지 않도록 초과분을 안전 슬리브에 유지');
+    return {...signal,target:result.target,reason:[signal.reason,...notes].filter(Boolean).join(' | ')};
+  }
+  StrategyClass.prototype.step=step;
+}
+installRotationRiskCap(Declarative);
 function stateName(value){if(typeof value==='string')return value.split('.').at(-1);return ''}
 function mapProductTarget(sourceTarget,def,source,actual){const target={},riskAssets=new Set(source.assets?.risk||[]),riskCap=Number(source.parameters?.canonical_risk_weight??.70);for(const [asset,weight]of Object.entries(sourceTarget)){const products=def.products?.[asset]||{[asset]:1},items=Object.entries(products),currentWeight=items.reduce((sum,[product])=>sum+(actual[product]||0),0),preserveMix=items.length>1&&riskAssets.has(asset)&&currentWeight>riskCap+1e-8&&weight>riskCap+1e-8;let allocated=0;for(const [index,[product,configuredShare]]of items.entries()){const share=preserveMix?(actual[product]||0)/currentWeight:pct(configuredShare),productWeight=index===items.length-1?weight-allocated:weight*share;target[product]=(target[product]||0)+productWeight;allocated+=productWeight;}}return target;}
 function resolve(def, all){if(!def.source)return new Declarative(def);const source=all[def.source];if(!source)throw Error('source 전략을 찾을 수 없습니다: '+def.source);const runtime=new Declarative(source);return {step(date,market,portfolio){const prices=Object.fromEntries(Object.entries(market).map(([t,r])=>[t,r.close])),actual=portfolio.weights(prices),virtual={weights:()=>Object.fromEntries((source.assets.required||[]).map(asset=>[asset,Object.entries(def.products[asset]||{[asset]:1}).reduce((s,[p])=>s+(actual[p]||0),0)]))};const signal=runtime.step(date,market,virtual),target=mapProductTarget(signal.target,def,source,actual);return {...signal,target};}};}
@@ -512,7 +540,7 @@ renderIndicators=async function(){await visibleYIndicatorRenderer();bindVisibleY
 // Imported strategies use this single preparation path: download, calculate,
 // validate and cache. It intentionally sits after the dashboard compatibility
 // wrappers above, so existing chart behavior is left unchanged.
-const BROWSER_ENGINE_VERSION = '2026-08-29.3';
+const BROWSER_ENGINE_VERSION = '2026-08-29.9';
 const FX_TICKER_BY_SUFFIX = {'.KS': 'KRW=X', '.KQ': 'KRW=X'};
 const TDF2050_PROXY_COMPONENT_WEIGHTS = {SPY:.4081,VXUS:.3339,BND:.258};
 const KRW_ADJUSTED_SUFFIX = '_KRW';
@@ -723,6 +751,10 @@ async function loadHostedStrategies(){
   }));
   definitions=loaded;
 }
+const DEFAULT_WEB_START_DATE='2012-01-03';
+function defaultStartDate(first,last){
+  return DEFAULT_WEB_START_DATE>=first&&DEFAULT_WEB_START_DATE<=last?DEFAULT_WEB_START_DATE:first;
+}
 function populateAnalysisPeriod(){
   const dates=[...dashboardResults.values()]
     .flatMap(([,history])=>history.map(row=>row.date))
@@ -730,7 +762,7 @@ function populateAnalysisPeriod(){
     .sort();
   if(!dates.length)return;
   const start=$('start-date'),end=$('end-date'),first=dates[0],last=dates.at(-1);
-  if(!start.value||start.value<first||start.value>last)start.value=first;
+  if(!start.value||start.value<first||start.value>last)start.value=defaultStartDate(first,last);
   if(!end.value||end.value<first||end.value>last)end.value=last;
 }
 const periodAwareRunDashboard=runDashboard;
@@ -809,3 +841,51 @@ renderIndicators=async function(){
   await Plotly.restyle(plot,{name:labels,meta:metadata});
   localizeIndicatorProductNames();
 };
+
+const defaultStartIndicatorControls=setupIndicatorControls;
+setupIndicatorControls=function(){
+  defaultStartIndicatorControls();
+  const state=loadUiState(),start=$('indicator-start-date'),end=$('indicator-end-date');
+  if(!state.indicatorStart&&start.value&&end.value)start.value=defaultStartDate(start.value,end.value);
+};
+
+// The indicator chart used to infer a rebalance from a daily 2%p weight move.
+// Weight drift is not an execution: show only records created when an order ran.
+const executedRebalanceIndicatorRenderer=renderIndicators;
+renderIndicators=async function(){
+  await executedRebalanceIndicatorRenderer();
+  const plot=$('indicator-plot'),selected=$('indicator-strategy').value,entry=dashboardResults.get(selected);
+  if(!plot?.data||!entry)return;
+  const staleMarkers=plot.data.map((trace,index)=>trace.mode==='markers'&&trace.meta?.excludeTooltip?index:null).filter(index=>index!==null);
+  if(staleMarkers.length)await Plotly.deleteTraces(plot,staleMarkers);
+  const start=$('indicator-start-date').value,end=$('indicator-end-date').value;
+  const history=entry[1].filter(row=>(!start||row.date>=start)&&(!end||row.date<=end));
+  const events=history.map((row,index)=>({row,index})).filter(({row})=>Boolean(row.target));
+  const strategyTrace=plot.data.find(trace=>trace.meta?.isStrategySeries);
+  if(!events.length||!strategyTrace||!history.length)return;
+  const base=Number(history[0].value);
+  await Plotly.addTraces(plot,{
+    type:'scattergl',x:events.map(item=>item.row.date),y:events.map(item=>item.row.value/base*100),
+    name:'\ub9ac\ubc38\ub7f0\uc2f1 \uc2e4\ud589',showlegend:false,xaxis:strategyTrace.xaxis,yaxis:strategyTrace.yaxis,
+    mode:'markers',marker:{symbol:'diamond',size:7,color:'#F23645'},meta:{excludeTooltip:true,panel:'price',isExecutedRebalance:true},hoverinfo:'skip',
+  });
+};
+
+const SIMPLE_ROTATION_ASSET_CLASSES={GLD:'GOLD','069500.KS':'EQUITY',VEA:'EQUITY',VWO:'EQUITY'};
+function normalizeSimpleRotation(def){
+  const rotation=def?.rotation;
+  if(!rotation||!Object.hasOwn(rotation,'replace'))return def;
+  const allowed=new Set(['replace','review','assets']),unknown=Object.keys(rotation).filter(key=>!allowed.has(key));
+  if(unknown.length)throw Error(`rotation의 지원하지 않는 항목: ${unknown.join(', ')}`);
+  if(!Array.isArray(rotation.assets)||!rotation.assets.length||rotation.assets.some(ticker=>typeof ticker!=='string'||!ticker))throw Error('rotation.assets에는 종목 코드를 하나 이상 넣어야 합니다.');
+  def.rotation={sleeve:rotation.replace,check:rotation.review||'monthly',candidates:rotation.assets.map(ticker=>({ticker,group:ticker,asset_class:SIMPLE_ROTATION_ASSET_CLASSES[ticker]||'BOND'})),top_n:2,max_single_sleeve_share:.5,max_gold_sleeve_share:.3,max_equity_sleeve_share:.3,switch_score_margin:3,minimum_hold_periods:3,minimum_weight_change:.1};
+  return def;
+}
+function normalizeAutomaticValuation(def){
+  if(!def||def.valuation||def.source||!def.rotation)return def;
+  const foreign=(def.assets?.required||[]).filter(ticker=>ticker!=='KRW=X'&&!/\.(KS|KQ)$/i.test(String(ticker)));
+  if(foreign.length)def.valuation={currency:'KRW',fx_ticker:'KRW=X',foreign_assets:foreign,signal_currency:'LOCAL'};
+  return def;
+}
+const simpleRotationValidator=validateStrategy;
+validateStrategy=function(def,all=definitions){return simpleRotationValidator(normalizeAutomaticValuation(normalizeSimpleRotation(def)),all);};

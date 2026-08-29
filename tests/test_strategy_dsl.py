@@ -752,6 +752,25 @@ class DeclarativeStrategyTests(unittest.TestCase):
         self.assertFalse(strategy.rotation_decision["candidates"]["KOSPI"]["eligible"])
         self.assertIn("자동 자산 교체", signal["reason"])
 
+    def test_simple_rotation_uses_ticker_list_and_safe_defaults(self):
+        configured = rotation_definition()
+        configured["rotation"] = {
+            "replace": "BIL",
+            "review": "monthly",
+            "assets": ["GLD", "SHY", "KOSPI"],
+        }
+
+        strategy = DeclarativeStrategy(configured)
+
+        self.assertEqual(strategy.rotation["sleeve"], "BIL")
+        self.assertEqual(strategy.rotation["check"], "monthly")
+        self.assertEqual(strategy.rotation["top_n"], 2)
+        self.assertEqual(
+            [candidate["ticker"] for candidate in strategy.rotation["candidates"]],
+            ["GLD", "SHY", "KOSPI"],
+        )
+        self.assertEqual(strategy.rotation["candidates"][0]["asset_class"], "GOLD")
+
     def test_rotation_reviews_monthly_and_forces_a_trade_when_selection_changes(self):
         strategy = DeclarativeStrategy(rotation_definition())
         portfolio = PortfolioStub()
@@ -776,6 +795,27 @@ class DeclarativeStrategyTests(unittest.TestCase):
         self.assertAlmostEqual(changed["target"]["BIL"], 0.32)
         self.assertEqual(strategy.rotation_decision["previous_selected"], ("GLD", "SHY"))
         self.assertEqual(strategy.rotation_decision["selected"], ("GLD", "KOSPI"))
+
+    def test_rotation_caps_declared_risk_assets_at_seventy_percent(self):
+        configured = rotation_definition()
+        configured["assets"]["risk"] = ["QQQ", "KOSPI"]
+        configured["target"] = [{"weights": {
+            "QQQ": "60%", "TDF": "0%", "BIL": "40%",
+            "GLD": "0%", "SHY": "0%", "KOSPI": "0%",
+        }}]
+        strategy = DeclarativeStrategy(configured)
+
+        signal = strategy.evaluate(
+            pd.Timestamp("2025-01-02"),
+            rotation_market(shy_eligible=False, kospi_eligible=True),
+            PortfolioStub(),
+        )
+
+        self.assertAlmostEqual(signal["target"]["QQQ"] + signal["target"]["KOSPI"], 0.70)
+        self.assertAlmostEqual(signal["target"]["KOSPI"], 0.10)
+        self.assertAlmostEqual(signal["target"]["BIL"], 0.18)
+        self.assertEqual(strategy.rotation_decision["risk_cap"], 0.70)
+
 
     def test_rotation_keeps_incumbent_when_challenger_advantage_is_small(self):
         configured = rotation_definition()
