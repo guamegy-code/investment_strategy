@@ -107,10 +107,10 @@ test("loadPriceRange returns only the requested ticker from the static fallback"
   assert.equal(spy.stale, true);
   assert.deepEqual(spy.rows.map(row => row.close), [102]);
   assert.deepEqual(qqq.rows.map(row => row.close), [203]);
-  assert.deepEqual(writes.map(([key]) => key).sort(), ["prices:QQQ", "prices:SPY"]);
+  assert.deepEqual(writes, []);
 });
 
-test("loadPriceRange backfills history when KV contains only recent rows", async (context) => {
+test("loadPriceRange combines R2 history with the small recent KV overlay", async (context) => {
   const originalFetch = globalThis.fetch;
   context.after(() => { globalThis.fetch = originalFetch; });
   globalThis.fetch = async () => new Response("rate limited", {status: 429});
@@ -122,8 +122,10 @@ test("loadPriceRange backfills history when KV contains only recent rows", async
   }];
   const writes = [];
   const env = {MARKET_DATA: {
-    get: async () => JSON.stringify(cached),
+    get: async key => key === "recent-prices:QQQ" ? JSON.stringify(cached) : null,
     put: async (key, value) => { writes.push([key, JSON.parse(value)]); },
+  }, MARKET_HISTORY: {
+    get: async () => ({body: new Response(gzipSync("Date,Open,High,Low,Close,Volume\n2024-01-02,200,204,198,203,2000\n")).body}),
   }};
 
   const result = await loadPriceRange(
@@ -131,14 +133,31 @@ test("loadPriceRange backfills history when KV contains only recent rows", async
     null,
     "QQQ",
     Math.floor(Date.parse("2024-01-01") / 1000),
-    Math.floor(Date.parse("2026-08-26") / 1000),
+    Math.floor(Date.parse("2026-08-25T12:00:00Z") / 1000),
     async () => fallback,
   );
 
   assert.equal(result.stale, true);
   assert.deepEqual(result.rows.map(row => row.date), ["2024-01-02", "2026-08-25"]);
-  assert.equal(writes.at(-1)[0], "prices:QQQ");
-  assert.deepEqual(writes.at(-1)[1].map(row => row.date), ["2024-01-02", "2026-08-25"]);
+  assert.deepEqual(writes, []);
+});
+
+test("loadPriceRange skips a KV write when Yahoo returns no new price row", async (context) => {
+  const originalFetch = globalThis.fetch;
+  context.after(() => { globalThis.fetch = originalFetch; });
+  globalThis.fetch = async () => Response.json(chartPayload);
+  const writes = [];
+  const env = {
+    MARKET_DATA: {get: async () => null, put: async (...args) => { writes.push(args); }},
+    MARKET_HISTORY: {
+      get: async () => ({body: new Response(gzipSync("Date,Open,High,Low,Close,Volume\n2024-01-01,99.01960784313727,101.99019607843138,98.02941176470588,101,1000\n")).body}),
+    },
+  };
+
+  const result = await loadPriceRange(env, null, "SPY", 1_704_067_200, 1_704_240_000);
+
+  assert.equal(result.rows.length, 1);
+  assert.deepEqual(writes, []);
 });
 
 test("loadPriceRange builds a KRW-adjusted price series from asset and FX rows", async (context) => {
