@@ -1,26 +1,20 @@
 strategy:
-  id: state-conditioned-cross-asset-rotation
-  name: State-conditioned cross-asset rotation
-  version: 7
+  id: band-7030-tdf-state-bil-gld-overlay
+  name: 70/30 TDF State BIL + GLD Relative Strength
+  version: 1
   dsl_version: 1
   enabled: true
 
+# Strategy 17 is an independent strategy definition. It copies strategy 15's
+# market-state rules and adds a small, confirmed GLD overlay funded only from QQQ.
 assets:
-  required:
-    - QQQ
-    - TDF2050_PROXY
-    - BIL
-    - GLD
-    - SHY
-    - IEF
-    - 114100.KS
-    - 148070.KS
-    - 069500.KS
-    - VEA
-    - VWO
+  required: [QQQ, TDF2050_PROXY, BIL, GLD]
   observations: [SPY]
-  # 주식성 자산의 합계는 로테이션 후에도 70%를 넘지 않는다.
-  risk: [QQQ, 069500.KS, VEA, VWO]
+  risk: [QQQ]
+
+parameters:
+  maximum_gld_weight: 0.05
+  minimum_gld_hold_days: 20
 
 variables:
   risk_off_score: >
@@ -54,6 +48,17 @@ variables:
   bull_reentry_allowed: >
     QQQ.close > QQQ.ema55
     and QQQ.roc60 > 0
+
+  gld_relative_strength_count: >
+    count(
+      GLD.roc60 > QQQ.roc60,
+      GLD.roc120 > QQQ.roc120,
+      GLD.roc252 > QQQ.roc252
+    )
+
+  gld_overlay_signal: >
+    GLD.close > GLD.ema200
+    and variables.gld_relative_strength_count >= 2
 
 state:
   market_mode:
@@ -101,8 +106,44 @@ state:
         set: CAUTION
         confirm: 3
 
+  # This counter is deliberately separate from the signal confirmation.
+  # It prevents a newly opened GLD position from being closed too quickly.
+  gold_hold_days:
+    initial: 0
+    rules:
+      - when: >
+          state.gold_overlay == 'ON'
+          and state.market_mode in ['BULL', 'CAUTION', 'RECOVERY']
+          and not variables.structural_bear
+        set: "=min(state.gold_hold_days + 1, 10000)"
+      - otherwise: true
+        set: 0
+
+  gold_overlay:
+    initial: 'OFF'
+    rules:
+      - when: >
+          state.gold_overlay == 'OFF'
+          and state.market_mode in ['BULL', 'CAUTION', 'RECOVERY']
+          and not variables.structural_bear
+          and variables.gld_overlay_signal
+        set: 'ON'
+        confirm: 5
+      - when: >
+          state.gold_overlay == 'ON'
+          and (
+            state.market_mode == 'BEAR'
+            or variables.structural_bear
+          )
+        set: 'OFF'
+      - when: >
+          state.gold_overlay == 'ON'
+          and state.gold_hold_days >= parameters.minimum_gld_hold_days
+          and not variables.gld_overlay_signal
+        set: 'OFF'
+        confirm: 5
+
 target:
-  # BEAR 확인을 기다리는 동안에는 위험자산을 먼저 줄이고 BIL을 유지한다.
   - when: >
       state.market_mode != 'BEAR'
       and variables.structural_bear
@@ -110,33 +151,55 @@ target:
       QQQ: 0%
       TDF2050_PROXY: 0%
       BIL: 100%
+      GLD: 0%
 
   - when: state.market_mode == 'BEAR'
     weights:
       QQQ: 0%
       TDF2050_PROXY: 20%
       BIL: 80%
+      GLD: 0%
+
+  - when: >
+      state.market_mode == 'RECOVERY'
+      and state.gold_overlay == 'ON'
+    weights:
+      QQQ: round(60% - parameters.maximum_gld_weight, 10)
+      TDF2050_PROXY: 30%
+      BIL: 10%
+      GLD: parameters.maximum_gld_weight
 
   - when: state.market_mode == 'RECOVERY'
     weights:
       QQQ: 60%
       TDF2050_PROXY: 30%
       BIL: 10%
+      GLD: 0%
+
+  - when: state.gold_overlay == 'ON'
+    weights:
+      QQQ: round(70% - parameters.maximum_gld_weight, 10)
+      TDF2050_PROXY: 30%
+      BIL: 0%
+      GLD: parameters.maximum_gld_weight
 
   - weights:
       QQQ: 70%
       TDF2050_PROXY: 30%
       BIL: 0%
-
-rotation:
-  # structural_bear 방어 중에는 후보 교체를 멈추고 BIL을 그대로 유지한다.
-  replace: BIL
-  review: monthly
-  suspend_when: variables.structural_bear
-  # 장기 지표가 준비된 자산부터 자동으로 비교 대상에 포함한다.
-  assets: [GLD, SHY, IEF, 114100.KS, 148070.KS, 069500.KS, VEA, VWO]
+      GLD: 0%
 
 rebalance:
+  # A 5% overlay is below the normal 7.5% band, so a confirmed overlay state
+  # change must explicitly start a rebalance.
+  - check: daily
+    when: >
+      changed(state.gold_overlay)
+      and (
+        state.gold_overlay == 'ON'
+        or portfolio.weight.GLD > 0
+      )
+
   - check: daily
     when: target_deviation() >= 7.5%
 

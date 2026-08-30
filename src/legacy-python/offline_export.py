@@ -328,6 +328,9 @@ def export_html(
         .replace("__RUNTIME__", runtime)
         .replace("__CSS__", css)
         .replace("__PLOTLY__", plotly_js)
+        .replace('<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.css">', '')
+        .replace('<script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13"></script>', '')
+        .replace('<script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/l10n/ko.js"></script>', '')
     )
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(document, encoding="utf-8")
@@ -343,7 +346,7 @@ def export_static_site(
     data_proxy: str | None = None,
     data_dir: Path | None = None,
 ) -> Path:
-    """Write a Pages bundle with optional local market-data fallback."""
+    """Write a small Pages bundle; market-data fallback is explicit opt-in."""
     strategies_dir = output_dir / "strategies"
     assets_dir = output_dir / "assets"
     strategies_dir.mkdir(parents=True, exist_ok=True)
@@ -383,13 +386,17 @@ def export_static_site(
     legacy_tdf_proxy = output_dir / "data" / "TDF2050_PROXY.csv"
     if legacy_tdf_proxy.is_file():
         legacy_tdf_proxy.unlink()
+    legacy_strategy_archive = output_dir / "strategies.zip"
+    if legacy_strategy_archive.is_file():
+        legacy_strategy_archive.unlink()
 
+    market_data_file = output_dir / "market-data.json.gz"
+    fallback_dir = output_dir / "market-data"
     data_url = ""
     market_data_version = "on-demand-v2"
     if data_dir is not None:
         compressed = _compressed_market_data(data_dir)
-        (output_dir / "market-data.json.gz").write_bytes(compressed)
-        fallback_dir = output_dir / "market-data"
+        market_data_file.write_bytes(compressed)
         if fallback_dir.exists():
             shutil.rmtree(fallback_dir)
         fallback_dir.mkdir()
@@ -399,6 +406,13 @@ def export_static_site(
                 target.write(source.read_bytes())
         data_url = "./market-data.json.gz"
         market_data_version = hashlib.sha256(compressed).hexdigest()[:16]
+    else:
+        # Hosted Pages deployments use the data proxy.  Remove fallback files
+        # left by an earlier offline export so they cannot bloat a deployment.
+        if market_data_file.exists():
+            market_data_file.unlink()
+        if fallback_dir.exists():
+            shutil.rmtree(fallback_dir)
 
     bundle = json.dumps({
         "strategies": [],
@@ -414,6 +428,9 @@ def export_static_site(
     document = (
         template.replace("__BUNDLE__", bundle)
         .replace("__CSS__", '@import url("./assets/app.css");')
+        .replace('<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.css">', '')
+        .replace('<script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13"></script>', '')
+        .replace('<script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/l10n/ko.js"></script>', '')
         .replace("<script>__PLOTLY__</script>", '<script src="./assets/plotly.min.js"></script>')
         .replace("<script>__RUNTIME__</script>", '<script src="./app.js"></script>')
     )
@@ -456,6 +473,11 @@ def main(argv=None) -> None:
         type=Path,
         help="write a small Pages-ready web bundle to this directory",
     )
+    parser.add_argument(
+        "--include-market-data-fallback",
+        action="store_true",
+        help="include full market-data fallback files in a static-site export",
+    )
     args = parser.parse_args(argv)
     if args.materialize_web_sources:
         materialize_web_sources()
@@ -465,7 +487,7 @@ def main(argv=None) -> None:
         path = export_static_site(
             args.static_site,
             data_proxy=args.data_proxy,
-            data_dir=DATA_DIR,
+            data_dir=DATA_DIR if args.include_market_data_fallback else None,
         )
         print(f"Created static strategy site: {path}")
         return

@@ -137,7 +137,6 @@ def rotation_definition():
         },
         "target": [{"weights": {
             "QQQ": "0%", "TDF": "20%", "BIL": "80%",
-            "GLD": "0%", "SHY": "0%", "KOSPI": "0%",
         }}],
         "rotation": {
             "sleeve": "BIL",
@@ -744,6 +743,7 @@ class DeclarativeStrategyTests(unittest.TestCase):
         self.assertAlmostEqual(signal["target"]["GLD"], 0.20)
         self.assertAlmostEqual(signal["target"]["SHY"], 0.40)
         self.assertAlmostEqual(signal["target"]["BIL"], 0.20)
+        self.assertEqual(signal["target"]["KOSPI"], 0.0)
         self.assertEqual(strategy.rotation_decision["selected"], ("GLD", "SHY"))
         self.assertEqual(
             strategy.rotation_decision["candidates"]["GLD"]["selection_status"],
@@ -758,6 +758,7 @@ class DeclarativeStrategyTests(unittest.TestCase):
             "replace": "BIL",
             "review": "monthly",
             "assets": ["GLD", "SHY", "KOSPI"],
+            "suspend_when": True,
         }
 
         strategy = DeclarativeStrategy(configured)
@@ -770,6 +771,22 @@ class DeclarativeStrategyTests(unittest.TestCase):
             ["GLD", "SHY", "KOSPI"],
         )
         self.assertEqual(strategy.rotation["candidates"][0]["asset_class"], "GOLD")
+        self.assertIs(strategy.rotation["suspend_when"], True)
+
+    def test_rotation_suspension_keeps_the_declared_bil_target(self):
+        configured = rotation_definition()
+        configured["rotation"]["suspend_when"] = True
+        strategy = DeclarativeStrategy(configured)
+
+        signal = strategy.evaluate(
+            pd.Timestamp("2025-01-02"), rotation_market(), PortfolioStub()
+        )
+
+        self.assertAlmostEqual(signal["target"]["BIL"], 0.80)
+        self.assertEqual(signal["target"]["GLD"], 0.0)
+        self.assertEqual(signal["target"]["SHY"], 0.0)
+        self.assertEqual(signal["target"]["KOSPI"], 0.0)
+        self.assertTrue(strategy.rotation_decision["suspended"])
 
     def test_rotation_reviews_monthly_and_forces_a_trade_when_selection_changes(self):
         strategy = DeclarativeStrategy(rotation_definition())
@@ -801,7 +818,6 @@ class DeclarativeStrategyTests(unittest.TestCase):
         configured["assets"]["risk"] = ["QQQ", "KOSPI"]
         configured["target"] = [{"weights": {
             "QQQ": "60%", "TDF": "0%", "BIL": "40%",
-            "GLD": "0%", "SHY": "0%", "KOSPI": "0%",
         }}]
         strategy = DeclarativeStrategy(configured)
 
@@ -1064,6 +1080,67 @@ products:
         self.assertEqual(len(loaded), 1)
         self.assertIsInstance(loaded[0], ProductMappedStrategy)
         self.assertEqual(loaded[0].strategy_id, "dsl:mapped")
+
+    def test_strategy17_confirms_and_holds_the_gld_overlay(self):
+        strategy = DeclarativeStrategy.from_yaml(
+            PROJECT_ROOT
+            / "strategies"
+            / "17_band_7030_tdf_state_bil_gld_overlay.yaml"
+        )
+        portfolio = PortfolioStub({
+            "QQQ": 0.70,
+            "TDF2050_PROXY": 0.30,
+            "BIL": 0.0,
+            "GLD": 0.0,
+        })
+        strong = {
+            "QQQ": {
+                "Close": 105.0, "EMA20": 103.0, "EMA55": 100.0,
+                "EMA200": 98.0, "ROC5": 3.0, "ROC20": 5.0,
+                "ROC60": 8.0, "ROC120": 10.0, "ROC252": 12.0,
+                "EMA20_SLOPE5": 2.0, "EMA200_SLOPE20": 1.0,
+            },
+            "TDF2050_PROXY": {"Close": 100.0},
+            "BIL": {"Close": 100.0},
+            "GLD": {
+                "Close": 110.0, "EMA200": 100.0,
+                "ROC60": 9.0, "ROC120": 11.0, "ROC252": 11.0,
+            },
+            "SPY": {"Close": 105.0, "EMA20": 100.0, "ROC5": 1.0},
+        }
+        weak = {
+            **strong,
+            "GLD": {
+                "Close": 110.0, "EMA200": 100.0,
+                "ROC60": 7.0, "ROC120": 9.0, "ROC252": 11.0,
+            },
+        }
+        dates = pd.bdate_range("2025-01-02", periods=30)
+
+        for date in dates[:4]:
+            signal = strategy.evaluate(date, strong, portfolio)
+            self.assertEqual(signal["target"]["GLD"], 0.0)
+        entered = strategy.evaluate(dates[4], strong, portfolio)
+        self.assertTrue(entered["rebalance"])
+        self.assertAlmostEqual(entered["target"]["QQQ"], 0.65)
+        self.assertAlmostEqual(entered["target"]["GLD"], 0.05)
+
+        portfolio.current_weights = {
+            "QQQ": 0.65,
+            "TDF2050_PROXY": 0.30,
+            "BIL": 0.0,
+            "GLD": 0.05,
+        }
+        for date in dates[5:25]:
+            strategy.evaluate(date, strong, portfolio)
+        for date in dates[25:29]:
+            retained = strategy.evaluate(date, weak, portfolio)
+            self.assertAlmostEqual(retained["target"]["GLD"], 0.05)
+
+        exited = strategy.evaluate(dates[29], weak, portfolio)
+        self.assertTrue(exited["rebalance"])
+        self.assertAlmostEqual(exited["target"]["QQQ"], 0.70)
+        self.assertEqual(exited["target"]["GLD"], 0.0)
 
 
 if __name__ == "__main__":
