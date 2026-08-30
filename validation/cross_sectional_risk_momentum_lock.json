@@ -1,0 +1,65 @@
+{
+  "lock_version": 1,
+  "locked_at": "2026-08-30",
+  "purpose": "Pre-register a cross-sectional momentum engine that replaces only Strategy 15's QQQ sleeve.",
+  "data": {
+    "start_date": "2013-01-04",
+    "currency_basis": "KRW unhedged total-return proxy",
+    "calendar": "QQQ trading dates",
+    "candidates": [
+      "QQQ",
+      "SPY",
+      "IWM",
+      "VEA",
+      "VWO",
+      "KOSPI200",
+      "VTV",
+      "VIG",
+      "USMV",
+      "SPLV"
+    ],
+    "known_limitations": [
+      "The universe is composed of ETFs known to exist at the end of the sample.",
+      "ETF histories are shorter than index histories and do not remove product-selection bias."
+    ]
+  },
+  "construction": {
+    "source_strategy": "15_band_7030_tdf_state_bil.yaml",
+    "replaced_sleeve": "QQQ",
+    "state_schedule": "frozen Strategy 15 schedule",
+    "review": "first trading day of each month using prior-close information",
+    "ranking_signal": "12-month return skipping the most recent 21 trading days",
+    "lookback_start_days": 252,
+    "skip_recent_days": 21,
+    "signal_lag_days": 1,
+    "selected_assets": 3,
+    "weighting": "equal",
+    "absolute_momentum_filter": false,
+    "cash_fallback": false,
+    "selection_execution_days": 1,
+    "base_one_way_cost": 0.00035,
+    "benchmarks": [
+      "STRATEGY15_QQQ",
+      "STRATEGY15_STATIC_EQUAL_UNIVERSE"
+    ]
+  },
+  "stress": {
+    "cost_multiple": 3.0,
+    "extra_execution_delay_days": 1,
+    "development_end": "2020-12-31",
+    "recent_start": "2021-01-01"
+  },
+  "promotion_gates": {
+    "full_cagr_gap_vs_strategy15_min": 0.0,
+    "development_cagr_gap_vs_strategy15_min": 0.0,
+    "recent_cagr_gap_vs_strategy15_min": 0.0,
+    "full_mdd_deterioration_max": 0.01,
+    "positive_3y_rolling_cagr_gap_share_min": 0.60,
+    "positive_5y_rolling_cagr_gap_share_min": 0.70,
+    "cost3x_cagr_gap_vs_strategy15_min": 0.0,
+    "delay1d_cagr_gap_vs_strategy15_min": 0.0,
+    "full_cagr_gap_vs_static_equal_min": 0.0,
+    "minimum_distinct_selected_assets": 5,
+    "maximum_single_asset_selection_share": 0.70
+  }
+}

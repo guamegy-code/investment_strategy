@@ -32,6 +32,8 @@
 | 2026-08-29 | 엄격한 DEFENSIVE_CAUTION 5%p 감축 PoC | 동일한 2012-01-03 이후 구간에서도 전략 14·15 모두 승격 실패, 전략 15에서는 CAGR -0.661%p와 리밸런싱 27→135회의 대가가 발생 | 생산 변경 없음 | [엄격한 DEFENSIVE_CAUTION 5%p 감축 PoC](defensive-caution-overlay-poc.md) |
 | 2026-08-29 | 상태 조건부 크로스애셋 로테이션 PoC | 원화 기준 CAGR은 +0.510%p였지만 Strategy 15 대체 기준에는 미달 | Strategy 15 유지, 별도 Strategy 16 자동 로테이션으로 운용·관찰 | [상태 조건부 크로스애셋 로테이션 PoC](state-conditioned-cross-asset-rotation-poc.md) |
 | 2026-08-30 | 전략 15 경로 보존형 GLD 오버레이 PoC | 전체 목표 재설정 경로를 제거해도 조건부 GLD는 CAGR -0.115%p, MDD +0.484%p의 위험·수익 교환 | 생산 변경 없음, 격리형 후보만 관찰 | [전략 15 경로 보존형 GLD 오버레이 PoC](strategy15-isolated-gold-overlay-poc.md) |
+| 2026-08-30 | 다중자산 추세추종 독립 슬리브 PoC | 합성 롱/숏은 독립성 기준을 통과했지만 5%·10% 대체 결합에서 전략 15 CAGR이 -0.695%p·-1.391%p 하락; 롱/현금 구현형도 승격 실패 | 생산 변경 없음, 자본효율형 원형 데이터 확보 여부를 다음 단계로 검토 | [다중자산 추세추종 독립 슬리브 PoC](multi-asset-trend-sleeve-poc.md) |
+| 2026-08-30 | 위험자산 70% 횡단면 모멘텀 PoC | 상위 3개 선택은 정적 분산보다 CAGR +1.824%p였지만 전략 15보다 -4.167%p, MDD -1.975%p 악화 | 생산 변경 없음, 상위 개수·기간 튜닝 없이 종료 | [위험자산 70% 횡단면 모멘텀 PoC](cross-sectional-risk-momentum-poc.md) |
 
 ## 관리 원칙
 
