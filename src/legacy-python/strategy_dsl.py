@@ -95,7 +95,7 @@ def _normalize_simple_rotation(definition: dict[str, Any]) -> None:
     rotation = definition.get("rotation")
     if not isinstance(rotation, Mapping) or "replace" not in rotation:
         return
-    allowed = {"replace", "review", "assets"}
+    allowed = {"replace", "review", "assets", "suspend_when"}
     unknown = sorted(set(rotation) - allowed)
     if unknown:
         raise StrategyDefinitionError(
@@ -109,6 +109,11 @@ def _normalize_simple_rotation(definition: dict[str, Any]) -> None:
     definition["rotation"] = {
         "sleeve": str(rotation["replace"]),
         "check": str(rotation.get("review", "monthly")),
+        **(
+            {"suspend_when": deepcopy(rotation["suspend_when"])}
+            if "suspend_when" in rotation
+            else {}
+        ),
         "candidates": [
             {
                 "ticker": ticker,
@@ -504,7 +509,7 @@ def _validate_definition(raw: Any, source: str) -> dict[str, Any]:
                 "sleeve", "check", "candidates", "top_n",
                 "max_single_sleeve_share", "max_gold_sleeve_share",
                 "max_equity_sleeve_share", "switch_score_margin",
-                "minimum_hold_periods", "minimum_weight_change",
+                "minimum_hold_periods", "minimum_weight_change", "suspend_when",
             },
             "rotation",
         )
@@ -896,12 +901,21 @@ class DeclarativeStrategy:
                 )
             )
             target[str(ticker)] = value
-        if set(target) != set(self.holding_tickers):
-            missing = sorted(set(self.holding_tickers) - set(target))
-            extra = sorted(set(target) - set(self.holding_tickers))
+        required = set(self.holding_tickers)
+        provided = set(target)
+        implicit_rotation_assets = set(self.rotation_candidate_tickers)
+        missing = sorted(required - provided - implicit_rotation_assets)
+        extra = sorted(provided - required)
+        if missing or extra:
             raise StrategyDefinitionError(
                 f"target assets must match assets.required; missing={missing}, extra={extra}"
             )
+        # Rotation candidates do not have a base allocation: the rotation rule
+        # determines them after selecting the declarative target. Keep the
+        # execution target complete so a previously selected asset can still
+        # receive an explicit 0% liquidation target.
+        for ticker in self.rotation_candidate_tickers:
+            target.setdefault(ticker, 0.0)
         if any(weight < 0.0 for weight in target.values()):
             raise StrategyDefinitionError("target weights must be non-negative")
         if abs(sum(target.values()) - 1.0) > 1e-8:
@@ -1098,12 +1112,41 @@ class DeclarativeStrategy:
         date: Any,
         target: Mapping[str, float],
         market: Mapping[str, Any],
+        *,
+        suspended: bool = False,
     ) -> tuple[dict[str, float], bool, bool, str | None]:
         """Replace only the configured cash sleeve and retain every base target."""
 
         assert self.rotation is not None
         sleeve = str(self.rotation["sleeve"])
         sleeve_weight = float(target[sleeve])
+        if suspended:
+            previous = self._rotation_selected
+            changed = any(
+                self._rotation_mix.get(str(candidate["ticker"]), 0.0) > 1e-12
+                for candidate in self.rotation["candidates"]
+            )
+            explanation = f"rotation suspended: {sleeve} retained"
+            self._rotation_mix = {sleeve: 1.0}
+            self._rotation_selected = ()
+            self._rotation_last_period = self._period(
+                date, str(self.rotation.get("check", "monthly"))
+            )
+            self._rotation_active = True
+            self._rotation_hold_periods = 0
+            self.rotation_decision = {
+                "date": str(date),
+                "reviewed": False,
+                "suspended": True,
+                "sleeve": sleeve,
+                "sleeve_weight": sleeve_weight,
+                "previous_selected": previous,
+                "selected": (),
+                "mix": {sleeve: 1.0},
+                "candidates": {},
+                "explanation": explanation,
+            }
+            return dict(target), False, changed, explanation
         active = sleeve_weight > 1e-12
         reviewed = False
         changed = False
@@ -1298,8 +1341,14 @@ class DeclarativeStrategy:
         rotation_changed = False
         rotation_reason = None
         if self.rotation is not None:
+            suspend_when = self.rotation.get("suspend_when")
+            rotation_suspended = bool(
+                self._evaluator(market, portfolio, target).evaluate(suspend_when)
+            ) if suspend_when is not None else False
             target, rotation_reviewed, rotation_changed, rotation_reason = (
-                self._apply_rotation(date, target, market)
+                self._apply_rotation(
+                    date, target, market, suspended=rotation_suspended
+                )
             )
         rebalance, reason, rule_days = self._should_rebalance(
             date, market, portfolio, target

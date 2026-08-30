@@ -39,6 +39,21 @@ test("loadTicker retries the second Yahoo chart host after a 429", async (contex
   assert.equal(rows[0].close, 101);
 });
 
+test("loadTicker maps the legacy KRW symbol to Yahoo's complete USDKRW history", async (context) => {
+  const originalFetch = globalThis.fetch;
+  let requestedUrl = "";
+  context.after(() => { globalThis.fetch = originalFetch; });
+  globalThis.fetch = async (url) => {
+    requestedUrl = String(url);
+    return Response.json(chartPayload);
+  };
+
+  await loadTicker("KRW=X", 1_700_000_000, 1_710_000_000);
+
+  assert.match(requestedUrl, /USDKRW%3DX/);
+  assert.doesNotMatch(requestedUrl, /\/KRW%3DX/);
+});
+
 test("loadPriceRange serves cached rows when every upstream host is rate limited", async (context) => {
   const originalFetch = globalThis.fetch;
   context.after(() => { globalThis.fetch = originalFetch; });
@@ -59,6 +74,32 @@ test("loadPriceRange serves cached rows when every upstream host is rate limited
   assert.deepEqual(result.rows, [{
     date: "2024-01-02", open: 100, high: 103, low: 99, close: 102, volume: 1_000,
   }]);
+});
+
+test("recent KV rows never suppress a full history request without a history store", async (context) => {
+  const originalFetch = globalThis.fetch;
+  let fetchCount = 0;
+  context.after(() => { globalThis.fetch = originalFetch; });
+  globalThis.fetch = async () => {
+    fetchCount += 1;
+    return Response.json(chartPayload);
+  };
+  const cached = [
+    {date:"2024-01-02",open:100,high:101,low:99,close:100,volume:1},
+    {date:"2024-01-03",open:101,high:102,low:100,close:101,volume:1},
+  ];
+  const env = {MARKET_DATA:{
+    get:async()=>JSON.stringify(cached),
+    put:async()=>{},
+  }};
+
+  await loadPriceRange(
+    env,null,"SPY",
+    Math.floor(Date.parse("2024-01-02")/1000),
+    Math.floor(Date.parse("2024-01-03T12:00:00Z")/1000),
+  );
+
+  assert.equal(fetchCount,1);
 });
 
 test("loadPriceRange still fails when no cached data is available", async (context) => {

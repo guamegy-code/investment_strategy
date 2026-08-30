@@ -1,0 +1,37 @@
+{
+  "status": "LOCKED_SHADOW",
+  "locked_on": "2026-08-30",
+  "historical_data_cutoff": "2026-07-31",
+  "oos_start": "2026-08-03",
+  "baseline": "BASELINE",
+  "selected_candidate": "CONDITIONAL_GLD_5",
+  "negative_control": "STATIC_GLD_5",
+  "selection_basis": "Risk-adjusted shadow candidate; no retrospective CAGR promotion",
+  "candidate_parameters": {
+    "mode": "conditional",
+    "maximum_gld_weight": 0.05,
+    "confirmation_days": 5,
+    "minimum_hold_days": 20,
+    "signal": "GLD close above EMA200 and at least two of ROC60/ROC120/ROC252 above QQQ"
+  },
+  "evaluation": {
+    "valuation_currency": "KRW",
+    "signal_currency": "LOCAL",
+    "commission": 0.00015,
+    "slippage": 0.0002,
+    "execution_delay_days": 1,
+    "required_comparison": [
+      "CAGR",
+      "MDD",
+      "Sharpe",
+      "Calmar",
+      "transaction_costs",
+      "episode_return_gap"
+    ]
+  },
+  "code_sha256": {
+    "src/legacy-python/validation/strategy15_isolated_gold_overlay.py": "B13F2162D34C112F66A6D316DC0D70558183848D28D99491DF0D2F91D6EC0227",
+    "tests/test_strategy15_isolated_gold_overlay.py": "4A527C67A9767922783826692B8BFC4F15B66A1838099C54AF983EB2C71018C6"
+  },
+  "methodology_note": "All observations through the cutoff are retrospective. Only dates on or after oos_start count as forward evidence. Do not retune the signal, weight, confirmation, or hold parameters before the OOS review."
+}

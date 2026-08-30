@@ -70,11 +70,12 @@ function unixSeconds(value, fallback) {
 }
 
 export async function loadTicker(ticker, start, end) {
+  const upstreamTicker = ticker === "KRW=X" ? "USDKRW=X" : ticker;
   let upstream = null;
   let lastStatus = null;
   let lastError = null;
   for (const host of YAHOO_CHART_HOSTS) {
-    const source = new URL(`https://${host}/v8/finance/chart/${encodeURIComponent(ticker)}`);
+    const source = new URL(`https://${host}/v8/finance/chart/${encodeURIComponent(upstreamTicker)}`);
     source.search = new URLSearchParams({
       period1: String(start), period2: String(end), interval: "1d", events: "history",
     });
@@ -266,7 +267,9 @@ export async function loadPriceRange(env, ctx, ticker, start, end, loadFallbackT
   const earliest = normalized.reduce((date, row) => !date || row.date < date ? row.date : date, "");
   const latest = normalized.reduce((date, row) => row.date > date ? row.date : date, "");
   const segments = [];
-  if (!normalized.length) segments.push([start, end]);
+  // Recent KV rows are only a small overlay, not proof that the historical
+  // interval between the first and last cached row is complete.
+  if (!baseRows.length) segments.push([start, end]);
   else {
     const earliestSecond = Math.floor(Date.parse(earliest) / 1000);
     const latestSecond = Math.floor(Date.parse(latest) / 1000);

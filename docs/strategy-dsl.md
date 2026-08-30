@@ -71,6 +71,7 @@ execution:
 | `rotation` | `replace` | 자동 대체할 안전자산 티커 | 예 |
 | `rotation` | `assets` | 비교할 후보 자산 티커 목록 | 예 |
 | `rotation` | `review` | 후보 재평가 주기, 기본값 `monthly` | 아니요 |
+| `rotation` | `suspend_when` | 참인 동안 후보 교체를 중단하고 `replace` 자산을 유지하는 조건 | 아니요 |
 | 최상위 | `source` | 실제 상품 매핑에 사용할 기존 전략 ID | 상품 매핑 시 예 |
 | 최상위 | `products` | 기준 종목과 실제 상품의 매핑 | 상품 매핑 시 예 |
 
@@ -257,16 +258,29 @@ target:
 ## 자동 교차자산 로테이션
 
 `rotation`은 기본 목표에서 지정한 현금/안전자산 슬리브만 후보 자산으로 자동 대체한다.
-사람이 종목을 고르거나 매월 승인하지 않는다. 기본 `target`에서 후보는 모두 0%로 두고,
-엔진이 슬리브 비중 안에서만 대체 비중을 계산하므로 QQQ·TDF 등 나머지 목표 비중은 바뀌지
-않는다.
+사람이 종목을 고르거나 매월 승인하지 않는다. 후보 자산은 `target`에 적지 않는다. 엔진이
+선택되지 않은 후보의 기본 비중을 0%로 처리하고 슬리브 비중 안에서만 대체 비중을 계산하므로
+QQQ·TDF 등 나머지 목표 비중은 바뀌지 않는다. 최종 주문 목표에는 이전에 선택한 후보를
+청산할 수 있도록 선택되지 않은 후보도 내부적으로 0%가 적용된다.
+
+```yaml
+target:
+  - weights:
+      QQQ: 20%
+      TDF2050_PROXY: 20%
+      BIL: 60%
+```
 
 ```yaml
 rotation:
   replace: BIL
   review: monthly
+  suspend_when: variables.structural_bear
   assets: [GLD, IEF, 069500.KS]
 ```
+
+`suspend_when`이 참이면 현재 후보 선택을 해제하고 `target`에 선언된 `replace`
+자산 비중을 그대로 유지한다. 조건이 해제되면 다음 `review` 주기에 후보를 다시 선택한다.
 
 `replace` 자산의 목표 비중이 0%보다 큰 달에만 다음 순서로 평가한다. BIL처럼 기본
 안전자산 비중이 없는 BULL 구간에서는 이 과정이 실행되지 않는다.

@@ -112,6 +112,23 @@ class OfflineExportTests(unittest.TestCase):
         self.assertIn("function buildTdf2050Proxy(components)", runtime)
         self.assertIn("await ensureTdf2050Proxy(data,tickers)", runtime)
 
+    def test_indicator_rebalance_markers_use_executed_orders(self):
+        runtime = (WEB_SOURCE_DIR / "app.js").read_text(encoding="utf-8")
+        final_renderer = runtime.split(
+            "current=dashboardResults.get(selected)?.[1]", 1
+        )[1].split("function applyResponsiveLegend", 1)[0]
+
+        self.assertIn("filter(({row})=>Boolean(row.target))", final_renderer)
+        self.assertNotIn("Math.abs((row.weights?.[ticker]||0)", final_renderer)
+        self.assertIn("current?.length?current", final_renderer)
+
+    def test_rotation_candidates_do_not_delay_browser_strategy_history(self):
+        runtime = (WEB_SOURCE_DIR / "app.js").read_text(encoding="utf-8")
+
+        self.assertIn("function rotationOptionalTickers", runtime)
+        self.assertIn("recordsFor(validation.tickers,data,optional)", runtime)
+        self.assertIn("optional.has(ticker)||", runtime)
+
     def test_browser_refreshes_only_the_cached_market_data_tail(self):
         runtime = (WEB_SOURCE_DIR / "app.js").read_text(encoding="utf-8")
 
@@ -348,6 +365,13 @@ class OfflineExportTests(unittest.TestCase):
             legacy_proxy = root / "site" / "data" / "TDF2050_PROXY.csv"
             legacy_proxy.parent.mkdir(parents=True)
             legacy_proxy.write_text("legacy", encoding="utf-8")
+            stale_sidecar = root / "site" / "market-data.json.gz"
+            stale_sidecar.write_bytes(b"stale")
+            stale_fallback = root / "site" / "market-data"
+            stale_fallback.mkdir()
+            (stale_fallback / "U1BZ.csv.gz").write_bytes(b"stale")
+            stale_strategy_archive = root / "site" / "strategies.zip"
+            stale_strategy_archive.write_bytes(b"stale")
 
             output = export_static_site(
                 root / "site",
@@ -368,6 +392,9 @@ class OfflineExportTests(unittest.TestCase):
             self.assertIn('"static_site": true', document)
             self.assertNotIn('"data": "H4sI', document)
             self.assertFalse(legacy_proxy.exists())
+            self.assertFalse(stale_sidecar.exists())
+            self.assertFalse(stale_fallback.exists())
+            self.assertFalse(stale_strategy_archive.exists())
 
     def test_export_can_write_market_data_as_a_sidecar_file(self):
         with TemporaryDirectory() as directory:

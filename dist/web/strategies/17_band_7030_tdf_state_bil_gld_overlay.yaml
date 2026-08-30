@@ -1,0 +1,207 @@
+strategy:
+  id: band-7030-tdf-state-bil-gld-overlay
+  name: 70/30 TDF State BIL + GLD Relative Strength
+  version: 1
+  dsl_version: 1
+  enabled: true
+
+# Strategy 17 is an independent strategy definition. It copies strategy 15's
+# market-state rules and adds a small, confirmed GLD overlay funded only from QQQ.
+assets:
+  required: [QQQ, TDF2050_PROXY, BIL, GLD]
+  observations: [SPY]
+  risk: [QQQ]
+
+parameters:
+  maximum_gld_weight: 0.05
+  minimum_gld_hold_days: 20
+
+variables:
+  risk_off_score: >
+    count(
+      QQQ.close < QQQ.ema20,
+      QQQ.close < QQQ.ema55,
+      QQQ.ema20 < QQQ.ema55,
+      QQQ.roc5 < 0,
+      QQQ.roc20 < 0,
+      QQQ.ema20_slope5 < 0
+    )
+
+  recovery_score: >
+    count(
+      QQQ.close > QQQ.ema20,
+      QQQ.close > QQQ.ema55,
+      QQQ.ema20 > QQQ.ema55,
+      QQQ.roc5 > 0,
+      QQQ.roc20 > 0,
+      QQQ.ema20_slope5 > 0
+    )
+
+  structural_bear: >
+    variables.risk_off_score >= 5
+    and QQQ.close < QQQ.ema20
+    and QQQ.ema20 < QQQ.ema55
+    and QQQ.ema55 < QQQ.ema200
+    and QQQ.roc60 < 0
+    and QQQ.ema200_slope20 < 0
+
+  bull_reentry_allowed: >
+    QQQ.close > QQQ.ema55
+    and QQQ.roc60 > 0
+
+  gld_relative_strength_count: >
+    count(
+      GLD.roc60 > QQQ.roc60,
+      GLD.roc120 > QQQ.roc120,
+      GLD.roc252 > QQQ.roc252
+    )
+
+  gld_overlay_signal: >
+    GLD.close > GLD.ema200
+    and variables.gld_relative_strength_count >= 2
+
+state:
+  market_mode:
+    initial: UNINITIALIZED
+    rules:
+      - when: state.market_mode == 'UNINITIALIZED' and variables.structural_bear
+        set: BEAR
+      - when: state.market_mode == 'UNINITIALIZED' and variables.risk_off_score >= 5
+        set: CAUTION
+      - when: state.market_mode == 'UNINITIALIZED'
+        set: BULL
+
+      - when: state.market_mode == 'BULL' and variables.structural_bear
+        set: BEAR
+        confirm: 10
+      - when: >
+          state.market_mode == 'BULL'
+          and QQQ.close < QQQ.ema20
+          and variables.risk_off_score >= 3
+          and SPY.close < SPY.ema20
+          and SPY.roc5 <= -1
+        set: CAUTION
+
+      - when: state.market_mode == 'CAUTION' and variables.structural_bear
+        set: BEAR
+        confirm: 10
+      - when: state.market_mode == 'CAUTION' and variables.recovery_score >= 4
+        set: BULL
+        confirm: 3
+
+      - when: state.market_mode == 'BEAR' and variables.recovery_score >= 3
+        set: RECOVERY
+        confirm: 3
+
+      - when: state.market_mode == 'RECOVERY' and variables.structural_bear
+        set: BEAR
+        confirm: 10
+      - when: >
+          state.market_mode == 'RECOVERY'
+          and variables.recovery_score >= 4
+          and variables.bull_reentry_allowed
+        set: BULL
+        confirm: 3
+      - when: state.market_mode == 'RECOVERY' and variables.risk_off_score >= 5
+        set: CAUTION
+        confirm: 3
+
+  # This counter is deliberately separate from the signal confirmation.
+  # It prevents a newly opened GLD position from being closed too quickly.
+  gold_hold_days:
+    initial: 0
+    rules:
+      - when: >
+          state.gold_overlay == 'ON'
+          and state.market_mode in ['BULL', 'CAUTION', 'RECOVERY']
+          and not variables.structural_bear
+        set: "=min(state.gold_hold_days + 1, 10000)"
+      - otherwise: true
+        set: 0
+
+  gold_overlay:
+    initial: 'OFF'
+    rules:
+      - when: >
+          state.gold_overlay == 'OFF'
+          and state.market_mode in ['BULL', 'CAUTION', 'RECOVERY']
+          and not variables.structural_bear
+          and variables.gld_overlay_signal
+        set: 'ON'
+        confirm: 5
+      - when: >
+          state.gold_overlay == 'ON'
+          and (
+            state.market_mode == 'BEAR'
+            or variables.structural_bear
+          )
+        set: 'OFF'
+      - when: >
+          state.gold_overlay == 'ON'
+          and state.gold_hold_days >= parameters.minimum_gld_hold_days
+          and not variables.gld_overlay_signal
+        set: 'OFF'
+        confirm: 5
+
+target:
+  - when: >
+      state.market_mode != 'BEAR'
+      and variables.structural_bear
+    weights:
+      QQQ: 0%
+      TDF2050_PROXY: 0%
+      BIL: 100%
+      GLD: 0%
+
+  - when: state.market_mode == 'BEAR'
+    weights:
+      QQQ: 0%
+      TDF2050_PROXY: 20%
+      BIL: 80%
+      GLD: 0%
+
+  - when: >
+      state.market_mode == 'RECOVERY'
+      and state.gold_overlay == 'ON'
+    weights:
+      QQQ: round(60% - parameters.maximum_gld_weight, 10)
+      TDF2050_PROXY: 30%
+      BIL: 10%
+      GLD: parameters.maximum_gld_weight
+
+  - when: state.market_mode == 'RECOVERY'
+    weights:
+      QQQ: 60%
+      TDF2050_PROXY: 30%
+      BIL: 10%
+      GLD: 0%
+
+  - when: state.gold_overlay == 'ON'
+    weights:
+      QQQ: round(70% - parameters.maximum_gld_weight, 10)
+      TDF2050_PROXY: 30%
+      BIL: 0%
+      GLD: parameters.maximum_gld_weight
+
+  - weights:
+      QQQ: 70%
+      TDF2050_PROXY: 30%
+      BIL: 0%
+      GLD: 0%
+
+rebalance:
+  # A 5% overlay is below the normal 7.5% band, so a confirmed overlay state
+  # change must explicitly start a rebalance.
+  - check: daily
+    when: >
+      changed(state.gold_overlay)
+      and (
+        state.gold_overlay == 'ON'
+        or portfolio.weight.GLD > 0
+      )
+
+  - check: daily
+    when: target_deviation() >= 7.5%
+
+execution:
+  days: 1
