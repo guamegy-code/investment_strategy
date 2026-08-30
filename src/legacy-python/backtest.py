@@ -324,7 +324,7 @@ class Backtest:
                     continue
                 source_column = next(
                     (
-                        key for key in row
+                        key for key in row.keys()
                         if key.casefold() == f"{ticker}_{field}".casefold()
                     ),
                     None,

@@ -13,6 +13,7 @@ data_multimarket/*.csv
 data_risk_assets/*.csv
 data_probability_signals/*.csv
 data_cross_asset_rotation/*.csv
+data_cross_sectional_momentum/*.csv
 
 # Results
 results/*

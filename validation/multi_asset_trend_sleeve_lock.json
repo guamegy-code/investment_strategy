@@ -1,0 +1,56 @@
+{
+  "lock_version": 1,
+  "locked_at": "2026-08-30",
+  "purpose": "Pre-register the first standalone multi-asset trend sleeve PoC before inspecting results.",
+  "data": {
+    "start_date": "2013-01-04",
+    "currency_basis": "KRW total-return proxy",
+    "cash_ticker": "KRGOVT3",
+    "cash_source": "114100.KS",
+    "asset_groups": {
+      "EQUITY": ["QQQ", "VEA", "VWO", "KOSPI200"],
+      "BOND": ["IEF", "KRGOVT10"],
+      "COMMODITY": ["GLD"],
+      "CURRENCY": ["USDKRW"]
+    }
+  },
+  "construction": {
+    "review": "monthly last observation",
+    "momentum_lookback_days": 252,
+    "volatility_lookback_days": 60,
+    "execution_lag_days": 1,
+    "group_risk_budget": "equal",
+    "within_group_weighting": "inverse volatility",
+    "gross_exposure": 1.0,
+    "leverage": false,
+    "base_one_way_cost": 0.00035,
+    "primary_candidate": "TSMOM_LONG_SHORT",
+    "implementable_proxy": "TSMOM_LONG_FLAT",
+    "benchmarks": ["CASH", "EQUAL_GROUP_LONG", "RISK_PARITY_LONG"]
+  },
+  "stress": {
+    "cost_multiple": 3.0,
+    "extra_signal_delay_days": 1,
+    "development_end": "2020-12-31",
+    "recent_start": "2021-01-01"
+  },
+  "promotion_gates": {
+    "research_reference": {
+      "full_excess_cagr_min": 0.0,
+      "development_excess_cagr_min": 0.0,
+      "recent_excess_cagr_min": 0.0,
+      "monthly_correlation_to_strategy15_max": 0.35,
+      "positive_5y_rolling_excess_share_min": 0.70,
+      "positive_contributing_asset_groups_min": 3,
+      "cost3x_excess_cagr_min": 0.0,
+      "delay1d_excess_cagr_min": 0.0
+    },
+    "implementable_proxy": {
+      "full_excess_cagr_min": 0.0,
+      "monthly_correlation_to_strategy15_max": 0.50,
+      "strategy15_blend_weight": 0.10,
+      "blend_cagr_gap_min": 0.0,
+      "blend_mdd_deterioration_max": 0.01
+    }
+  }
+}
