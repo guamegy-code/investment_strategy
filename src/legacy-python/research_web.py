@@ -593,6 +593,44 @@ def strategy_name(result: dict[str, Any]) -> str:
     return strategy_display_name(result["strategy"])
 
 
+def _is_product_mapped_strategy(strategy: object) -> bool:
+    """Return whether a strategy maps a model asset to an investable product."""
+    mapping = getattr(strategy, "asset_mapping", None)
+    if not isinstance(mapping, dict):
+        return False
+    return any(
+        any(product != model_asset for product in products)
+        for model_asset, products in mapping.items()
+        if isinstance(products, dict)
+    )
+
+
+def _strategy_options(view: "ResearchViewModel") -> list[dict[str, Any]]:
+    options = []
+    for result in view.results:
+        name = strategy_name(result)
+        label = (
+            html.Span(name, className="research-product-strategy-label")
+            if _is_product_mapped_strategy(result["strategy"])
+            else name
+        )
+        options.append({"label": label, "value": name})
+    return options
+
+
+def _resample_ohlc(frame: pd.DataFrame, timeframe: str) -> pd.DataFrame:
+    """Aggregate QQQ OHLC rows to the requested display timeframe."""
+    ohlc = frame[["Open", "High", "Low", "Close"]].dropna()
+    if timeframe == "daily":
+        return ohlc
+    rule = {"weekly": "W-FRI", "monthly": "ME"}.get(timeframe)
+    if rule is None:
+        return ohlc.iloc[0:0]
+    return ohlc.resample(rule).agg({
+        "Open": "first", "High": "max", "Low": "min", "Close": "last",
+    }).dropna()
+
+
 def _date_bounds(results: Iterable[dict[str, Any]]) -> tuple[str | None, str | None]:
     dates = [
         pd.Timestamp(date)
@@ -1030,6 +1068,7 @@ class ResearchViewModel:
         overlay_strategy: str | None = None,
         overlay_options: Iterable[str] | None = None,
         selected_pairs: Iterable[tuple[str, str]] | None = None,
+        candle_timeframes: Iterable[str] | None = None,
     ) -> go.Figure:
         """Build synchronized price, oscillator, and risk research panels."""
         frames = self.market_frames
@@ -1053,12 +1092,17 @@ class ResearchViewModel:
         )
         overlay_result = overlay_data["result"] if overlay_data else None
         has_strategy_return = overlay_data is not None
+        candle_timeframes = list(dict.fromkeys(
+            timeframe for timeframe in (candle_timeframes or [])
+            if timeframe in {"daily", "weekly", "monthly"}
+        ))
+        has_qqq_candles = bool(candle_timeframes and "QQQ" in frames)
         panels = [
             panel for panel in PANEL_ORDER
             if any(indicator_panel(column) == panel for column in columns)
-            or (panel == "price" and has_strategy_return)
+            or (panel == "price" and (has_strategy_return or has_qqq_candles))
         ]
-        if not panels or (not tickers and not has_strategy_return):
+        if not panels or (not tickers and not has_strategy_return and not has_qqq_candles):
             figure = _apply_chart_style(go.Figure())
             figure.add_annotation(
                 text="종목과 지표를 선택하면 연구 그래프가 표시됩니다.",
@@ -1123,6 +1167,35 @@ class ResearchViewModel:
                     connectgaps=False,
                 ), row=row, col=1)
                 style_index += 1
+
+        if has_qqq_candles and "price" in panels:
+            qqq = _filtered_history(frames["QQQ"], start, end)
+            close = qqq.get("Close", pd.Series(dtype=float)).dropna()
+            if not close.empty and float(close.iloc[0]) != 0:
+                baseline = float(close.iloc[0])
+                candle_labels = {"daily": "일봉", "weekly": "주봉", "monthly": "월봉"}
+                price_row = panels.index("price") + 1
+                for timeframe in candle_timeframes:
+                    candles = _resample_ohlc(qqq, timeframe) / baseline * 100
+                    if candles.empty:
+                        continue
+                    trace_name = f"QQQ · {candle_labels[timeframe]}"
+                    figure.add_trace(go.Candlestick(
+                        x=candles.index,
+                        open=candles["Open"], high=candles["High"],
+                        low=candles["Low"], close=candles["Close"],
+                        name=trace_name,
+                        increasing={
+                            "line": {"color": "#F23645"},
+                            "fillcolor": "rgba(242,54,69,.38)",
+                        },
+                        decreasing={
+                            "line": {"color": "#2962FF"},
+                            "fillcolor": "rgba(41,98,255,.38)",
+                        },
+                        whiskerwidth=.35,
+                        meta={"tooltipName": trace_name, "panel": "price"},
+                    ), row=price_row, col=1)
 
         if has_strategy_return and "price" in panels and not strategy_values.empty:
             figure.add_trace(go.Scattergl(
@@ -1374,9 +1447,11 @@ class ResearchViewModel:
         )
         return figure
 
-    def summary_rows(self) -> list[dict[str, Any]]:
+    def summary_rows(
+        self, selected_names: Iterable[str] | None = None,
+    ) -> list[dict[str, Any]]:
         rows = []
-        for result in self.results:
+        for result in self.selected_results(selected_names):
             row = {"Strategy": strategy_name(result)}
             summary = result.get("summary", {})
             total_return = self.total_return(strategy_name(result))
@@ -1778,13 +1853,14 @@ def create_research_app(
                         dcc.DatePickerRange(
                             id="research-date-range", min_date_allowed=start, max_date_allowed=end,
                             start_date=start, end_date=end, display_format="YYYY.MM.DD",
+                            persistence=True, persistence_type="local",
                         ),
                     ], className="research-control"),
                     html.Div([
                         html.Label([_icon("adjustments-horizontal"), "비교 전략"], className="form-label"),
                         dcc.Checklist(
                             id="research-strategies",
-                            options=[{"label": name, "value": name} for name in names],
+                            options=_strategy_options(view),
                             value=names,
                             inline=True,
                             persistence=True,
@@ -1957,6 +2033,20 @@ def create_research_app(
                                     className="research-indicator-overlay-hint",
                                 ),
                             ], className="research-indicator-control"),
+                            html.Div([
+                                html.Label("QQQ 봉 표시", className="form-label"),
+                                dcc.Checklist(
+                                    id="research-indicator-candles",
+                                    options=[
+                                        {"label": "일봉", "value": "daily"},
+                                        {"label": "주봉", "value": "weekly"},
+                                        {"label": "월봉", "value": "monthly"},
+                                    ],
+                                    value=[], inline=True,
+                                    persistence=True, persistence_type="local",
+                                    className="research-indicator-checklist",
+                                ),
+                            ], className="research-indicator-control"),
                         ], className="card-body research-indicator-toolbar"),
                     ], className="card research-card research-indicator-controls"),
 
@@ -2113,9 +2203,7 @@ def create_research_app(
             ]
             error_style = {}
 
-        strategy_options = [
-            {"label": name, "value": name} for name in active_names
-        ]
+        strategy_options = _strategy_options(active_view)
         indicator_options_for_strategy = [
             {"label": "표시 안 함", "value": ""},
             *strategy_options,
@@ -2133,7 +2221,7 @@ def create_research_app(
             preserved_names,
             strategy_options,
             detail_name,
-            active_view.summary_rows(),
+            active_view.summary_rows(preserved_names),
             indicator_config["start"],
             indicator_config["end"],
             indicator_config["start"],
@@ -2229,6 +2317,7 @@ def create_research_app(
         Input("research-indicator-date-range", "end_date"),
         Input("research-indicator-strategy", "value"),
         Input("research-indicator-overlays", "value"),
+        Input("research-indicator-candles", "value"),
         Input("research-result-version", "data"),
         State({"type": "indicator-matrix-row", "column": ALL}, "id"),
     )
@@ -2238,6 +2327,7 @@ def create_research_app(
         selected_end,
         overlay_strategy,
         overlay_options,
+        candle_timeframes,
         version,
         row_ids,
     ):
@@ -2254,16 +2344,27 @@ def create_research_app(
             overlay_strategy,
             overlay_options,
             selected_pairs=selected_pairs,
+            candle_timeframes=candle_timeframes,
         )
         figure.update_layout(
             datarevision=(
                 f"indicators:{selected_pairs}:"
                 f"{overlay_strategy}:"
-                f"{','.join(overlay_options or [])}:{version}"
+                f"{','.join(overlay_options or [])}:"
+                f"{','.join(candle_timeframes or [])}:{version}"
             ),
             uirevision=f"indicator-range:{selected_start}:{selected_end}",
         )
         return figure, _indicator_selection_badges(selected_pairs)
+
+    @app.callback(
+        Output("research-summary-grid", "rowData", allow_duplicate=True),
+        Input("research-strategies", "value"),
+        Input("research-result-version", "data"),
+        prevent_initial_call=True,
+    )
+    def update_summary(selected_names, _version):
+        return current_view().summary_rows(selected_names or [])
 
     @app.callback(
         Output("research-performance", "figure"),
