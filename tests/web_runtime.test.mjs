@@ -46,6 +46,34 @@ function extractedVisibleYAutoscale(){
   return Function('$','Plotly',`${axisKey};${range};${bind};return bindVisibleYAutoscale;`);
 }
 
+function extractedQqqCandleRows(){
+  const helper=source.match(/function qqqCandleRows\(rows,timeframe\)\{[\s\S]*?\n\}/)?.[0];
+  assert.ok(helper,'QQQ candle aggregation source was not found');
+  return Function(`${helper};return qqqCandleRows;`)();
+}
+
+test('QQQ candles aggregate daily rows into weekly and monthly OHLC',()=>{
+  const aggregate=extractedQqqCandleRows(),rows=[
+    {Date:'2024-01-29',Open:100,High:103,Low:99,Close:102},
+    {Date:'2024-01-30',Open:102,High:105,Low:101,Close:104},
+    {Date:'2024-02-01',Open:104,High:106,Low:100,Close:101},
+    {Date:'2024-02-05',Open:101,High:108,Low:100,Close:107},
+  ];
+
+  assert.equal(aggregate(rows,'daily'),rows);
+  assert.deepEqual(aggregate(rows,'monthly'),[
+    {Date:'2024-01-30',Open:100,High:105,Low:99,Close:104},
+    {Date:'2024-02-05',Open:104,High:108,Low:100,Close:107},
+  ]);
+  assert.equal(aggregate(rows,'weekly').length,2);
+});
+
+test('hosted strategy refresh preserves locally imported definitions',()=>{
+  assert.match(source,/importedDefinitions\|\|\[\]/);
+  assert.match(source,/definitions=\[\.\.\.loaded\.filter\(definition=>!importedIds\.has/);
+  assert.match(source,/indicatorCandles:next/);
+});
+
 test('rotation candidates carry their last price across a different market holiday',()=>{
   const recordsFor=extractedRecordsFor(),data={
     QQQ:[

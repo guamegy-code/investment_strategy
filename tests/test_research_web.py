@@ -33,6 +33,9 @@ class GammaStrategy:
 def make_result(strategy, values, rebalances=()):
     index = pd.to_datetime(["2024-01-01", "2024-01-02", "2024-01-03"])
     market_frame = pd.DataFrame({
+        "Open": [99.0, 101.0, 103.0],
+        "High": [101.0, 103.0, 104.0],
+        "Low": [98.0, 100.0, 100.0],
         "Close": [100.0, 102.0, 101.0],
         "EMA55": [99.0, 100.0, 100.5],
         "EMA200": [95.0, 95.2, 95.4],
@@ -169,7 +172,10 @@ class ResearchWebTests(unittest.TestCase):
         ])
         self.assertEqual(output[9], ["AlphaStrategy"])
         self.assertEqual(output[11], "AlphaStrategy")
-        self.assertEqual(output[12][1]["Strategy"], "GammaStrategy")
+        self.assertEqual(
+            [row["Strategy"] for row in output[12]],
+            ["AlphaStrategy"],
+        )
 
     def test_figures_project_existing_result_data(self):
         performance = self.view.performance_figure(["AlphaStrategy"])
@@ -503,6 +509,13 @@ class ResearchWebTests(unittest.TestCase):
         self.assertIn("KODEX 미국나스닥100 · QQQ 계열", names)
         self.assertIn("BND", names)
 
+        app = create_research_app((result,))
+        selector = find_component(app.layout, "research-strategies")
+        self.assertEqual(
+            selector.options[0]["label"].className,
+            "research-product-strategy-label",
+        )
+
     def test_indicator_research_builds_synchronized_selected_panels(self):
         figure = self.view.indicator_figure(
             ["QQQ"], ["Close", "RSI14", "MDD252"],
@@ -717,6 +730,37 @@ class ResearchWebTests(unittest.TestCase):
             [trace.name for trace in oscillator_only.data],
         )
 
+    def test_indicator_research_can_toggle_qqq_daily_weekly_monthly_candles(self):
+        index = pd.date_range("2024-01-01", periods=45, freq="D")
+        result = make_result(AlphaStrategy(), [100, 110, 121])
+        result["market_data"]["QQQ"] = pd.DataFrame({
+            "Open": 100.0 + pd.Series(range(45), index=index),
+            "High": 102.0 + pd.Series(range(45), index=index),
+            "Low": 99.0 + pd.Series(range(45), index=index),
+            "Close": 101.0 + pd.Series(range(45), index=index),
+        }, index=index)
+
+        figure = ResearchViewModel((result,)).indicator_figure(
+            None, None, candle_timeframes=["daily", "weekly", "monthly"],
+        )
+        candles = [trace for trace in figure.data if trace.type == "candlestick"]
+
+        self.assertEqual(
+            [trace.name for trace in candles],
+            ["QQQ · 일봉", "QQQ · 주봉", "QQQ · 월봉"],
+        )
+        self.assertEqual(candles[0].increasing.line.color, "#F23645")
+        self.assertEqual(candles[0].decreasing.line.color, "#2962FF")
+        self.assertEqual(len(candles[0].x), 45)
+        self.assertLess(len(candles[1].x), len(candles[0].x))
+        self.assertLess(len(candles[2].x), len(candles[1].x))
+
+    def test_summary_rows_only_include_selected_strategies(self):
+        self.assertEqual(
+            [row["Strategy"] for row in self.view.summary_rows(["BetaStrategy"])],
+            ["BetaStrategy"],
+        )
+
     def test_indicator_zoom_rescales_each_visible_y_axis(self):
         result = make_result(AlphaStrategy(), [100, 110, 121])
         result["market_data"]["QQQ"]["Close"] = [100.0, 102.0, 240.0]
@@ -794,7 +838,7 @@ class ResearchWebTests(unittest.TestCase):
         app = create_research_app(self.results)
 
         self.assertEqual(app.title, "Investment Strategy Research")
-        self.assertEqual(len(app.callback_map), 19)
+        self.assertEqual(len(app.callback_map), 20)
         strategy_selector = find_component(app.layout, "research-strategies")
         self.assertTrue(strategy_selector.persistence)
         self.assertEqual(strategy_selector.persistence_type, "local")
@@ -817,6 +861,21 @@ class ResearchWebTests(unittest.TestCase):
         )
         self.assertIsNotNone(find_component(app.layout, "research-indicator-tooltip"))
         self.assertIsNotNone(find_component(app.layout, "research-indicator-panel"))
+        indicator_candles = find_component(
+            app.layout, "research-indicator-candles"
+        )
+        self.assertEqual(
+            [option["value"] for option in indicator_candles.options],
+            ["daily", "weekly", "monthly"],
+        )
+        self.assertTrue(indicator_candles.persistence)
+        self.assertTrue(find_component(app.layout, "research-date-range").persistence)
+        calendar_asset = (
+            Path(__file__).parents[1]
+            / "src" / "legacy-python" / "assets" / "win11_date_picker.js"
+        ).read_text(encoding="utf-8")
+        self.assertIn('view = "month"', calendar_asset)
+        self.assertIn('data-year=', calendar_asset)
         indicator_overlays = find_component(
             app.layout, "research-indicator-overlays"
         )
@@ -871,6 +930,7 @@ class ResearchWebTests(unittest.TestCase):
             "research-indicator-date-range",
             "research-indicator-strategy",
             "research-indicator-overlays",
+            "research-indicator-candles",
             "research-result-version",
         })
         reload_callback = next(

@@ -831,7 +831,12 @@ async function loadHostedStrategies(){
     definition._yaml_file=String(path).split(/[\\/]/).at(-1);
     return definition;
   }));
-  definitions=loaded;
+  const state=loadUiState();
+  const imported=(state.importedDefinitions||[])
+    .map(migrateStrategyDefinition)
+    .filter(definition=>definition?.strategy?.id);
+  const importedIds=new Set(imported.map(definition=>definition.strategy.id));
+  definitions=[...loaded.filter(definition=>!importedIds.has(definition.strategy.id)),...imported];
 }
 const DEFAULT_WEB_START_DATE='2012-01-03';
 function defaultStartDate(first,last){
@@ -1051,4 +1056,61 @@ setupDashboard=async function(){
   await flatpickrDashboardSetup();
   mountDateRangePicker('analysis-date-range','start-date','end-date','분석 기간');
   mountDateRangePicker('indicator-date-range','indicator-start-date','indicator-end-date','지표 연구 기간');
+};
+
+const CANDLE_TIMEFRAMES={
+  daily:{label:'일봉'},
+  weekly:{label:'주봉'},
+  monthly:{label:'월봉'},
+};
+function qqqCandleRows(rows,timeframe){
+  if(timeframe==='daily')return rows;
+  const grouped=new Map();
+  for(const row of rows){
+    const date=new Date(`${row.Date}T00:00:00Z`);
+    const key=timeframe==='monthly'
+      ? row.Date.slice(0,7)
+      : (()=>{const friday=new Date(date);friday.setUTCDate(date.getUTCDate()+((5-date.getUTCDay()+7)%7));return friday.toISOString().slice(0,10);})();
+    const current=grouped.get(key);
+    if(!current)grouped.set(key,{...row});
+    else grouped.set(key,{...current,Date:row.Date,High:Math.max(Number(current.High),Number(row.High)),Low:Math.min(Number(current.Low),Number(row.Low)),Close:Number(row.Close)});
+  }
+  return [...grouped.values()];
+}
+const candleIndicatorRenderer=renderIndicators;
+renderIndicators=async function(){
+  const control=$('indicator-candles');
+  const timeframes=control?[...control.querySelectorAll('input:checked')].map(input=>input.value):[];
+  const closeKey='QQQ|Close',hadClose=indicatorSelection.has(closeKey);
+  if(timeframes.length&&!hadClose)indicatorSelection.add(closeKey);
+  try{await candleIndicatorRenderer();}
+  finally{if(!hadClose)indicatorSelection.delete(closeKey);}
+  const plot=$('indicator-plot');
+  if(!plot?.data||!timeframes.length)return;
+  const priceTrace=plot.data.find(trace=>trace.meta?.panel==='price'&&String(trace.meta?.tooltipName||'').startsWith('QQQ '));
+  if(!priceTrace)return;
+  if(!hadClose){
+    const closeIndex=plot.data.indexOf(priceTrace);
+    if(closeIndex>=0)await Plotly.deleteTraces(plot,closeIndex);
+  }
+  const data=await loadData(),start=$('indicator-start-date').value,end=$('indicator-end-date').value;
+  const rows=(data.QQQ||[]).filter(row=>(!start||row.Date>=start)&&(!end||row.Date<=end));
+  const baseline=Number(rows[0]?.Close);
+  if(!rows.length||!baseline)return;
+  const traces=timeframes.map(timeframe=>{
+    const candles=qqqCandleRows(rows,timeframe),label=CANDLE_TIMEFRAMES[timeframe]?.label||timeframe;
+    return {type:'candlestick',x:candles.map(row=>row.Date),open:candles.map(row=>Number(row.Open)/baseline*100),high:candles.map(row=>Number(row.High)/baseline*100),low:candles.map(row=>Number(row.Low)/baseline*100),close:candles.map(row=>Number(row.Close)/baseline*100),name:`QQQ · ${label}`,xaxis:priceTrace.xaxis||'x',yaxis:priceTrace.yaxis||'y',increasing:{line:{color:'#F23645'},fillcolor:'rgba(242,54,69,.38)'},decreasing:{line:{color:'#2962FF'},fillcolor:'rgba(41,98,255,.38)'},whiskerwidth:.35,meta:{tooltipName:`QQQ · ${label}`,panel:'price'}};
+  });
+  await Plotly.addTraces(plot,traces);
+};
+const candleStateDashboardSetup=setupDashboard;
+setupDashboard=async function(){
+  await candleStateDashboardSetup();
+  const control=$('indicator-candles');
+  if(!control)return;
+  const state=loadUiState(),selected=new Set(Array.isArray(state.indicatorCandles)?state.indicatorCandles:[]);
+  for(const input of control.querySelectorAll('input')){
+    input.checked=selected.has(input.value);
+    input.onchange=()=>{const next=[...control.querySelectorAll('input:checked')].map(item=>item.value);localStorage.setItem(uiStateKey,JSON.stringify({...loadUiState(),indicatorCandles:next}));void renderIndicators();};
+  }
 };
