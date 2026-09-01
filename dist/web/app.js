@@ -220,7 +220,7 @@ const strategyChartColors=new Map();
 function strategyChartColor(strategyId){for(const definition of definitions){const id=definition?.strategy?.id;if(id&&!strategyChartColors.has(id))strategyChartColors.set(id,dashPalette[strategyChartColors.size%dashPalette.length]);}if(!strategyChartColors.has(strategyId))strategyChartColors.set(strategyId,dashPalette[strategyChartColors.size%dashPalette.length]);return strategyChartColors.get(strategyId);}
 const tooltipEscape=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
 const tooltipNumber=value=>Number.isFinite(Number(value))?Number(value).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}):'—';
-const tooltipIndicatorValue=point=>point?.data?.type==='candlestick'?`시 ${tooltipNumber(point.open)} · 고 ${tooltipNumber(point.high)} · 저 ${tooltipNumber(point.low)} · 종 ${tooltipNumber(point.close)}`:tooltipNumber(point?.y);
+const tooltipIndicatorValue=point=>{const raw=point?.customdata||point;return point?.data?.type==='candlestick'?`시 ${tooltipNumber(raw.open)}\n고 ${tooltipNumber(raw.high)}\n저 ${tooltipNumber(raw.low)}\n종 ${tooltipNumber(raw.close)}`:tooltipNumber(point?.customdata??point?.y);};
 const percentText=value=>`${Number(value).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}%`;
 
 function tooltipRow(label,value,target=null,expanded=false){return `<div class="research-custom-tooltip-row"><span class="research-custom-tooltip-label">${tooltipEscape(label)}</span><span class="research-custom-tooltip-value">${tooltipEscape(value)}</span>${expanded?`<span class="research-custom-tooltip-arrow">${target?'→':''}</span><span class="research-custom-tooltip-target">${tooltipEscape(target||'')}</span>`:''}</div>`;}
@@ -1064,6 +1064,7 @@ const CANDLE_TIMEFRAMES={
   weekly:{label:'주봉'},
   monthly:{label:'월봉'},
 };
+const AUTO_QQQ_MOVING_AVERAGES=['MA20','MA55','MA120','MA200'];
 function qqqCandleRows(rows,timeframe){
   if(timeframe==='daily')return rows;
   const grouped=new Map();
@@ -1081,26 +1082,41 @@ function qqqCandleRows(rows,timeframe){
 const candleIndicatorRenderer=renderIndicators;
 renderIndicators=async function(){
   const control=$('indicator-candles');
-  const timeframes=control?[...control.querySelectorAll('input:checked')].map(input=>input.value):[];
-  const closeKey='QQQ|Close',hadClose=indicatorSelection.has(closeKey);
-  if(timeframes.length&&!hadClose)indicatorSelection.add(closeKey);
+  const selectedPairs=[...indicatorSelection].map(key=>key.split('|'));
+  const selectedTickers=[...new Set(selectedPairs.map(([ticker])=>ticker))];
+  const candleTicker=selectedTickers.length===1?selectedTickers[0]:'';
+  const explicitlySelectedMovingAverages=selectedPairs.filter(([ticker,field])=>ticker===candleTicker&&AUTO_QQQ_MOVING_AVERAGES.includes(field));
+  const autoMovingAverages=candleTicker&&!explicitlySelectedMovingAverages.length?AUTO_QQQ_MOVING_AVERAGES.map(field=>`${candleTicker}|${field}`):[];
+  for(const key of autoMovingAverages)indicatorSelection.add(key);
+  const displayedPairs=[...indicatorSelection].map(key=>key.split('|'));
+  const candleCloseSelected=Boolean(candleTicker)&&indicatorSelection.has(`${candleTicker}|Close`);
+  if(control)control.classList.toggle('offline-hidden',!candleCloseSelected);
+  const timeframe=candleCloseSelected?(control?.querySelector('input:checked')?.value||''):'';
+  const timeframes=timeframe?[timeframe]:[];
   try{await candleIndicatorRenderer();}
-  finally{if(!hadClose)indicatorSelection.delete(closeKey);}
+  finally{for(const key of autoMovingAverages)indicatorSelection.delete(key);}
   const plot=$('indicator-plot');
   if(!plot?.data||!timeframes.length)return;
-  const priceTrace=plot.data.find(trace=>trace.meta?.panel==='price'&&String(trace.meta?.tooltipName||'').startsWith('QQQ '));
+  const displayTicker=typeof indicatorDisplayTicker==='function'?indicatorDisplayTicker(candleTicker):candleTicker;
+  const priceTrace=plot.data.find(trace=>trace.meta?.panel==='price'&&!trace.meta?.isStrategySeries&&String(trace.meta?.tooltipName||'').startsWith(`${displayTicker} · `)&&/Close|종가/.test(String(trace.meta?.tooltipName||'')));
   if(!priceTrace)return;
-  if(!hadClose){
-    const closeIndex=plot.data.indexOf(priceTrace);
-    if(closeIndex>=0)await Plotly.deleteTraces(plot,closeIndex);
-  }
+  const closeIndex=plot.data.indexOf(priceTrace);
+  if(closeIndex>=0)await Plotly.deleteTraces(plot,closeIndex);
   const data=await loadData(),start=$('indicator-start-date').value,end=$('indicator-end-date').value;
-  const rows=(data.QQQ||[]).filter(row=>(!start||row.Date>=start)&&(!end||row.Date<=end));
+  const rows=(data[candleTicker]||[]).filter(row=>(!start||row.Date>=start)&&(!end||row.Date<=end));
   const baseline=Number(rows[0]?.Close);
   if(!rows.length||!baseline)return;
+  const pricePairs=displayedPairs.filter(([ticker,field])=>ticker===candleTicker&&['Close',...AUTO_QQQ_MOVING_AVERAGES].includes(field));
+  const traceIndexes=[],customdata=[];
+  for(const [,field] of pricePairs){
+    const label=indicatorCatalogLabels?.[field]||field;
+    const index=plot.data.findIndex(trace=>trace.meta?.panel==='price'&&!trace.meta?.isStrategySeries&&String(trace.meta?.tooltipName||'').endsWith(` · ${label}`));
+    if(index>=0){traceIndexes.push(index);customdata.push(rows.map(row=>Number(row[field])));}
+  }
+  if(traceIndexes.length)await Plotly.restyle(plot,{customdata},traceIndexes);
   const traces=timeframes.map(timeframe=>{
     const candles=qqqCandleRows(rows,timeframe),label=CANDLE_TIMEFRAMES[timeframe]?.label||timeframe;
-    return {type:'candlestick',x:candles.map(row=>row.Date),open:candles.map(row=>Number(row.Open)/baseline*100),high:candles.map(row=>Number(row.High)/baseline*100),low:candles.map(row=>Number(row.Low)/baseline*100),close:candles.map(row=>Number(row.Close)/baseline*100),name:`QQQ · ${label}`,xaxis:priceTrace.xaxis||'x',yaxis:priceTrace.yaxis||'y',increasing:{line:{color:'#F23645'},fillcolor:'rgba(242,54,69,.38)'},decreasing:{line:{color:'#2962FF'},fillcolor:'rgba(41,98,255,.38)'},whiskerwidth:.35,hoverinfo:'none',meta:{tooltipName:`QQQ · ${label}`,panel:'price'}};
+    return {type:'candlestick',x:candles.map(row=>row.Date),open:candles.map(row=>Number(row.Open)/baseline*100),high:candles.map(row=>Number(row.High)/baseline*100),low:candles.map(row=>Number(row.Low)/baseline*100),close:candles.map(row=>Number(row.Close)/baseline*100),customdata:candles.map(row=>({open:Number(row.Open),high:Number(row.High),low:Number(row.Low),close:Number(row.Close)})),name:`${displayTicker} · ${label}`,showlegend:false,xaxis:priceTrace.xaxis||'x',yaxis:priceTrace.yaxis||'y',increasing:{line:{color:'#F23645'},fillcolor:'#F23645'},decreasing:{line:{color:'#2962FF'},fillcolor:'#2962FF'},whiskerwidth:.35,hoverinfo:'none',meta:{tooltipName:`${displayTicker} · ${label}`,panel:'price'}};
   });
   await Plotly.addTraces(plot,traces);
 };
@@ -1109,9 +1125,85 @@ setupDashboard=async function(){
   await candleStateDashboardSetup();
   const control=$('indicator-candles');
   if(!control)return;
-  const state=loadUiState(),selected=new Set(Array.isArray(state.indicatorCandles)?state.indicatorCandles:[]);
+  const state=loadUiState(),hasSavedCandleState=Array.isArray(state.indicatorCandles);
+  const selected=(hasSavedCandleState?(state.indicatorCandles||[]):['daily']).find(value=>CANDLE_TIMEFRAMES[value])||'';
   for(const input of control.querySelectorAll('input')){
-    input.checked=selected.has(input.value);
-    input.onchange=()=>{const next=[...control.querySelectorAll('input:checked')].map(item=>item.value);localStorage.setItem(uiStateKey,JSON.stringify({...loadUiState(),indicatorCandles:next}));void renderIndicators();};
+    input.checked=input.value===selected;
+    input.onchange=()=>{const timeframe=control.querySelector('input:checked')?.value||'';localStorage.setItem(uiStateKey,JSON.stringify({...loadUiState(),indicatorCandles:timeframe?[timeframe]:[]}));void renderIndicators();};
   }
+};
+
+function tradingDayRangebreaks(traces){
+  const dates=[...new Set((traces||[]).flatMap(trace=>(trace.x||[]).map(value=>String(value).slice(0,10)).filter(value=>/^\d{4}-\d{2}-\d{2}$/.test(value))))].sort();
+  if(dates.length<2)return [{bounds:['sat','mon']}];
+  const observed=new Set(dates),missing=[];
+  for(let day=new Date(`${dates[0]}T00:00:00Z`),end=new Date(`${dates.at(-1)}T00:00:00Z`);day<=end;day.setUTCDate(day.getUTCDate()+1)){
+    const key=day.toISOString().slice(0,10),weekday=day.getUTCDay();
+    if(weekday!==0&&weekday!==6&&!observed.has(key))missing.push(key);
+  }
+  return missing.length?[{bounds:['sat','mon']},{values:missing}]:[{bounds:['sat','mon']}];
+}
+const tradingDayAxisReact=Plotly.react.bind(Plotly);
+Plotly.react=function(target,traces,layout,...args){
+  if(Array.isArray(traces)&&layout){
+    const rangebreaks=tradingDayRangebreaks(traces);
+    for(const [key,axis] of Object.entries(layout))if(/^xaxis\d*$/.test(key)&&axis?.type==='date')axis.rangebreaks=rangebreaks;
+    for(const trace of traces)if(trace.type==='scattergl')trace.type='scatter';
+  }
+  return tradingDayAxisReact(target,traces,layout,...args);
+};
+bindVisibleYAutoscale=function(plotId){
+  const plot=$(plotId);
+  if(!plot||plot.dataset.visibleYAutoscaleBound)return;
+  plot.dataset.visibleYAutoscaleBound='1';
+  plot.on('plotly_relayout',change=>{
+    if(!Object.keys(change||{}).some(key=>/^xaxis\d*\.(range|autorange)/.test(key)))return;
+    const updates={};
+    for(const yaxis of [...new Set((plot.data||[]).map(trace=>trace.yaxis||'y'))]){
+      const values=[];
+      for(const trace of (plot.data||[]).filter(item=>(item.yaxis||'y')===yaxis)){
+        const xaxis=trace.xaxis||'x',range=plot._fullLayout?.[axisLayoutKey(xaxis)]?.range||plot.layout?.[axisLayoutKey(xaxis)]?.range;
+        if(!range?.length)continue;
+        const lower=Date.parse(range[0]),upper=Date.parse(range[1]);
+        for(let index=0;index<(trace.x||[]).length;index++){
+          const date=Date.parse(trace.x[index]);
+          if(!Number.isFinite(date)||date<lower||date>upper)continue;
+          const series=trace.type==='candlestick'?[trace.low?.[index],trace.high?.[index]]:[trace.y?.[index]];
+          for(const value of series)if(Number.isFinite(Number(value)))values.push(Number(value));
+        }
+      }
+      if(values.length)updates[`${axisLayoutKey(yaxis)}.range`]=visibleAxisRange(values);
+    }
+    if(Object.keys(updates).length)Plotly.relayout(plot,updates);
+  });
+};
+const candleDateAwareTooltip=bindChartTooltip;
+bindChartTooltip=function(plotId,kind){
+  candleDateAwareTooltip(plotId,kind);
+  if(kind!=='indicator')return;
+  const plot=$(plotId);
+  if(!plot||plot.dataset.candleDateBound)return;
+  plot.dataset.candleDateBound='1';
+  plot.on('plotly_hover',event=>{
+    const candle=(event.points||[]).find(point=>point.data?.type==='candlestick');
+    if(!candle)return;
+    const date=String(candle.x||'').slice(0,10).replaceAll('-','.');
+    const heading=document.querySelector('.research-indicator-tooltip .research-custom-tooltip-date');
+    if(heading)heading.textContent=date;
+    const grid=heading?.parentElement?.querySelector('.research-custom-tooltip-grid');
+    const candleRow=[...(grid?.querySelectorAll('.research-custom-tooltip-row')||[])].find(row=>row.querySelector('.research-custom-tooltip-label')?.textContent===candle.data.name);
+    if(candleRow)grid.prepend(candleRow);
+  });
+};
+const matchedPriceHeightReact=Plotly.react.bind(Plotly);
+Plotly.react=function(target,traces,layout,...args){
+  const id=typeof target==='string'?target:target?.id;
+  if(id==='detail-plot')layout.height=700;
+  if(id==='indicator-plot'){
+    const panels=Object.keys(layout||{}).filter(key=>/^yaxis\d*$/.test(key)).length;
+    layout.height=700+Math.max(0,panels-1)*210;
+    const plot=typeof target==='string'?$(target):target;
+    if(plot){plot.style.height=`${layout.height}px`;plot.style.minHeight=`${layout.height}px`;}
+  }
+  return matchedPriceHeightReact(target,traces,layout,...args);
 };

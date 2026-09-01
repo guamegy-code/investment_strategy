@@ -1098,10 +1098,17 @@ class ResearchViewModel:
         )
         overlay_result = overlay_data["result"] if overlay_data else None
         has_strategy_return = overlay_data is not None
-        candle_timeframes = list(dict.fromkeys(
-            timeframe for timeframe in (candle_timeframes or [])
-            if timeframe in {"daily", "weekly", "monthly"}
-        ))
+        requested_timeframes = (
+            [candle_timeframes]
+            if isinstance(candle_timeframes, str)
+            else (candle_timeframes or [])
+        )
+        candle_timeframes = [next(
+            (timeframe for timeframe in requested_timeframes
+             if timeframe in {"daily", "weekly", "monthly"}),
+            None,
+        )]
+        candle_timeframes = [timeframe for timeframe in candle_timeframes if timeframe]
         has_qqq_candles = bool(candle_timeframes and "QQQ" in frames)
         panels = [
             panel for panel in PANEL_ORDER
@@ -2095,19 +2102,19 @@ def create_research_app(
                     html.Section([
                         html.Div([
                             html.Div([
-                                html.Label("QQQ 봉 표시", className="form-label"),
-                                dcc.Checklist(
+                                dcc.RadioItems(
                                     id="research-indicator-candles",
                                     options=[
+                                        {"label": "표시 안 함", "value": ""},
                                         {"label": "일봉", "value": "daily"},
                                         {"label": "주봉", "value": "weekly"},
                                         {"label": "월봉", "value": "monthly"},
                                     ],
-                                    value=[], inline=True,
+                                    value="", inline=True,
                                     persistence=True, persistence_type="local",
                                     className="research-indicator-checklist",
                                 ),
-                            ], className=(
+                            ], id="research-indicator-candle-control", className=(
                                 "research-indicator-control "
                                 "research-indicator-candle-control"
                             )),
@@ -2324,6 +2331,7 @@ def create_research_app(
     @app.callback(
         Output("research-indicator-graph", "figure"),
         Output("research-indicator-selection-summary", "children"),
+        Output("research-indicator-candle-control", "style"),
         Input({"type": "indicator-matrix-row", "column": ALL}, "value"),
         Input("research-indicator-date-range", "start_date"),
         Input("research-indicator-date-range", "end_date"),
@@ -2363,11 +2371,14 @@ def create_research_app(
                 f"indicators:{selected_pairs}:"
                 f"{overlay_strategy}:"
                 f"{','.join(overlay_options or [])}:"
-                f"{','.join(candle_timeframes or [])}:{version}"
+                f"{candle_timeframes or ''}:{version}"
             ),
             uirevision=f"indicator-range:{selected_start}:{selected_end}",
         )
-        return figure, _indicator_selection_badges(selected_pairs)
+        candle_control_style = (
+            {} if ("QQQ", "Close") in selected_pairs else {"display": "none"}
+        )
+        return figure, _indicator_selection_badges(selected_pairs), candle_control_style
 
     @app.callback(
         Output("research-summary-grid", "rowData", allow_duplicate=True),
@@ -2584,9 +2595,9 @@ def create_research_app(
             };
             const formatIndicatorValue = (point, trace) => {
                 if (trace.type !== "candlestick") return formatNumber(point.y);
-                return `시 ${formatNumber(point.open)} · ` +
-                    `고 ${formatNumber(point.high)} · ` +
-                    `저 ${formatNumber(point.low)} · ` +
+                return `시 ${formatNumber(point.open)}\n` +
+                    `고 ${formatNumber(point.high)}\n` +
+                    `저 ${formatNumber(point.low)}\n` +
                     `종 ${formatNumber(point.close)}`;
             };
             const row = (label, value, target, expanded) => {
