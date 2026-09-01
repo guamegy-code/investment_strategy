@@ -518,6 +518,18 @@ body:has(.research-navigation-graph .nsewdrag:active) .dragcover {
 
 .research-indicator-controls,
 .research-indicator-selector { margin-bottom: 20px; }
+.research-indicator-chart-header {
+  display: flex;
+  min-height: 64px !important;
+  align-items: center;
+  justify-content: flex-end;
+}
+.research-indicator-candle-control {
+  width: max-content;
+  max-width: 100%;
+  justify-items: end;
+}
+.research-indicator-candle-control .research-indicator-checklist { justify-content: flex-end; }
 .research-indicator-controls {
   position: relative;
   z-index: 5;

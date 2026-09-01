@@ -626,9 +626,15 @@ def _resample_ohlc(frame: pd.DataFrame, timeframe: str) -> pd.DataFrame:
     rule = {"weekly": "W-FRI", "monthly": "ME"}.get(timeframe)
     if rule is None:
         return ohlc.iloc[0:0]
-    return ohlc.resample(rule).agg({
+    resampler = ohlc.resample(rule)
+    aggregated = resampler.agg({
         "Open": "first", "High": "max", "Low": "min", "Close": "last",
     }).dropna()
+    # Plot each candle on its actual last trading day. Synthetic Friday or
+    # month-end timestamps make unified hover jump to dates with no market row.
+    last_trading_dates = pd.Series(ohlc.index, index=ohlc.index).resample(rule).last()
+    aggregated.index = pd.DatetimeIndex(last_trading_dates.loc[aggregated.index])
+    return aggregated
 
 
 def _date_bounds(results: Iterable[dict[str, Any]]) -> tuple[str | None, str | None]:
@@ -1194,6 +1200,7 @@ class ResearchViewModel:
                             "fillcolor": "rgba(41,98,255,.38)",
                         },
                         whiskerwidth=.35,
+                        hoverinfo="none",
                         meta={"tooltipName": trace_name, "panel": "price"},
                     ), row=price_row, col=1)
 
@@ -2033,20 +2040,6 @@ def create_research_app(
                                     className="research-indicator-overlay-hint",
                                 ),
                             ], className="research-indicator-control"),
-                            html.Div([
-                                html.Label("QQQ 봉 표시", className="form-label"),
-                                dcc.Checklist(
-                                    id="research-indicator-candles",
-                                    options=[
-                                        {"label": "일봉", "value": "daily"},
-                                        {"label": "주봉", "value": "weekly"},
-                                        {"label": "월봉", "value": "monthly"},
-                                    ],
-                                    value=[], inline=True,
-                                    persistence=True, persistence_type="local",
-                                    className="research-indicator-checklist",
-                                ),
-                            ], className="research-indicator-control"),
                         ], className="card-body research-indicator-toolbar"),
                     ], className="card research-card research-indicator-controls"),
 
@@ -2100,6 +2093,25 @@ def create_research_app(
                     ], className="card research-card research-indicator-selector"),
 
                     html.Section([
+                        html.Div([
+                            html.Div([
+                                html.Label("QQQ 봉 표시", className="form-label"),
+                                dcc.Checklist(
+                                    id="research-indicator-candles",
+                                    options=[
+                                        {"label": "일봉", "value": "daily"},
+                                        {"label": "주봉", "value": "weekly"},
+                                        {"label": "월봉", "value": "monthly"},
+                                    ],
+                                    value=[], inline=True,
+                                    persistence=True, persistence_type="local",
+                                    className="research-indicator-checklist",
+                                ),
+                            ], className=(
+                                "research-indicator-control "
+                                "research-indicator-candle-control"
+                            )),
+                        ], className="card-header research-indicator-chart-header"),
                         dcc.Loading(
                             dcc.Graph(
                                 id="research-indicator-graph",
@@ -2570,6 +2582,13 @@ def create_research_app(
                     maximumFractionDigits: 2
                 }) : "—";
             };
+            const formatIndicatorValue = (point, trace) => {
+                if (trace.type !== "candlestick") return formatNumber(point.y);
+                return `시 ${formatNumber(point.open)} · ` +
+                    `고 ${formatNumber(point.high)} · ` +
+                    `저 ${formatNumber(point.low)} · ` +
+                    `종 ${formatNumber(point.close)}`;
+            };
             const row = (label, value, target, expanded) => {
                 const cells = [
                     span("research-custom-tooltip-label", label),
@@ -2627,7 +2646,9 @@ def create_research_app(
                     isIndicatorGraph
                         ? (traceFor(point).meta || {}).tooltipName
                         : point.customdata.name,
-                    isIndicatorGraph ? formatNumber(point.y) : point.customdata.value,
+                    isIndicatorGraph
+                        ? formatIndicatorValue(point, traceFor(point))
+                        : point.customdata.value,
                     null,
                     hasTargets
                 ));

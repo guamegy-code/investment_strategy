@@ -3,6 +3,7 @@ import {readFileSync} from 'node:fs';
 import test from 'node:test';
 
 const source=readFileSync(new URL('../src/web/app.js',import.meta.url),'utf8');
+const template=readFileSync(new URL('../src/web/index.html',import.meta.url),'utf8');
 
 function extractedRecordsFor(){
   const marketRow=source.match(/function marketRow\(row\) \{[^\n]+\}/)?.[0];
@@ -51,6 +52,30 @@ function extractedQqqCandleRows(){
   assert.ok(helper,'QQQ candle aggregation source was not found');
   return Function(`${helper};return qqqCandleRows;`)();
 }
+
+function extractedTooltipIndicatorValue(){
+  const number=source.match(/const tooltipNumber=[^\n]+/)?.[0];
+  const formatter=source.match(/const tooltipIndicatorValue=[^\n]+/)?.[0];
+  assert.ok(number&&formatter,'indicator tooltip formatter source was not found');
+  return Function(`${number};${formatter};return tooltipIndicatorValue;`)();
+}
+
+test('candlestick tooltip shows OHLC and suppresses the native hover popup',()=>{
+  const format=extractedTooltipIndicatorValue();
+  const value=format({
+    data:{type:'candlestick'},open:100,high:103,low:99,close:102,
+  });
+
+  assert.equal(value,'시 100.00 · 고 103.00 · 저 99.00 · 종 102.00');
+  assert.match(source,/type:'candlestick'.*hoverinfo:'none'/);
+});
+
+test('QQQ candle controls live in the indicator chart header',()=>{
+  const chartStart=template.indexOf('research-indicator-chart-card');
+  const candleControl=template.indexOf('id="indicator-candles"');
+  assert.ok(chartStart>=0&&candleControl>chartStart);
+  assert.match(template,/research-indicator-chart-header/);
+});
 
 test('QQQ candles aggregate daily rows into weekly and monthly OHLC',()=>{
   const aggregate=extractedQqqCandleRows(),rows=[
