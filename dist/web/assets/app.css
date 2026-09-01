@@ -461,6 +461,9 @@ body {
   white-space: nowrap;
   font-variant-numeric: tabular-nums lining-nums;
 }
+.research-custom-tooltip-value {
+  white-space: pre-line;
+}
 .research-custom-tooltip-arrow {
   color: #667382;
   text-align: center;
