@@ -751,9 +751,12 @@ class ResearchWebTests(unittest.TestCase):
         )
         self.assertEqual(candles[0].increasing.line.color, "#F23645")
         self.assertEqual(candles[0].decreasing.line.color, "#2962FF")
+        self.assertEqual(candles[0].hoverinfo, "none")
         self.assertEqual(len(candles[0].x), 45)
         self.assertLess(len(candles[1].x), len(candles[0].x))
         self.assertLess(len(candles[2].x), len(candles[1].x))
+        self.assertIn(pd.Timestamp(candles[1].x[-1]), index)
+        self.assertIn(pd.Timestamp(candles[2].x[-1]), index)
 
     def test_summary_rows_only_include_selected_strategies(self):
         self.assertEqual(
@@ -869,6 +872,13 @@ class ResearchWebTests(unittest.TestCase):
             ["daily", "weekly", "monthly"],
         )
         self.assertTrue(indicator_candles.persistence)
+        chart_card = find_component_by_class(
+            app.layout, "card research-card research-indicator-chart-card"
+        )
+        self.assertIs(
+            find_component(chart_card.children[0], "research-indicator-candles"),
+            indicator_candles,
+        )
         self.assertTrue(find_component(app.layout, "research-date-range").persistence)
         calendar_asset = (
             Path(__file__).parents[1]
