@@ -1131,6 +1131,7 @@ setupDashboard=async function(){
     input.checked=input.value===selected;
     input.onchange=()=>{const timeframe=control.querySelector('input:checked')?.value||'';localStorage.setItem(uiStateKey,JSON.stringify({...loadUiState(),indicatorCandles:timeframe?[timeframe]:[]}));void renderIndicators();};
   }
+  if(!$('indicators-view').classList.contains('offline-hidden'))await renderIndicators();
 };
 
 function tradingDayRangebreaks(traces){
@@ -1186,11 +1187,18 @@ bindChartTooltip=function(plotId,kind){
   plot.dataset.candleDateBound='1';
   plot.on('plotly_hover',event=>{
     const candle=(event.points||[]).find(point=>point.data?.type==='candlestick');
-    if(!candle)return;
-    const date=String(candle.x||'').slice(0,10).replaceAll('-','.');
     const heading=document.querySelector('.research-indicator-tooltip .research-custom-tooltip-date');
-    if(heading)heading.textContent=date;
     const grid=heading?.parentElement?.querySelector('.research-custom-tooltip-grid');
+    if(!grid)return;
+    if(!candle){
+      const priceRows=[...grid.querySelectorAll('.research-custom-tooltip-row')].filter(row=>/종가|Close|이동평균|MA\s*\d+/i.test(row.querySelector('.research-custom-tooltip-label')?.textContent||''));
+      const rank=row=>{const label=row.querySelector('.research-custom-tooltip-label')?.textContent||'';if(/종가|Close/i.test(label))return 0;const period=Number(label.match(/(?:이동평균|MA\s*)(\d+)/i)?.[1]);return Number.isFinite(period)?1000-period:999;};
+      for(const row of priceRows.sort((left,right)=>rank(left)-rank(right)))grid.append(row);
+      return;
+    }
+    const candleIndex=Number.isInteger(candle.pointNumber)?candle.pointNumber:candle.pointIndex;
+    const date=String(candle.data?.x?.[candleIndex]||candle.x||'').slice(0,10).replaceAll('-','.');
+    if(heading)heading.textContent=date;
     const candleRow=[...(grid?.querySelectorAll('.research-custom-tooltip-row')||[])].find(row=>row.querySelector('.research-custom-tooltip-label')?.textContent===candle.data.name);
     if(candleRow)grid.prepend(candleRow);
   });

@@ -84,7 +84,12 @@ test('candlestick mode hides the duplicate QQQ close line and owns tooltip date'
   assert.match(source,/const closeIndex=plot\.data\.indexOf\(priceTrace\);/);
   assert.match(source,/await Plotly\.deleteTraces\(plot,closeIndex\)/);
   assert.match(source,/const candle=\(event\.points\|\|\[\]\)\.find\(point=>point\.data\?\.type==='candlestick'\)/);
+  assert.match(source,/const candleIndex=Number\.isInteger\(candle\.pointNumber\)\?candle\.pointNumber:candle\.pointIndex/);
+  assert.match(source,/candle\.data\?\.x\?\.\[candleIndex\]\|\|candle\.x/);
   assert.match(source,/heading\.textContent=date/);
+  assert.match(source,/if\(!candle\)\{/);
+  assert.match(source,/if\(\/종가\|Close\/i\.test\(label\)\)return 0/);
+  assert.match(source,/1000-period/);
   assert.match(source,/name:`\$\{displayTicker\} · \$\{label\}`,showlegend:false/);
   assert.match(source,/trace\.type==='candlestick'\?\[trace\.low\?\.\[index\],trace\.high\?\.\[index\]\]/);
 });
@@ -111,6 +116,10 @@ test('single-ticker charts add default moving averages and a daily candle',()=>{
   assert.match(source,/candleTicker&&!explicitlySelectedMovingAverages\.length/);
   assert.match(source,/hasSavedCandleState\?\(state\.indicatorCandles\|\|\[\]\):\['daily'\]/);
   assert.match(source,/if\(candleRow\)grid\.prepend\(candleRow\)/);
+});
+
+test('restored candle selection redraws an initially visible indicator view',()=>{
+  assert.match(source,/if\(!\$\('indicators-view'\)\.classList\.contains\('offline-hidden'\)\)await renderIndicators\(\)/);
 });
 
 test('all charts compress non-trading dates with one shared rangebreak list',()=>{
