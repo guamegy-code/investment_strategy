@@ -3,7 +3,7 @@ strategy:
   name: Buy 3 Dip Optimized 70-30 (a-b-c-d) [BIL]
   version: 1
   dsl_version: 1
-  enabled: true
+  enabled: false
 
 # Optimized from buy-3dip-bil while preserving the stage 0~3 state model.
 assets:
