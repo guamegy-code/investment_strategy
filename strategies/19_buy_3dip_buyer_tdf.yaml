@@ -1,0 +1,22 @@
+strategy:
+  id: buy-3dip-tdf
+  name: Buy 3 Dip 70-30 (a-b-c-d) [TDF]
+  version: 1
+  dsl_version: 1
+  enabled: true
+
+source: buy-3dip-bil
+
+# 379810.KS: KODEX 미국나스닥100
+# 426030.KS: TIME 미국나스닥100액티브
+# 0015B0.KS: KoAct 미국나스닥성장기업액티브
+
+# 437080.KS: KODEX 미국종합채권ESG액티브(H)
+
+# 434060.KS: KODEX TDF2050액티브 적격
+# 442570.KS: RISE TDF2050액티브 적격
+
+
+products:
+  QQQ: {QQQ: 100%}
+  BIL: {434060.KS: 100%} #KODEX TDF2050액티브 적격
