@@ -1,6 +1,6 @@
 strategy:
-  id: qqq-cash-dip-buyer
-  name: QQQ Cash Peak-Grid 70-30 (a-b-c-d)
+  id: buy-3dip-bil
+  name: Buy 3 Dip 70-30 (a-b-c-d) [BIL]
   version: 7
   dsl_version: 1
   enabled: true
@@ -121,13 +121,13 @@ target:
 
   - when: state.stage == 2
     weights:
-      QQQ: 89.5%
-      BIL: 10.5%
+      QQQ: 90%
+      BIL: 10%
 
   - when: state.stage == 1
     weights:
-      QQQ: 79%
-      BIL: 21%
+      QQQ: 80%
+      BIL: 20%
 
   - weights:
       QQQ: 70%
