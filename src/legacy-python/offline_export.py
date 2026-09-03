@@ -325,6 +325,7 @@ def export_html(
     runtime = (WEB_SOURCE_DIR / "app.js").read_text(encoding="utf-8")
     document = (
         template.replace("__BUNDLE__", bundle)
+        .replace("__CSS_LINK__", "")
         .replace("__RUNTIME__", runtime)
         .replace("__CSS__", css)
         .replace("__PLOTLY__", plotly_js)
@@ -377,12 +378,20 @@ def export_static_site(
     )
     css += "\n\n/* Investment Strategy web application */\n"
     css += (source_assets_dir / "research_web.css").read_text(encoding="utf-8")
-    (assets_dir / "app.css").write_text(css, encoding="utf-8")
-    shutil.copy2(
-        Path(plotly.__file__).parent / "package_data" / "plotly.min.js",
-        assets_dir / "plotly.min.js",
+    def write_hashed_asset(stem: str, suffix: str, content: bytes) -> str:
+        name = f"{stem}.{hashlib.sha256(content).hexdigest()[:12]}{suffix}"
+        (assets_dir / name).write_bytes(content)
+        return name
+
+    css_name = write_hashed_asset("app", ".css", css.encode("utf-8"))
+    plotly_name = write_hashed_asset(
+        "plotly", ".min.js",
+        (Path(plotly.__file__).parent / "package_data" / "plotly.min.js").read_bytes(),
     )
-    shutil.copy2(WEB_SOURCE_DIR / "app.js", output_dir / "app.js")
+    runtime_bytes = (WEB_SOURCE_DIR / "app.js").read_bytes()
+    runtime_name = write_hashed_asset("app", ".js", runtime_bytes)
+    # Keep this source-named copy for downloadable/offline compatibility.
+    (output_dir / "app.js").write_bytes(runtime_bytes)
     legacy_tdf_proxy = output_dir / "data" / "TDF2050_PROXY.csv"
     if legacy_tdf_proxy.is_file():
         legacy_tdf_proxy.unlink()
@@ -427,15 +436,23 @@ def export_static_site(
     template = (WEB_SOURCE_DIR / "index.html").read_text(encoding="utf-8")
     document = (
         template.replace("__BUNDLE__", bundle)
-        .replace("__CSS__", '@import url("./assets/app.css");')
+        .replace("__CSS_LINK__", f'<link rel="stylesheet" href="./assets/{css_name}">')
+        .replace("__CSS__", "")
         .replace('<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.css">', '')
         .replace('<script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13"></script>', '')
         .replace('<script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/l10n/ko.js"></script>', '')
-        .replace("<script>__PLOTLY__</script>", '<script src="./assets/plotly.min.js"></script>')
-        .replace("<script>__RUNTIME__</script>", '<script src="./app.js"></script>')
+        .replace("<script>__PLOTLY__</script>", f'<script defer src="./assets/{plotly_name}"></script>')
+        .replace("<script>__RUNTIME__</script>", f'<script defer src="./assets/{runtime_name}"></script>')
     )
     index = output_dir / "index.html"
     index.write_text(document, encoding="utf-8")
+    (output_dir / "_headers").write_text(
+        "/assets/*\n  Cache-Control: public, max-age=31536000, immutable\n"
+        "/strategies/*\n  Cache-Control: public, max-age=3600\n"
+        "/index.html\n  Cache-Control: no-cache\n"
+        "/app.js\n  Cache-Control: no-cache\n",
+        encoding="utf-8",
+    )
     return index
 
 

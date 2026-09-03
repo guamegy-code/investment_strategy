@@ -850,6 +850,9 @@ class ResearchViewModel:
     _indicator_overlay_cache: dict[
         tuple[str, str, str], dict[str, Any]
     ] = field(default_factory=dict, init=False, repr=False, compare=False)
+    _indicator_figure_cache: dict[tuple[Any, ...], go.Figure] = field(
+        default_factory=dict, init=False, repr=False, compare=False,
+    )
 
     @property
     def names(self) -> list[str]:
@@ -1076,6 +1079,50 @@ class ResearchViewModel:
         selected_pairs: Iterable[tuple[str, str]] | None = None,
         candle_timeframes: Iterable[str] | None = None,
     ) -> go.Figure:
+        """Return a defensive copy of a recently built indicator figure."""
+        ticker_values = tuple(selected_tickers or ())
+        column_values = tuple(selected_columns or ())
+        pair_values = None if selected_pairs is None else tuple(selected_pairs)
+        overlay_values = tuple(sorted(overlay_options or ()))
+        candle_values = (
+            (candle_timeframes,)
+            if isinstance(candle_timeframes, str)
+            else tuple(candle_timeframes or ())
+        )
+        cache_key = (
+            ticker_values, column_values, str(start or ""), str(end or ""),
+            str(overlay_strategy or ""), overlay_values, pair_values, candle_values,
+        )
+        cached = self._indicator_figure_cache.get(cache_key)
+        if cached is not None:
+            return go.Figure(cached)
+        figure = self._build_indicator_figure(
+            ticker_values,
+            column_values,
+            start,
+            end,
+            overlay_strategy,
+            overlay_values,
+            selected_pairs=pair_values,
+            candle_timeframes=candle_values,
+        )
+        if len(self._indicator_figure_cache) >= 8:
+            oldest_key = next(iter(self._indicator_figure_cache))
+            self._indicator_figure_cache.pop(oldest_key)
+        self._indicator_figure_cache[cache_key] = go.Figure(figure)
+        return figure
+
+    def _build_indicator_figure(
+        self,
+        selected_tickers: Iterable[str] | None,
+        selected_columns: Iterable[str] | None,
+        start=None,
+        end=None,
+        overlay_strategy: str | None = None,
+        overlay_options: Iterable[str] | None = None,
+        selected_pairs: Iterable[tuple[str, str]] | None = None,
+        candle_timeframes: Iterable[str] | None = None,
+    ) -> go.Figure:
         """Build synchronized price, oscillator, and risk research panels."""
         frames = self.market_frames
         if selected_pairs is None:
@@ -1109,13 +1156,18 @@ class ResearchViewModel:
             None,
         )]
         candle_timeframes = [timeframe for timeframe in candle_timeframes if timeframe]
-        has_qqq_candles = bool(candle_timeframes and "QQQ" in frames)
+        candle_ticker = (
+            tickers[0]
+            if len(tickers) == 1 and (tickers[0], "Close") in pairs
+            else "QQQ" if not tickers and "QQQ" in frames else None
+        )
+        has_candles = bool(candle_timeframes and candle_ticker in frames)
         panels = [
             panel for panel in PANEL_ORDER
             if any(indicator_panel(column) == panel for column in columns)
-            or (panel == "price" and (has_strategy_return or has_qqq_candles))
+            or (panel == "price" and (has_strategy_return or has_candles))
         ]
-        if not panels or (not tickers and not has_strategy_return and not has_qqq_candles):
+        if not panels or (not tickers and not has_strategy_return and not has_candles):
             figure = _apply_chart_style(go.Figure())
             figure.add_annotation(
                 text="종목과 지표를 선택하면 연구 그래프가 표시됩니다.",
@@ -1151,6 +1203,8 @@ class ResearchViewModel:
             for column in columns:
                 if (ticker, column) not in pairs:
                     continue
+                if has_candles and ticker == candle_ticker and column == "Close":
+                    continue
                 panel = indicator_panel(column)
                 if panel not in panels or column not in frame:
                     continue
@@ -1181,32 +1235,41 @@ class ResearchViewModel:
                 ), row=row, col=1)
                 style_index += 1
 
-        if has_qqq_candles and "price" in panels:
-            qqq = _filtered_history(frames["QQQ"], start, end)
-            close = qqq.get("Close", pd.Series(dtype=float)).dropna()
+        if has_candles and "price" in panels:
+            candle_frame = _filtered_history(frames[candle_ticker], start, end)
+            close = candle_frame.get("Close", pd.Series(dtype=float)).dropna()
             if not close.empty and float(close.iloc[0]) != 0:
                 baseline = float(close.iloc[0])
                 candle_labels = {"daily": "일봉", "weekly": "주봉", "monthly": "월봉"}
                 price_row = panels.index("price") + 1
                 for timeframe in candle_timeframes:
-                    candles = _resample_ohlc(qqq, timeframe) / baseline * 100
+                    raw_candles = _resample_ohlc(candle_frame, timeframe)
+                    candles = raw_candles / baseline * 100
                     if candles.empty:
                         continue
-                    trace_name = f"QQQ · {candle_labels[timeframe]}"
+                    trace_name = f"{candle_ticker} · {candle_labels[timeframe]}"
                     figure.add_trace(go.Candlestick(
                         x=candles.index,
                         open=candles["Open"], high=candles["High"],
                         low=candles["Low"], close=candles["Close"],
+                        customdata=[
+                            {
+                                "open": float(row.Open), "high": float(row.High),
+                                "low": float(row.Low), "close": float(row.Close),
+                            }
+                            for row in raw_candles.itertuples()
+                        ],
                         name=trace_name,
                         increasing={
                             "line": {"color": "#F23645"},
-                            "fillcolor": "rgba(242,54,69,.38)",
+                            "fillcolor": "#F23645",
                         },
                         decreasing={
                             "line": {"color": "#2962FF"},
-                            "fillcolor": "rgba(41,98,255,.38)",
+                            "fillcolor": "#2962FF",
                         },
                         whiskerwidth=.35,
+                        showlegend=False,
                         hoverinfo="none",
                         meta={"tooltipName": trace_name, "panel": "price"},
                     ), row=price_row, col=1)
@@ -2375,8 +2438,10 @@ def create_research_app(
             ),
             uirevision=f"indicator-range:{selected_start}:{selected_end}",
         )
+        selected_tickers = list(dict.fromkeys(ticker for ticker, _ in selected_pairs))
         candle_control_style = (
-            {} if ("QQQ", "Close") in selected_pairs else {"display": "none"}
+            {} if len(selected_tickers) == 1 and (selected_tickers[0], "Close") in selected_pairs
+            else {"display": "none"}
         )
         return figure, _indicator_selection_badges(selected_pairs), candle_control_style
 
@@ -2593,13 +2658,11 @@ def create_research_app(
                     maximumFractionDigits: 2
                 }) : "—";
             };
-            const formatIndicatorValue = (point, trace) => {
-                if (trace.type !== "candlestick") return formatNumber(point.y);
-                return `시 ${formatNumber(point.open)}\n` +
-                    `고 ${formatNumber(point.high)}\n` +
-                    `저 ${formatNumber(point.low)}\n` +
-                    `종 ${formatNumber(point.close)}`;
-            };
+            const formatIndicatorValue = point => formatNumber(point.y);
+            const formatCandleValue = raw => `시 ${formatNumber(raw.open)}\n` +
+                `고 ${formatNumber(raw.high)}\n` +
+                `저 ${formatNumber(raw.low)}\n` +
+                `종 ${formatNumber(raw.close)}`;
             const row = (label, value, target, expanded) => {
                 const cells = [
                     span("research-custom-tooltip-label", label),
@@ -2614,8 +2677,13 @@ def create_research_app(
                     cells
                 );
             };
+            const candleTrace = isIndicatorGraph
+                ? traces.find(trace => trace.type === "candlestick") : null;
+            const hoverPoint = isIndicatorGraph
+                ? (points.find(point => traceFor(point).type !== "candlestick") || points[0])
+                : points[0];
             const dateKey = isIndicatorGraph
-                ? String(points[0].x).slice(0, 10) : null;
+                ? String(hoverPoint.x).slice(0, 10) : null;
             const dateText = isIndicatorGraph
                 ? dateKey.replaceAll("-", ".") : points[0].customdata.date;
             const content = [
@@ -2652,7 +2720,8 @@ def create_research_app(
             }
             const indicatorRows = points
                 .filter(point => !isIndicatorGraph ||
-                    !(traceFor(point).meta || {}).isStrategySeries)
+                    (!(traceFor(point).meta || {}).isStrategySeries &&
+                     traceFor(point).type !== "candlestick"))
                 .map(point => row(
                     isIndicatorGraph
                         ? (traceFor(point).meta || {}).tooltipName
@@ -2663,6 +2732,25 @@ def create_research_app(
                     null,
                     hasTargets
                 ));
+            if (isIndicatorGraph && candleTrace && dateKey) {
+                let candleIndex = -1;
+                (candleTrace.x || []).forEach((date, index) => {
+                    if (String(date).slice(0, 10) <= dateKey) candleIndex = index;
+                });
+                if (candleIndex >= 0) {
+                    const raw = (candleTrace.customdata || [])[candleIndex] || {};
+                    content[0] = component(
+                        "Div", "research-custom-tooltip-date",
+                        String((candleTrace.x || [])[candleIndex]).slice(0, 10).replaceAll("-", ".")
+                    );
+                    indicatorRows.unshift(row(
+                        candleTrace.name,
+                        formatCandleValue(raw),
+                        null,
+                        hasTargets
+                    ));
+                }
+            }
             rows.push(...indicatorRows);
             if (rows.length) {
                 content.push(component(
