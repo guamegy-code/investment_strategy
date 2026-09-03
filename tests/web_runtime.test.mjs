@@ -60,6 +60,12 @@ function extractedTooltipIndicatorValue(){
   return Function(`${number};${formatter};return tooltipIndicatorValue;`)();
 }
 
+function extractedCandleIndexForDate(){
+  const helper=source.match(/function candleIndexForDate\(dates,hoverDate\)\{[^\n]+\}/)?.[0];
+  assert.ok(helper,'candle hover-date lookup source was not found');
+  return Function(`${helper};return candleIndexForDate;`)();
+}
+
 test('candlestick tooltip shows OHLC and suppresses the native hover popup',()=>{
   const format=extractedTooltipIndicatorValue();
   const value=format({
@@ -81,17 +87,43 @@ test('QQQ candle controls live in the indicator chart header',()=>{
 });
 
 test('candlestick mode hides the duplicate QQQ close line and owns tooltip date',()=>{
-  assert.match(source,/const closeIndex=plot\.data\.indexOf\(priceTrace\);/);
-  assert.match(source,/await Plotly\.deleteTraces\(plot,closeIndex\)/);
-  assert.match(source,/const candle=\(event\.points\|\|\[\]\)\.find\(point=>point\.data\?\.type==='candlestick'\)/);
-  assert.match(source,/const candleIndex=Number\.isInteger\(candle\.pointNumber\)\?candle\.pointNumber:candle\.pointIndex/);
-  assert.match(source,/candle\.data\?\.x\?\.\[candleIndex\]\|\|candle\.x/);
+  assert.match(source,/function mergeIndicatorCandleTraces\(traces,context\)/);
+  assert.match(source,/traces\.splice\(closeIndex,1,candleTrace\)/);
+  assert.doesNotMatch(source,/Plotly\.deleteTraces\(plot,closeIndex\)/);
+  assert.doesNotMatch(source,/Plotly\.addTraces\(plot,traces\)/);
+  assert.match(source,/const points=event\.points\|\|\[\],candlePoint=points\.find\(point=>point\.data\?\.type==='candlestick'\)/);
+  assert.match(source,/candleTrace=candlePoint\?\.data\|\|\(plot\.data\|\|\[\]\)\.find\(trace=>trace\.type==='candlestick'\)/);
+  assert.match(source,/candleIndexForDate\(candleTrace\.x\|\|\[\],hoverDate\)/);
+  assert.match(source,/candleTrace\.customdata\?\.\[candleIndex\]/);
   assert.match(source,/heading\.textContent=date/);
-  assert.match(source,/if\(!candle\)\{/);
+  assert.match(source,/if\(!candleTrace\)\{/);
   assert.match(source,/if\(\/종가\|Close\/i\.test\(label\)\)return 0/);
-  assert.match(source,/1000-period/);
+  assert.match(source,/Number\.isFinite\(period\)\?period:999/);
   assert.match(source,/name:`\$\{displayTicker\} · \$\{label\}`,showlegend:false/);
   assert.match(source,/trace\.type==='candlestick'\?\[trace\.low\?\.\[index\],trace\.high\?\.\[index\]\]/);
+});
+
+test('indicator candles are merged before the single Plotly render and unchanged views reuse it',()=>{
+  assert.match(source,/mergeIndicatorCandleTraces\(traces,indicatorCandleRenderContext\)/);
+  assert.match(source,/lastIndicatorRenderKey=indicatorRenderKey\(\)/);
+  assert.match(source,/if\(key===lastIndicatorRenderKey&&plot\?\.querySelector\('\.main-svg'\)\)/);
+  assert.match(source,/await new Promise\(resolve=>requestAnimationFrame\(resolve\)\)/);
+  assert.match(source,/if\(lastIndicatorRenderKey&&plot\?\.querySelector\('\.main-svg'\)\)/);
+  assert.match(source,/function installIndicatorTabFastPath\(\)/);
+  assert.match(source,/event\.stopImmediatePropagation\(\)/);
+  assert.match(source,/\},true\);/);
+  assert.match(source,/const tradingDayRangebreakCache=new Map\(\)/);
+  assert.match(source,/indicatorLongRangeMode=.*>1500/);
+  assert.match(source,/if\(\/\\\.rangeslider\\\.visible\$\/\.test\(key\)\)update\[key\]=false/);
+  assert.match(source,/function ensureSelectedIndicatorData\(\)/);
+  assert.match(source,/void ensureSelectedIndicatorData\(\)\.catch\(\(\)=>\{\}\)/);
+});
+
+test('candle tooltip follows the current MA hover date, including aggregated candles',()=>{
+  const indexForDate=extractedCandleIndexForDate();
+  assert.equal(indexForDate(['2024-08-27','2024-08-28','2024-08-29'],'2024-08-29'),2);
+  assert.equal(indexForDate(['2024-08-23','2024-08-30'],'2024-08-28'),0);
+  assert.equal(indexForDate(['2024-08-23','2024-08-30'],'2024-09-02'),1);
 });
 
 test('QQQ candles aggregate daily rows into weekly and monthly OHLC',()=>{
@@ -115,11 +147,15 @@ test('single-ticker charts add default moving averages and a daily candle',()=>{
   assert.match(source,/const candleTicker=selectedTickers\.length===1\?selectedTickers\[0\]:''/);
   assert.match(source,/candleTicker&&!explicitlySelectedMovingAverages\.length/);
   assert.match(source,/hasSavedCandleState\?\(state\.indicatorCandles\|\|\[\]\):\['daily'\]/);
-  assert.match(source,/if\(candleRow\)grid\.prepend\(candleRow\)/);
+  assert.match(source,/if\(candleRow\)\{[\s\S]*?grid\.prepend\(candleRow\)/);
 });
 
 test('restored candle selection redraws an initially visible indicator view',()=>{
   assert.match(source,/if\(!\$\('indicators-view'\)\.classList\.contains\('offline-hidden'\)\)await renderIndicators\(\)/);
+});
+
+test('saved indicator tab is made visible before dashboard loading starts',()=>{
+  assert.match(source,/const restoreIndicators=loadUiState\(\)\.activeView==='indicators';if\(restoreIndicators\)\{\$\('analysis-view'\)\.classList\.add\('offline-hidden'\);\$\('indicators-view'\)\.classList\.remove\('offline-hidden'\)/);
 });
 
 test('all charts compress non-trading dates with one shared rangebreak list',()=>{
@@ -140,6 +176,13 @@ test('hosted strategy refresh preserves locally imported definitions',()=>{
   assert.match(source,/definitions=\[\.\.\.loaded\.filter\(definition=>!importedIds\.has/);
   assert.match(source,/indicatorCandles:timeframe\?\[timeframe\]:\[\]/);
 });
+
+test('hosted strategy definitions use the browser cache on refresh',()=>{
+  assert.match(source,/const response=await fetch\(manifestUrl\);/);
+  assert.match(source,/const yamlResponse=await fetch\(new URL\(path,manifestUrl\)\);/);
+  assert.doesNotMatch(source,/fetch\(manifestUrl,\{cache:'no-store'\}\)/);
+});
+
 
 test('rotation candidates carry their last price across a different market holiday',()=>{
   const recordsFor=extractedRecordsFor(),data={

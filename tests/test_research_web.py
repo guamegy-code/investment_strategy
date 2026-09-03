@@ -630,6 +630,27 @@ class ResearchWebTests(unittest.TestCase):
             cached,
         )
 
+    def test_indicator_reuses_complete_figure_for_identical_controls(self):
+        result = make_result(AlphaStrategy(), [100, 110, 121])
+        view = ResearchViewModel((result,))
+
+        first = view.indicator_figure(
+            None, None, selected_pairs=[("QQQ", "Close")],
+            candle_timeframes="daily",
+        )
+        second = view.indicator_figure(
+            None, None, selected_pairs=[("QQQ", "Close")],
+            candle_timeframes="daily",
+        )
+
+        self.assertEqual(len(view._indicator_figure_cache), 1)
+        self.assertIsNot(first, second)
+        self.assertEqual(
+            [(trace.type, trace.name) for trace in first.data],
+            [(trace.type, trace.name) for trace in second.data],
+        )
+        self.assertEqual(first.layout.height, second.layout.height)
+
     def test_indicator_matrix_row_and_column_bulk_toggles_are_scoped(self):
         row_ids = [
             {"type": "indicator-matrix-row", "column": "Close"},
@@ -751,8 +772,36 @@ class ResearchWebTests(unittest.TestCase):
         )
         self.assertEqual(candles[0].increasing.line.color, "#F23645")
         self.assertEqual(candles[0].decreasing.line.color, "#2962FF")
+        self.assertEqual(candles[0].increasing.fillcolor, "#F23645")
+        self.assertEqual(candles[0].decreasing.fillcolor, "#2962FF")
+        self.assertFalse(candles[0].showlegend)
         self.assertEqual(candles[0].hoverinfo, "none")
         self.assertEqual(len(candles[0].x), 45)
+        self.assertEqual(candles[0].customdata[0], {
+            "open": 100.0, "high": 102.0, "low": 99.0, "close": 101.0,
+        })
+
+    def test_single_ticker_candles_replace_the_close_line_and_keep_raw_ohlc(self):
+        result = make_result(AlphaStrategy(), [100, 110, 121])
+        result["market_data"]["BND"] = pd.DataFrame({
+            "Open": [80.0, 81.0, 82.0],
+            "High": [82.0, 83.0, 84.0],
+            "Low": [79.0, 80.0, 81.0],
+            "Close": [81.0, 82.0, 83.0],
+            "MA20": [80.0, 80.5, 81.0],
+        }, index=pd.date_range("2024-01-01", periods=3, freq="D"))
+
+        figure = ResearchViewModel((result,)).indicator_figure(
+            None, None,
+            selected_pairs=[("BND", "Close"), ("BND", "MA20")],
+            candle_timeframes="daily",
+        )
+        candles = [trace for trace in figure.data if trace.type == "candlestick"]
+
+        self.assertEqual([trace.name for trace in candles], ["BND · 일봉"])
+        self.assertNotIn("BND · 종가", [trace.name for trace in figure.data])
+        self.assertIn("BND · MA20", [trace.name for trace in figure.data])
+        self.assertEqual(candles[0].customdata[1]["close"], 82.0)
 
     def test_summary_rows_only_include_selected_strategies(self):
         self.assertEqual(
