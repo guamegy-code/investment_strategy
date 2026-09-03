@@ -116,8 +116,8 @@ state:
 target:
   - when: state.stage == 3
     weights:
-      QQQ: 94.75%
-      BIL: 5.25%
+      QQQ: 100% #94.75%
+      BIL: 0% #5.25%
 
   - when: state.stage == 2
     weights:
