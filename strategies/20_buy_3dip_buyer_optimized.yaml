@@ -1,0 +1,102 @@
+strategy:
+  id: buy-3dip-bil-optimized
+  name: Buy 3 Dip Optimized 70-30 (a-b-c-d) [BIL]
+  version: 1
+  dsl_version: 1
+  enabled: true
+
+# Optimized from buy-3dip-bil while preserving the stage 0~3 state model.
+assets:
+  required: [QQQ, BIL]
+  risk: [QQQ]
+
+parameters:
+  drop_b: -0.10                  # b: peak 대비 -10%
+  drop_c: -0.18                  # c: peak 대비 -18%
+  drop_d: -0.32                  # d: peak 대비 -32%
+
+state:
+  stage:
+    initial: 0
+    rules:
+      # stage 3 -> 2: c 회복 시 마지막 매수분 회수
+      - when: >
+          state.stage == 3
+          and state.peak_price > 0
+          and QQQ.close >= state.peak_price * (1 + parameters.drop_c)
+        set: 2
+
+      # stage 2 -> 3: d 도달 시 남은 현금 전부 투자
+      - when: >
+          state.stage == 2
+          and state.peak_price > 0
+          and QQQ.close <= state.peak_price * (1 + parameters.drop_d)
+        set: 3
+
+      # stage 2 -> 1: b 회복 시 두 번째 매수분 회수
+      - when: >
+          state.stage == 2
+          and state.peak_price > 0
+          and QQQ.close >= state.peak_price * (1 + parameters.drop_b)
+        set: 1
+
+      # stage 1 -> 2: c 도달 시 두 번째 현금 투입
+      - when: >
+          state.stage == 1
+          and state.peak_price > 0
+          and QQQ.close <= state.peak_price * (1 + parameters.drop_c)
+        set: 2
+
+      # stage 1 -> 0: 전고점 회복 시 기본 비중 복원
+      - when: >
+          state.stage == 1
+          and state.peak_price > 0
+          and QQQ.close >= state.peak_price
+        set: 0
+
+      # stage 0 -> 1: b 도달 시 첫 번째 현금 투입
+      - when: >
+          state.stage == 0
+          and state.peak_price > 0
+          and QQQ.close <= state.peak_price * (1 + parameters.drop_b)
+        set: 1
+
+  peak_price:
+    initial: 0
+    rules:
+      - when: state.peak_price == 0
+        set: "=QQQ.close"
+
+      - when: changed(state.stage) and state.stage == 0
+        set: "=QQQ.close"
+
+      - when: state.stage == 0 and QQQ.close > state.peak_price
+        set: "=QQQ.close"
+
+# 초기 BIL 30%를 17%p, 3%p, 10%p 순서로 투입한다.
+target:
+  - when: state.stage == 3
+    weights:
+      QQQ: 100%
+      BIL: 0%
+
+  - when: state.stage == 2
+    weights:
+      QQQ: 90%
+      BIL: 10%
+
+  - when: state.stage == 1
+    weights:
+      QQQ: 87%
+      BIL: 13%
+
+  - weights:
+      QQQ: 70%
+      BIL: 30%
+
+rebalance:
+  - when: changed(state.stage)
+    days: 1
+
+execution:
+  days: 1
