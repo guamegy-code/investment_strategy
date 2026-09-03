@@ -449,6 +449,7 @@ def export_static_site(
     (output_dir / "_headers").write_text(
         "/assets/*\n  Cache-Control: public, max-age=31536000, immutable\n"
         "/strategies/*\n  Cache-Control: public, max-age=3600\n"
+        "/strategies/manifest.json\n  Cache-Control: no-cache\n"
         "/index.html\n  Cache-Control: no-cache\n"
         "/app.js\n  Cache-Control: no-cache\n",
         encoding="utf-8",
