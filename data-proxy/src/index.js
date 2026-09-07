@@ -8,6 +8,7 @@ import {
   strategySnapshot,
   strategyTickers,
 } from "./strategy-runtime.js";
+import {addCompositeValuationScore} from "./composite-valuation.js";
 
 const CACHE_SECONDS = 60 * 60 * 12;
 const MAX_TICKERS = 20;
@@ -77,7 +78,7 @@ export async function loadTicker(ticker, start, end) {
   for (const host of YAHOO_CHART_HOSTS) {
     const source = new URL(`https://${host}/v8/finance/chart/${encodeURIComponent(upstreamTicker)}`);
     source.search = new URLSearchParams({
-      period1: String(start), period2: String(end), interval: "1d", events: "history",
+      period1: String(start), period2: String(end), interval: "1d", events: "div,splits",
     });
     try {
       const candidate = await fetch(source, {
@@ -104,14 +105,21 @@ export async function loadTicker(ticker, start, end) {
   }
   const quote = result.indicators.quote[0];
   const adjusted = result.indicators.adjclose?.[0]?.adjclose;
+  const dividends = new Map();
+  for (const item of Object.values(result.events?.dividends || {})) {
+    const date = new Date(item.date * 1000).toISOString().slice(0, 10);
+    dividends.set(date, (dividends.get(date) || 0) + Number(item.amount || 0));
+  }
   const rows = result.timestamp.map((timestamp, index) => {
     const rawClose = quote.close[index];
     const close = adjusted?.[index] ?? rawClose;
     const factor = close / rawClose;
+    const date = new Date(timestamp * 1000).toISOString().slice(0, 10);
     return {
-      date: new Date(timestamp * 1000).toISOString().slice(0, 10),
+      date,
       open: quote.open[index] * factor, high: quote.high[index] * factor,
       low: quote.low[index] * factor, close, volume: quote.volume[index],
+      raw_close: rawClose, dividends: dividends.get(date) || 0,
     };
   }).filter((row) => Object.values(row).every((value) => Number.isFinite(value) || typeof value === "string"));
   if (!rows.length) throw new Error(`${ticker}: no complete daily rows available`);
@@ -166,6 +174,7 @@ function fallbackCsvRows(csv) {
       date: row.Date,
       open: Number(row.Open), high: Number(row.High), low: Number(row.Low),
       close: Number(row.Close), volume: Number(row.Volume),
+      raw_close: Number(row.RawClose || row.Close), dividends: Number(row.Dividends || 0),
     };
   }).filter((row) => row.date && [row.open, row.high, row.low, row.close, row.volume].every(Number.isFinite));
 }
@@ -212,7 +221,21 @@ export function createFallbackTickerLoader(env) {
 }
 
 function samePriceRows(left, right) {
-  return JSON.stringify(left) === JSON.stringify(right);
+  const comparable = (value) => {
+    if (Array.isArray(value)) return value.map(comparable);
+    if (!value || typeof value !== "object") return value;
+    const row = {...value};
+    if (Object.hasOwn(row, "close")) {
+      row.raw_close = Number.isFinite(Number(row.raw_close)) ? Number(row.raw_close) : Number(row.close);
+      row.dividends = Number.isFinite(Number(row.dividends)) ? Number(row.dividends) : 0;
+    }
+    if (Object.hasOwn(row, "Close")) {
+      row.RawClose = Number.isFinite(Number(row.RawClose)) ? Number(row.RawClose) : Number(row.Close);
+      row.Dividends = Number.isFinite(Number(row.Dividends)) ? Number(row.Dividends) : 0;
+    }
+    return row;
+  };
+  return JSON.stringify(comparable(left)) === JSON.stringify(comparable(right));
 }
 
 async function saveRecentPriceRows(env, ctx, ticker, baseRows, rows) {
@@ -357,14 +380,18 @@ function mergeRows(existing, incoming) {
   return addIndicators([...merged.values()].sort((left, right) => left.Date.localeCompare(right.Date)));
 }
 
-async function refreshNotificationTicker(env, ticker) {
+async function refreshNotificationTicker(env, ticker, {lookbackDays = NOTIFICATION_LOOKBACK_DAYS, tailRows = NOTIFICATION_TAIL_ROWS} = {}) {
   if (!env.MARKET_DATA) throw new Error("MARKET_DATA KV binding is not configured");
   const key = `notification-tail:${ticker}`;
   const existing = JSON.parse(await env.MARKET_DATA.get(key) || "[]");
   const latest = existing.reduce((date, row) => row.Date > date ? row.Date : date, "");
-  const start = latest ? Math.floor(Date.parse(latest) / 1000) : Math.floor((Date.now() - NOTIFICATION_LOOKBACK_DAYS * 86400000) / 1000);
+  const requiredStart = Math.floor((Date.now() - lookbackDays * 86400000) / 1000);
+  const earliest = existing.reduce((date, row) => !date || row.Date < date ? row.Date : date, "");
+  const start = !earliest || Date.parse(earliest) / 1000 > requiredStart
+    ? requiredStart
+    : latest ? Math.floor(Date.parse(latest) / 1000) : requiredStart;
   const incoming = await loadTicker(ticker, start, Math.floor(Date.now() / 1000));
-  const rows = mergeRows(existing, incoming.map(row => ({Date: row.date, Open: row.open, High: row.high, Low: row.low, Close: row.close, Volume: row.volume}))).slice(-NOTIFICATION_TAIL_ROWS);
+  const rows = mergeRows(existing, incoming.map(row => ({Date: row.date, Open: row.open, High: row.high, Low: row.low, Close: row.close, Volume: row.volume, RawClose: row.raw_close, Dividends: row.dividends}))).slice(-tailRows);
   if (!samePriceRows(existing, rows)) await env.MARKET_DATA.put(key, JSON.stringify(rows));
   return rows;
 }
@@ -394,10 +421,13 @@ async function notificationEvaluation(request, env) {
   const unseeded = selected.filter(definition => !snapshots.get(definition.strategy.id)).map(definition => definition.strategy.id);
   if (unseeded.length) throw new Error(`notification seed is required: ${unseeded.join(", ")}`);
   const tickers = new Set(selected.flatMap(definition => strategyTickers(definitions, definition)));
+  const hasCompositeValuation = selected.some(definition => JSON.stringify(definition).includes("QQQ.valuation_score"));
   const hasTdfProxy = [...tickers].some(ticker => ticker === "TDF2050_PROXY" || krwAdjustedBaseTicker(ticker) === "TDF2050_PROXY");
   if (hasTdfProxy) for (const ticker of Object.keys(TDF2050_PROXY_COMPONENT_WEIGHTS)) tickers.add(ticker);
   const data = {};
-  for (const ticker of tickers) if (ticker !== "TDF2050_PROXY" && !krwAdjustedBaseTicker(ticker)) data[ticker] = await refreshNotificationTicker(env, ticker);
+  const historyOptions = hasCompositeValuation ? {lookbackDays: 3650, tailRows: 2300} : {};
+  for (const ticker of tickers) if (ticker !== "TDF2050_PROXY" && !krwAdjustedBaseTicker(ticker)) data[ticker] = await refreshNotificationTicker(env, ticker, historyOptions);
+  if (hasCompositeValuation) addCompositeValuationScore(data);
   if (hasTdfProxy) {
     data.TDF2050_PROXY = buildTdf2050Proxy(data);
     const priorProxyClose = selected.map(definition => snapshots.get(definition.strategy.id)?.prices?.TDF2050_PROXY).find(Number.isFinite);
@@ -451,10 +481,13 @@ async function notificationBootstrap(request, env) {
   const selected = ids.map(id => byId.get(id)).filter(Boolean);
   if (selected.length !== ids.length) throw new Error("one or more strategy IDs are unknown");
   const tickers = new Set(selected.flatMap(definition => strategyTickers(definitions, definition)));
+  const hasCompositeValuation = selected.some(definition => JSON.stringify(definition).includes("QQQ.valuation_score"));
   const hasTdfProxy = [...tickers].some(ticker => ticker === "TDF2050_PROXY" || krwAdjustedBaseTicker(ticker) === "TDF2050_PROXY");
   if (hasTdfProxy) for (const ticker of Object.keys(TDF2050_PROXY_COMPONENT_WEIGHTS)) tickers.add(ticker);
   const data = {};
-  for (const ticker of tickers) if (ticker !== "TDF2050_PROXY" && !krwAdjustedBaseTicker(ticker)) data[ticker] = await refreshNotificationTicker(env, ticker);
+  const historyOptions = hasCompositeValuation ? {lookbackDays: 3650, tailRows: 2300} : {};
+  for (const ticker of tickers) if (ticker !== "TDF2050_PROXY" && !krwAdjustedBaseTicker(ticker)) data[ticker] = await refreshNotificationTicker(env, ticker, historyOptions);
+  if (hasCompositeValuation) addCompositeValuationScore(data);
   if (hasTdfProxy) data.TDF2050_PROXY = buildTdf2050Proxy(data);
   for (const ticker of [...tickers].filter(krwAdjustedBaseTicker)) {
     const baseTicker = krwAdjustedBaseTicker(ticker);
