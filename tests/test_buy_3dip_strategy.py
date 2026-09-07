@@ -29,6 +29,9 @@ class BuyThreeDipStrategyTests(unittest.TestCase):
         self.strategy21 = DeclarativeStrategy.from_yaml(
             ROOT / "strategies" / "21_buy_3dip_buyer_delayed_recovery.yaml"
         )
+        self.strategy22 = DeclarativeStrategy.from_yaml(
+            ROOT / "strategies" / "22_buy_3dip_composite_valuation.yaml"
+        )
         self.portfolio = EmptyPortfolio()
 
     def evaluate_path(self, strategy, prices):
@@ -87,6 +90,35 @@ class BuyThreeDipStrategyTests(unittest.TestCase):
             self.original.parameters,
             {"drop_b": -0.10, "drop_c": -0.20, "drop_d": -0.30},
         )
+
+    def test_strategy_22_uses_composite_valuation_overlay(self):
+        self.assertEqual(self.strategy22.strategy_id, "dsl:buy-3dip-bil-composite-valuation")
+        self.assertEqual(self.strategy22.STRATEGY_VERSION, "2")
+        self.assertTrue(self.strategy22.definition["strategy"]["enabled"])
+        self.assertEqual(self.strategy22.parameters["valuation_mild_entry"], 65)
+        self.assertEqual(self.strategy22.parameters["valuation_high_entry"], 75)
+        self.assertIn("SPY", self.strategy22.required_tickers)
+        self.assertIn("VALUATION_SCORE", self.strategy22.required_market_fields["QQQ"])
+
+        date = pd.Timestamp("2024-01-02")
+        targets = []
+        for qqq_close in (100.0, 90.0, 80.0):
+            result = self.strategy22.evaluate(
+                date,
+                {
+                    "QQQ": {"Close": qqq_close, "VALUATION_SCORE": 80.0},
+                    "BIL": {"Close": 100.0},
+                    "SPY": {"Close": 100.0},
+                },
+                self.portfolio,
+            )
+            targets.append(result["target"])
+            date += pd.Timedelta(days=1)
+        self.assertEqual(targets, [
+            {"QQQ": 0.50, "BIL": 0.50},
+            {"QQQ": 0.85, "BIL": 0.15},
+            {"QQQ": 0.90, "BIL": 0.10},
+        ])
 
 
 if __name__ == "__main__":

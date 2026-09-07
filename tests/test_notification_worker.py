@@ -16,7 +16,9 @@ class NotificationWorkerContractTests(unittest.TestCase):
 
         self.assertIn('url.pathname === "/notification-evaluations"', source)
         self.assertIn("requireNotificationAuth(request, env)", source)
-        self.assertIn("await refreshNotificationTicker(env, ticker)", source)
+        self.assertIn("await refreshNotificationTicker(env, ticker, historyOptions)", source)
+        self.assertIn("hasCompositeValuation ? {lookbackDays: 3650, tailRows: 2300}", source)
+        self.assertIn("addCompositeValuationScore(data)", source)
         self.assertIn("runStrategyIncremental(definitions, definition, data", source)
         self.assertIn("privateDefinitions(body, publicDefinitions)", source)
         self.assertIn("private_strategies", source)

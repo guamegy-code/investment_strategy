@@ -37,6 +37,12 @@
 | 2026-09-03 | Buy 3 Dip 파라미터 최적화 | 10%/18%/32% 진입점과 QQQ 87%/90%/100%가 전체·개발·최근 구간에서 CAGR과 MDD를 함께 개선 | 원본 19번을 유지하고 별도 20번 전략으로 반영 | [Buy 3 Dip 파라미터 최적화](buy-3dip-parameter-optimization.md) |
 | 2026-09-03 | Buy 3 Dip stage 4 추가 | 7,680개 후보에서 기존 20번의 CAGR·MDD를 동시에 개선한 stage 0~4 구조가 없음 | 전략 20 변경 없음 | [Buy 3 Dip stage 4 추가 실험](buy-3dip-stage4-experiment.md) |
 | 2026-09-03 | Buy 3 Dip 진입·회복 공동 최적화 | 진입 -10%/-20%/-32.5%, 회복 +7.5%/-8.5%/-17.5%가 CAGR·MDD·Calmar를 함께 개선 | 20번 유지, 별도 21번 전략으로 생성 | [Buy 3 Dip 진입·회복 시점 공동 최적화](buy-3dip-joint-threshold-optimization.md) |
+| 2026-09-03 | Buy 3 Dip 회복 지연 비중 탐색 | stage별 QQQ 비중 재탐색에서 21번의 87%/90%/100%를 CAGR·MDD 동시 개선한 후보 없음 | 21번 유지, 88%/90%/100%는 CAGR 절충 후보로 기록 | [Buy 3 Dip 회복 지연 비중 탐색](buy-3dip-delayed-recovery-allocation-optimization.md) |
+| 2026-09-03 | Buy 3 Dip 분할 현금화 | stage 1~3의 회복 매도를 두 번으로 나눈 후보는 21번의 CAGR·MDD를 함께 개선하지 못함 | 21번의 즉시 한 단계 현금화 유지 | [Buy 3 Dip 분할 현금화 실험](buy-3dip-partial-unwind-experiment.md) |
+| 2026-09-04 | Buy 3 Dip 동적 진입 조건 | 변동성 비율·급락 속도 기반 후보는 CAGR과 MDD가 모두 악화 | 21번 유지 | [Buy 3 Dip 동적 진입 조건 실험](buy-3dip-dynamic-threshold-experiments.md) |
+| 2026-09-04 | Buy 3 Dip 파라미터 안정성 | 인접 729개 조합에 21번을 CAGR·MDD 모두 이긴 후보 없음, 근방은 완만 | 21번 유지 | [Buy 3 Dip 파라미터 안정성 검증](buy-3dip-parameter-stability.md) |
+| 2026-09-04 | Buy 3 Dip 밸류에이션 프록시 | S&P 500 CAPE 프록시에서 stage 0/1 축소 후보가 전 구간·분할 구간 모두 개선 | Nasdaq-100 직접 밸류에이션 데이터 검증 전까지 연구 후보 | [Buy 3 Dip 밸류에이션 프록시 실험](buy-3dip-valuation-proxy-experiment.md) |
+| 2026-09-07 | Buy 3 Dip 합성 밸류에이션 및 추가 튜닝 | 네 지표 합성 후 stage 0 고평가 방어를 강화하고 stage 1 감축을 줄여 전체·개발·최근 CAGR을 추가 개선 | 21번 유지, 22번 버전 2에 반영 | [Buy 3 Dip 합성 밸류에이션 최적화](buy-3dip-composite-valuation-optimization.md) |
 
 ## 관리 원칙
 

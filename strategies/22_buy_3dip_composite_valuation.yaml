@@ -1,0 +1,151 @@
+strategy:
+  id: buy-3dip-bil-composite-valuation
+  name: Buy 3 Dip Composite Valuation 70-30 (a-b-c-d) [BIL]
+  version: 2
+  dsl_version: 1
+  enabled: true
+
+# 21번 전략의 하락 단계와 회복 지연 구조를 그대로 유지하면서,
+# 매월 한 번 합성 밸류에이션을 확인해 고평가 구간의 QQQ 비중을 추가로 낮춘다.
+# QQQ.valuation_score는 미래 데이터를 사용하지 않고 다음 네 지표의 과거 시점 백분위를 합성한다.
+# - QQQ/SPY 상대 프리미엄 25%: 시장 대비 나스닥100의 상대적인 가격 부담
+# - QQQ 장기 가격 이격도 25%: QQQ 가격이 3년 중앙값에서 벌어진 정도
+# - BIL 현금수익률 35%: 주식 보유의 기회비용이 되는 단기금리 수준
+# - QQQ 배당수익률 역지표 15%: 배당수익률이 낮을수록 높아지는 가격 부담
+# 월말에 확정한 점수는 다음 달부터 사용하여 시점 오류를 방지한다.
+assets:
+  required: [QQQ, BIL]
+  observations: [SPY]
+  risk: [QQQ]
+
+parameters:
+  # 직전 고점 대비 하락률에 따라 stage 0에서 stage 3까지 순차적으로 진입한다.
+  drop_b: -0.10
+  drop_c: -0.20
+  drop_d: -0.325
+
+  # 회복 시에는 진입 기준보다 더 높은 가격까지 기다린 뒤 한 단계씩 현금을 회수한다.
+  # 예: stage 3은 고점 대비 -32.5%에서 진입하지만 -17.5%까지 회복해야 stage 2로 내려간다.
+  recovery_stage_1: 0.075
+  recovery_stage_2: -0.085
+  recovery_stage_3: -0.175
+
+  # 합성점수가 65 이상이면 고평가, 75 이상이면 강한 고평가로 진입한다.
+  # 진입점보다 낮은 이탈점을 사용해 경계 부근에서 잦게 상태가 바뀌는 현상을 줄인다.
+  valuation_mild_entry: 65
+  valuation_high_entry: 75
+  valuation_mild_exit: 60
+  valuation_high_exit: 65
+
+state:
+  # 하락 및 회복 단계다. 숫자가 커질수록 낙폭이 크고 QQQ 목표 비중도 높아진다.
+  # 규칙은 위에서부터 평가되므로, 같은 날 하락 진입과 회복 조건이 겹칠 때 우선순위가 유지된다.
+  stage:
+    initial: 0
+    rules:
+      - when: >
+          state.stage == 3
+          and state.peak_price > 0
+          and QQQ.close >= state.peak_price * (1 + parameters.recovery_stage_3)
+        set: 2
+      - when: >
+          state.stage == 2
+          and state.peak_price > 0
+          and QQQ.close <= state.peak_price * (1 + parameters.drop_d)
+        set: 3
+      - when: >
+          state.stage == 2
+          and state.peak_price > 0
+          and QQQ.close >= state.peak_price * (1 + parameters.recovery_stage_2)
+        set: 1
+      - when: >
+          state.stage == 1
+          and state.peak_price > 0
+          and QQQ.close <= state.peak_price * (1 + parameters.drop_c)
+        set: 2
+      - when: >
+          state.stage == 1
+          and state.peak_price > 0
+          and QQQ.close >= state.peak_price * (1 + parameters.recovery_stage_1)
+        set: 0
+      - when: >
+          state.stage == 0
+          and state.peak_price > 0
+          and QQQ.close <= state.peak_price * (1 + parameters.drop_b)
+        set: 1
+
+  peak_price:
+    initial: 0
+    rules:
+      # 최초 관측 가격을 기준 고점으로 설정한다.
+      - when: state.peak_price == 0
+        set: "=QQQ.close"
+      # 완전히 회복해 stage 0으로 돌아온 날부터 새로운 하락 주기를 시작한다.
+      - when: changed(state.stage) and state.stage == 0
+        set: "=QQQ.close"
+      # stage 0에 있는 동안에만 신고가를 따라가며 하락률의 기준점을 갱신한다.
+      - when: state.stage == 0 and QQQ.close > state.peak_price
+        set: "=QQQ.close"
+
+  # 밸류에이션 상태는 0=보통, 1=고평가, 2=강한 고평가다.
+  # 매일 반응하지 않고 월 단위로만 확인해 단기 잡음과 불필요한 거래를 줄인다.
+  valuation_level:
+    initial: 0
+    check: monthly
+    rules:
+      # 강한 고평가 상태에서 60 미만으로 내려가면 즉시 보통 상태로 복귀한다.
+      - when: >
+          state.valuation_level == 2
+          and QQQ.valuation_score < parameters.valuation_mild_exit
+        set: 0
+      # 60 이상 65 미만이면 강한 고평가에서 고평가 상태로 한 단계 완화한다.
+      - when: >
+          state.valuation_level == 2
+          and QQQ.valuation_score < parameters.valuation_high_exit
+        set: 1
+      # 고평가 상태에서 점수가 75 이상으로 높아지면 강한 고평가로 상향한다.
+      - when: >
+          state.valuation_level == 1
+          and QQQ.valuation_score >= parameters.valuation_high_entry
+        set: 2
+      # 고평가 상태는 점수가 60 미만까지 내려가야 해제된다.
+      - when: >
+          state.valuation_level == 1
+          and QQQ.valuation_score < parameters.valuation_mild_exit
+        set: 0
+      # 기존 상태가 보통일 때 적용하는 신규 진입 규칙이다. 강한 고평가를 먼저 판정한다.
+      - when: QQQ.valuation_score >= parameters.valuation_high_entry
+        set: 2
+      - when: QQQ.valuation_score >= parameters.valuation_mild_entry
+        set: 1
+
+target:
+  # 큰 하락 구간인 stage 2와 3에서는 밸류에이션보다 낙폭 매수를 우선한다.
+  # 따라서 이 두 단계의 목표 비중은 21번 전략과 동일하다.
+  - when: state.stage == 3
+    weights: {QQQ: 100%, BIL: 0%}
+  - when: state.stage == 2
+    weights: {QQQ: 90%, BIL: 10%}
+  # stage 1에서는 이미 가격이 10% 이상 하락했으므로 회복 참여를 우선한다.
+  # 고평가 상태는 기본 87%를 유지하고, 강한 고평가에서만 QQQ를 85%로 낮춘다.
+  - when: state.stage == 1 and state.valuation_level == 2
+    weights: {QQQ: 85%, BIL: 15%}
+  - when: state.stage == 1 and state.valuation_level == 1
+    weights: {QQQ: 87%, BIL: 13%}
+  - when: state.stage == 1
+    weights: {QQQ: 87%, BIL: 13%}
+  # stage 0에서는 하락 전에 현금을 확보하도록 고평가 55%, 강한 고평가 50%로 방어한다.
+  - when: state.valuation_level == 2
+    weights: {QQQ: 50%, BIL: 50%}
+  - when: state.valuation_level == 1
+    weights: {QQQ: 55%, BIL: 45%}
+  - weights: {QQQ: 70%, BIL: 30%}
+
+rebalance:
+  # 하락·회복 단계 또는 월간 밸류에이션 상태가 실제로 바뀔 때만 다음 거래일에 조정한다.
+  - when: changed(state.stage) or changed(state.valuation_level)
+    days: 1
+
+execution:
+  # 신호가 확정된 당일 종가를 미리 사용하지 않도록 주문은 다음 거래일에 실행한다.
+  days: 1

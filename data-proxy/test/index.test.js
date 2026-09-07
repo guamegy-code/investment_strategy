@@ -15,6 +15,7 @@ const chartPayload = {
         }],
         adjclose: [{adjclose: [101]}],
       },
+      events: {dividends: {"1704067200": {date: 1_704_067_200, amount: 0.25}}},
     }],
   },
 };
@@ -37,6 +38,8 @@ test("loadTicker retries the second Yahoo chart host after a 429", async (contex
   assert.match(urls[1], /query2\.finance\.yahoo\.com/);
   assert.equal(rows[0].date, "2024-01-01");
   assert.equal(rows[0].close, 101);
+  assert.equal(rows[0].raw_close, 102);
+  assert.equal(rows[0].dividends, 0.25);
 });
 
 test("loadTicker maps the legacy KRW symbol to Yahoo's complete USDKRW history", async (context) => {
@@ -183,7 +186,7 @@ test("loadPriceRange combines R2 history with the small recent KV overlay", asyn
   assert.deepEqual(writes, []);
 });
 
-test("loadPriceRange skips a KV write when Yahoo returns no new price row", async (context) => {
+test("loadPriceRange enriches an existing row when Yahoo supplies raw close metadata", async (context) => {
   const originalFetch = globalThis.fetch;
   context.after(() => { globalThis.fetch = originalFetch; });
   globalThis.fetch = async () => Response.json(chartPayload);
@@ -198,7 +201,10 @@ test("loadPriceRange skips a KV write when Yahoo returns no new price row", asyn
   const result = await loadPriceRange(env, null, "SPY", 1_704_067_200, 1_704_240_000);
 
   assert.equal(result.rows.length, 1);
-  assert.deepEqual(writes, []);
+  assert.equal(writes.length, 1);
+  const enriched = JSON.parse(writes[0][1]);
+  assert.equal(enriched[0].raw_close, 102);
+  assert.equal(enriched[0].dividends, 0.25);
 });
 
 test("loadPriceRange builds a KRW-adjusted price series from asset and FX rows", async (context) => {
