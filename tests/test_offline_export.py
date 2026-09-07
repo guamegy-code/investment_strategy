@@ -349,6 +349,11 @@ class OfflineExportTests(unittest.TestCase):
             self.assertIn("transaction.objectStore(name).clear()", document)
             self.assertIn("function indicatorTickerData(data)", document)
             self.assertIn("if(!ticker.endsWith('=X'))visible.add(ticker)", document)
+            self.assertIn("data[ticker]||[]", document)
+            self.assertIn('id="indicator-remove-fx"', document)
+            self.assertIn("VALUATION_SCORE:'합성 밸류에이션 점수 (비공식)'", document)
+            self.assertIn("strategyWithSingleQqqIndicator", document)
+            self.assertIn("function exchangeRateRemovedIndicatorRows(data,ticker)", document)
             self.assertNotIn("<script src=", document)
 
     def test_static_site_uses_manifest_and_excludes_market_data(self):

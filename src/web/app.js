@@ -497,9 +497,9 @@ setupDashboard=async function(){
 const indicatorCatalog={
   price:['Close','MA20','MA55','MA120','MA200','EMA20','EMA55','EMA120','EMA200','BB_UPPER','BB_MIDDLE','BB_LOWER'],
   oscillator:['RSI14','DISPARITY60','MACD','MACD_SIGNAL','MACD_HIST','STOCH_K','STOCH_D'],
-  risk:['DRAWDOWN20','DRAWDOWN60','DRAWDOWN120','ROC252','TR','ATR','ATR60','ATR_PCT','VOL20','VOL60','MDD252']
+  risk:['DRAWDOWN20','DRAWDOWN60','DRAWDOWN120','ROC252','TR','ATR','ATR60','ATR_PCT','VOL20','VOL60','MDD252','VALUATION_SCORE']
 };
-const indicatorCatalogLabels={Close:'종가',MA20:'이동평균 20',MA55:'이동평균 55',MA120:'이동평균 120',MA200:'이동평균 200',EMA20:'EMA 20',EMA55:'EMA 55',EMA120:'EMA 120',EMA200:'EMA 200',BB_UPPER:'볼린저 상단',BB_MIDDLE:'볼린저 중심',BB_LOWER:'볼린저 하단',RSI14:'RSI 14',DISPARITY60:'60일 이격도',MACD:'MACD',MACD_SIGNAL:'MACD Signal',MACD_HIST:'MACD Histogram',STOCH_K:'Stochastic %K',STOCH_D:'Stochastic %D',DRAWDOWN20:'20일 낙폭',DRAWDOWN60:'60일 낙폭',DRAWDOWN120:'120일 낙폭',ROC252:'ROC 252일',TR:'TR',ATR:'ATR',ATR60:'ATR 60일',ATR_PCT:'ATR 비율',VOL20:'변동성 20일',VOL60:'변동성 60일',MDD252:'MDD 252일'};
+const indicatorCatalogLabels={Close:'종가',MA20:'이동평균 20',MA55:'이동평균 55',MA120:'이동평균 120',MA200:'이동평균 200',EMA20:'EMA 20',EMA55:'EMA 55',EMA120:'EMA 120',EMA200:'EMA 200',BB_UPPER:'볼린저 상단',BB_MIDDLE:'볼린저 중심',BB_LOWER:'볼린저 하단',RSI14:'RSI 14',DISPARITY60:'60일 이격도',MACD:'MACD',MACD_SIGNAL:'MACD Signal',MACD_HIST:'MACD Histogram',STOCH_K:'Stochastic %K',STOCH_D:'Stochastic %D',DRAWDOWN20:'20일 낙폭',DRAWDOWN60:'60일 낙폭',DRAWDOWN120:'120일 낙폭',ROC252:'ROC 252일',TR:'TR',ATR:'ATR',ATR60:'ATR 60일',ATR_PCT:'ATR 비율',VOL20:'변동성 20일',VOL60:'변동성 60일',MDD252:'MDD 252일',VALUATION_SCORE:'합성 밸류에이션 점수 (비공식)'};
 indicatorFields=panel=>indicatorCatalog[panel]||[];
 indicatorPanel=field=>Object.entries(indicatorCatalog).find(([,fields])=>fields.includes(field))?.[0]||'risk';
 function applyIndicatorCatalogLabels(){
@@ -570,7 +570,7 @@ renderIndicators=async function(){
 // Imported strategies use this single preparation path: download, calculate,
 // validate and cache. It intentionally sits after the dashboard compatibility
 // wrappers above, so existing chart behavior is left unchanged.
-const BROWSER_ENGINE_VERSION = '2026-09-07.1';
+const BROWSER_ENGINE_VERSION = '2026-09-08.1';
 const FX_TICKER_BY_SUFFIX = {'.KS': 'KRW=X', '.KQ': 'KRW=X'};
 const TDF2050_PROXY_COMPONENT_WEIGHTS = {SPY:.4081,VXUS:.3339,BND:.258};
 const KRW_ADJUSTED_SUFFIX = '_KRW';
@@ -748,7 +748,7 @@ function indicatorTickerData(data){
     if(ticker)visible.add(ticker);
   }
   if(!visible.size&&data.QQQ)visible.add('QQQ');
-  return Object.fromEntries([...visible].sort().filter(ticker=>data[ticker]).map(ticker=>[ticker,data[ticker]]));
+  return Object.fromEntries([...visible].sort().map(ticker=>[ticker,data[ticker]||[]]));
 }
 const unfilteredIndicatorSetup=setupIndicatorControls;
 setupIndicatorControls=function(){
@@ -1130,7 +1130,8 @@ renderIndicators=async function(){
   const selectedTickers=[...new Set(selectedPairs.map(([ticker])=>ticker))];
   const candleTicker=selectedTickers.length===1?selectedTickers[0]:'';
   const explicitlySelectedMovingAverages=selectedPairs.filter(([ticker,field])=>ticker===candleTicker&&AUTO_QQQ_MOVING_AVERAGES.includes(field));
-  const autoMovingAverages=candleTicker&&!explicitlySelectedMovingAverages.length?AUTO_QQQ_MOVING_AVERAGES.map(field=>`${candleTicker}|${field}`):[];
+  const strategyWithSingleQqqIndicator=Boolean($('indicator-strategy')?.value)&&selectedPairs.length===1&&candleTicker==='QQQ';
+  const autoMovingAverages=candleTicker&&!explicitlySelectedMovingAverages.length&&!strategyWithSingleQqqIndicator?AUTO_QQQ_MOVING_AVERAGES.map(field=>`${candleTicker}|${field}`):[];
   for(const key of autoMovingAverages)indicatorSelection.add(key);
   const displayedPairs=[...indicatorSelection].map(key=>key.split('|'));
   const candleCloseSelected=Boolean(candleTicker)&&indicatorSelection.has(`${candleTicker}|Close`);
@@ -1289,16 +1290,23 @@ Plotly.relayout=function(target,update,...args){
 let lastIndicatorRenderKey='';
 const indicatorDataRequests=new Map();
 function ensureSelectedIndicatorData(){
-  const selectedTickers=[...new Set([...indicatorSelection].map(key=>key.split('|')[0]).filter(Boolean))].sort(),requestKey=selectedTickers.join('|');
+  const needsCompositeValuation=indicatorSelection.has('QQQ|VALUATION_SCORE');
+  const removeFx=Boolean($('indicator-remove-fx')?.checked);
+  const selectedTickers=[...new Set([...indicatorSelection].map(key=>key.split('|')[0]).filter(Boolean))].sort(),requestKey=`${selectedTickers.join('|')}:${needsCompositeValuation?'valuation':'standard'}:${removeFx?'usd':'native'}`;
   if(indicatorDataRequests.has(requestKey))return indicatorDataRequests.get(requestKey);
   const request=(async()=>{
     const data=await loadData();
     const componentTickers=selectedTickers.some(ticker=>ticker==='TDF2050_PROXY'||krwAdjustedBaseTicker(ticker)==='TDF2050_PROXY')
       ? Object.keys(TDF2050_PROXY_COMPONENT_WEIGHTS):[];
     const sourceTickers=selectedTickers.flatMap(ticker=>isKrwAdjustedTicker(ticker)?[krwAdjustedBaseTicker(ticker),'KRW=X']:[ticker]);
-    const required=[...new Set([...sourceTickers,...componentTickers])];
+    const fxTickers=removeFx?selectedTickers.map(tickerFxRate).filter(Boolean):[];
+    const required=[...new Set([...sourceTickers,...componentTickers,...fxTickers,...(needsCompositeValuation?['QQQ','SPY','BIL']:[])])];
     await loadCachedTickerData(data,required);
-    await fetchProxyTickerData(data,required);
+    await fetchProxyTickerData(data,required,needsCompositeValuation?'2004-01-01':null);
+    if(needsCompositeValuation){
+      addCompositeValuationScore(data);
+      await saveCachedPrices('QQQ',data.QQQ);
+    }
     await ensureTdf2050Proxy(data,selectedTickers);
     await ensureKrwAdjustedAssets(data,selectedTickers);
     return data;
@@ -1317,6 +1325,7 @@ function indicatorRenderKey(){
     strategy,
     overlays,
     candle,
+    removeFx:Boolean($('indicator-remove-fx')?.checked),
     definitions:definitions.length,
   });
 }
@@ -1379,3 +1388,73 @@ function installIndicatorTabFastPath(){
   },true);
 }
 installIndicatorTabFastPath();
+
+// 지표연구의 환율 제거 옵션은 원화 환산 티커에는 원자산을 사용하고,
+// 국내 상장 종목에는 같은 날의 USD/KRW 환율을 나누어 달러 기준 가격을 만든다.
+function exchangeRateRemovedIndicatorRows(data,ticker){
+  const baseTicker=krwAdjustedBaseTicker(ticker);
+  if(baseTicker)return data[baseTicker]||data[ticker]||[];
+  const fxTicker=tickerFxRate(ticker),source=data[ticker],fxRows=data[fxTicker];
+  if(!fxTicker||!source?.length||!fxRows?.length)return source||[];
+  const fxByDate=new Map(fxRows.map(row=>[row.Date,Number(row.Close)]));
+  let lastFx=NaN;
+  const rows=[];
+  for(const row of source){
+    const known=fxByDate.get(row.Date);
+    if(Number.isFinite(known)&&known>0)lastFx=known;
+    if(!Number.isFinite(lastFx)||lastFx<=0)continue;
+    const copy={...row};
+    for(const field of ['Open','High','Low','Close'])copy[field]=Number(copy[field])/lastFx;
+    rows.push(copy);
+  }
+  return addStrategyIndicators(rows);
+}
+
+const indicatorFxHistories=new Map();
+const exchangeRateAwareIndicatorRenderer=renderIndicators;
+renderIndicators=async function(){
+  const toggle=$('indicator-remove-fx'),selected=String($('indicator-strategy')?.value||''),removeFx=Boolean(toggle?.checked);
+  const definition=definitions.find(def=>def.strategy.id===selected),originalEntry=dashboardResults.get(selected),data=await ensureSelectedIndicatorData();
+  const restored=[];
+  if(removeFx){
+    for(const ticker of new Set([...indicatorSelection].map(key=>key.split('|')[0]).filter(Boolean))){
+      const rows=exchangeRateRemovedIndicatorRows(data,ticker);
+      if(rows!==data[ticker]){restored.push([ticker,data[ticker]]);data[ticker]=rows;}
+    }
+  }
+  if(removeFx&&definition){
+    const cacheKey=`${selected}:${definition.strategy.version||''}`;
+    let history=indicatorFxHistories.get(cacheKey);
+    if(!history){
+      if(toggle)toggle.disabled=true;
+      try{
+        const strategyData=await downloadMissingData(definition);
+        history=runWithData(usdValuationDefinition(definition),strategyData,definitions);
+        indicatorFxHistories.set(cacheKey,history);
+      }finally{if(toggle)toggle.disabled=false;}
+    }
+    dashboardResults.set(selected,[definition,history]);
+  }
+  try{return await exchangeRateAwareIndicatorRenderer();}
+  finally{
+    for(const [ticker,rows] of restored)data[ticker]=rows;
+    if(definition){
+      if(originalEntry)dashboardResults.set(selected,originalEntry);
+      else dashboardResults.delete(selected);
+    }
+  }
+};
+
+const indicatorFxDashboardSetup=setupDashboard;
+setupDashboard=async function(){
+  await indicatorFxDashboardSetup();
+  const toggle=$('indicator-remove-fx');
+  if(!toggle)return;
+  const saved=loadUiState();
+  if(Object.hasOwn(saved,'indicatorRemoveFx'))toggle.checked=Boolean(saved.indicatorRemoveFx);
+  toggle.onchange=()=>{
+    localStorage.setItem(uiStateKey,JSON.stringify({...loadUiState(),indicatorRemoveFx:toggle.checked}));
+    lastIndicatorRenderKey='';
+    void renderIndicators();
+  };
+};
