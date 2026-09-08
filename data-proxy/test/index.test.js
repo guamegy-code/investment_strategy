@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
+import {readFileSync} from "node:fs";
 import test from "node:test";
 import {gzipSync} from "node:zlib";
 
 import worker, {createFallbackTickerLoader, loadPriceRange, loadTicker} from "../src/index.js";
-import {mapProductTarget, runStrategy, strategyTickers} from "../src/strategy-runtime.js";
+import {mapProductTarget, parseYaml, runStrategy, strategyTickers} from "../src/strategy-runtime.js";
 
 const chartPayload = {
   chart: {
@@ -253,6 +254,50 @@ test("mapped risk products keep their current mix while risk stays above 70%", (
     mapProductTarget({QQQ: 0.70, BND: 0.30}, definition, source, actual),
     {PRODUCT_A: 0.35, PRODUCT_B: 0.35, PRODUCT_C: 0.30},
   );
+});
+
+test("state confirmation resets when an intervening day does not match", () => {
+  const definition = {
+    strategy: {id: "confirmation-reset", name: "Confirmation reset", version: 1},
+    assets: {required: ["QQQ"]},
+    state: {
+      defense_mode: {
+        initial: "WARNING",
+        rules: [{when: "QQQ.close < 90", set: "DEFENSE", confirm: 2}],
+      },
+    },
+    target: [
+      {when: "state.defense_mode == 'DEFENSE'", weights: {QQQ: "100%"}},
+      {weights: {QQQ: "100%"}},
+    ],
+    execution: {days: 1},
+  };
+  const closes = [80, 100, 80, 80];
+  const dates = ["2025-01-02", "2025-01-03", "2025-01-06", "2025-01-07"];
+  const data = {QQQ: dates.map((Date, index) => ({
+    Date, Open: closes[index], High: closes[index], Low: closes[index],
+    Close: closes[index], Volume: 1,
+  }))};
+
+  const history = runStrategy([definition], definition, data);
+
+  assert.deepEqual(history.map(row => row.state), [
+    "WARNING", "WARNING", "WARNING", "DEFENSE",
+  ]);
+});
+
+test("strategy 24 Korean-commented YAML is available to the Worker runtime", () => {
+  const source = readFileSync(
+    new URL("../../strategies/24_qqq_valuation_breakdown_defense.yaml", import.meta.url),
+    "utf8",
+  );
+  const definition = parseYaml(source);
+
+  assert.equal(definition.strategy.id, "qqq-valuation-breakdown-defense");
+  assert.equal(definition.strategy.enabled, true);
+  assert.equal(definition.state.defense_mode.initial, "NORMAL");
+  assert.equal(definition.state.defense_mode.rules[2].confirm, 6);
+  assert.deepEqual(strategyTickers([definition], definition), ["QQQ", "BIL", "SPY"]);
 });
 
 test("runtime rotation changes only the configured BIL sleeve", () => {

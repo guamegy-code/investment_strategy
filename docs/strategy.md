@@ -30,6 +30,8 @@
 | `14_profit_band_tdf2050_gate_spy_tdf100_no_bnd.yaml` | `profit-band-tdf2050-gate-spy-tdf100-no-bnd` | 예 | 13에서 BND를 빼고 TDF/BIL만 사용하는 전용 단순형 |
 | `15_band_7030_tdf_state_bil.yaml` | `band-7030-tdf-state-bil` | 예 | 70/30 밴드에 사전 BEAR 현금화와 상태별 TDF/BIL 배분을 결합한 방어형 |
 | `16_state_conditioned_cross_asset_rotation.yaml` | `state-conditioned-cross-asset-rotation` | 예 | Strategy 15의 QQQ/TDF 비중을 보존하고 BIL 슬리브만 자동 교차자산으로 대체 |
+| `23_qqq_structural_defense_balanced.yaml` | `qqq-structural-defense-balanced` | 예 | 개인연금용 QQQ 100%와 4상태 추세 방어를 결합한 23B |
+| `24_qqq_valuation_breakdown_defense.yaml` | `qqq-valuation-breakdown-defense` | 예 | 합성 밸류에이션 고점 붕괴를 주 방어 신호로 쓰고 23번 추세 상한을 결합한 전략 |
 
 다음 네 파일은 독립 규칙이 아니라 `source` 전략의 신호·상태·리밸런싱을 그대로 사용해 실제
 상품만 바꾸는 매핑입니다. 자세한 매핑은 [국내 상품 매핑](#국내-상품-매핑)에 있습니다.
@@ -212,6 +214,32 @@ BEAR 확정 전 `structural_bear` 신호만으로 BIL 100%로 이동하던 예�
 
 초기 PoC의 수익률 개선만으로 Strategy 15를 바꾸지는 않았으며, 이 전략의 검증 근거와 한계는
 [상태 조건부 교차자산 로테이션 PoC](research/state-conditioned-cross-asset-rotation-poc.md)에 기록합니다.
+
+### 23 — QQQ Structural Defense Balanced
+
+`23_qqq_structural_defense_balanced.yaml`은 안전자산 비율 제한이 없는 개인연금에서 QQQ의
+장기 수익 참여를 유지하면서 구조적 하락 구간만 BIL로 방어하는 전략입니다.
+
+- BULL과 일반 CAUTION에서는 QQQ 100%를 목표로 합니다.
+- `structural_bear`가 발생했지만 BEAR 10일 확인이 끝나지 않은 구간은 QQQ 50%, BIL 50%입니다.
+- BEAR가 확정되면 QQQ 0%, BIL 100%로 전환합니다.
+- RECOVERY에서는 QQQ 80%, BIL 20%를 유지하고, EMA55와 ROC60 회복까지 확인한 뒤 QQQ 100%로 돌아갑니다.
+- 목표 비중과 실제 비중의 차이가 7.5%p 이상일 때 다음 거래일 시가에 1일 주문을 실행합니다.
+
+### 24 — QQQ Valuation Breakdown Defense
+
+`24_qqq_valuation_breakdown_defense.yaml`은 22번의 합성 밸류에이션 점수를 보조 필터가 아닌
+주 방어 상태로 사용합니다. 단순히 점수가 높다는 이유로 QQQ를 줄이지 않고, 고평가 이후 점수가
+급락하면서 실제 가격 약세까지 확인되는 전환 구간을 찾습니다.
+
+- NORMAL에서 합성점수가 65 이상인 주기 고점을 만든 뒤 25점 이상 하락하면 WARNING이 됩니다.
+- WARNING에서 `risk_off_score` 4 이상이 6거래일 연속이면 DEFENSE가 되고 QQQ 50%, BIL 50%를 목표로 합니다.
+- `recovery_score` 4 이상과 QQQ의 EMA20 상향 회복이 3거래일 이어지면 NORMAL로 돌아가며, 그날 점수로 새 주기 고점을 시작합니다.
+- 23번의 추세 상태는 안전 상한으로 유지합니다. 확정 BEAR는 QQQ 0%, 구조적 약세 사전 경보는 QQQ 50%, RECOVERY는 QQQ 80% 상한입니다.
+- 여러 조건이 겹치면 QQQ 비중이 가장 낮은 목표를 우선합니다. 모든 주문은 다음 거래일 시가부터 1일에 실행합니다.
+
+23·24번의 성과 비교, 비용·파라미터 민감도와 표본 한계는
+[QQQ 구조적 방어와 밸류에이션 급락 방어 검증](research/qqq-structural-valuation-defense-validation.md)에 기록합니다.
 
 ## VXUS 수익 밴드 계열
 
