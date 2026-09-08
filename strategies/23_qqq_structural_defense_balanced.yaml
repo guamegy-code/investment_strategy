@@ -1,0 +1,130 @@
+strategy:
+  id: qqq-structural-defense-balanced
+  name: QQQ Structural Defense Balanced (23B) [BIL]
+  version: 1
+  dsl_version: 1
+  enabled: true
+
+# 15번 전략의 시장 상태 판정은 유지하고, 개인연금의 안전자산 비율 제한이
+# 없다는 점을 활용해 QQQ와 BIL만으로 위험 노출을 조절한다.
+#
+# - BULL / 일반 CAUTION: QQQ 100%
+# - 구조적 약세 감지 후 BEAR 확정 전: QQQ 50%, BIL 50%
+# - BEAR 10거래일 확정 후: BIL 100%
+# - RECOVERY: QQQ 80%, BIL 20%
+#
+# 신호는 당일 종가로 평가하고 주문은 다음 거래일 시가부터 1일에 걸쳐 실행한다.
+assets:
+  required: [QQQ, BIL]
+  observations: [SPY]
+  risk: [QQQ]
+
+variables:
+  risk_off_score: >
+    count(
+      QQQ.close < QQQ.ema20,
+      QQQ.close < QQQ.ema55,
+      QQQ.ema20 < QQQ.ema55,
+      QQQ.roc5 < 0,
+      QQQ.roc20 < 0,
+      QQQ.ema20_slope5 < 0
+    )
+
+  recovery_score: >
+    count(
+      QQQ.close > QQQ.ema20,
+      QQQ.close > QQQ.ema55,
+      QQQ.ema20 > QQQ.ema55,
+      QQQ.roc5 > 0,
+      QQQ.roc20 > 0,
+      QQQ.ema20_slope5 > 0
+    )
+
+  structural_bear: >
+    variables.risk_off_score >= 5
+    and QQQ.close < QQQ.ema20
+    and QQQ.ema20 < QQQ.ema55
+    and QQQ.ema55 < QQQ.ema200
+    and QQQ.roc60 < 0
+    and QQQ.ema200_slope20 < 0
+
+  bull_reentry_allowed: >
+    QQQ.close > QQQ.ema55
+    and QQQ.roc60 > 0
+
+state:
+  market_mode:
+    initial: UNINITIALIZED
+    rules:
+      - when: state.market_mode == 'UNINITIALIZED' and variables.structural_bear
+        set: BEAR
+      - when: state.market_mode == 'UNINITIALIZED' and variables.risk_off_score >= 5
+        set: CAUTION
+      - when: state.market_mode == 'UNINITIALIZED'
+        set: BULL
+
+      - when: state.market_mode == 'BULL' and variables.structural_bear
+        set: BEAR
+        confirm: 10
+      - when: >
+          state.market_mode == 'BULL'
+          and QQQ.close < QQQ.ema20
+          and variables.risk_off_score >= 3
+          and SPY.close < SPY.ema20
+          and SPY.roc5 <= -1
+        set: CAUTION
+        confirm: 1
+
+      - when: state.market_mode == 'CAUTION' and variables.structural_bear
+        set: BEAR
+        confirm: 10
+      - when: state.market_mode == 'CAUTION' and variables.recovery_score >= 4
+        set: BULL
+        confirm: 3
+
+      - when: state.market_mode == 'BEAR' and variables.recovery_score >= 3
+        set: RECOVERY
+        confirm: 3
+
+      - when: state.market_mode == 'RECOVERY' and variables.structural_bear
+        set: BEAR
+        confirm: 10
+      - when: >
+          state.market_mode == 'RECOVERY'
+          and variables.recovery_score >= 4
+          and variables.bull_reentry_allowed
+        set: BULL
+        confirm: 3
+      - when: state.market_mode == 'RECOVERY' and variables.risk_off_score >= 5
+        set: CAUTION
+        confirm: 3
+
+target:
+  # BEAR 확정 전에도 구조적 약세가 지속되면 위험 노출을 절반으로 낮춘다.
+  - when: >
+      state.market_mode != 'BEAR'
+      and variables.structural_bear
+    weights:
+      QQQ: 50%
+      BIL: 50%
+
+  - when: state.market_mode == 'BEAR'
+    weights:
+      QQQ: 0%
+      BIL: 100%
+
+  - when: state.market_mode == 'RECOVERY'
+    weights:
+      QQQ: 80%
+      BIL: 20%
+
+  - weights:
+      QQQ: 100%
+      BIL: 0%
+
+rebalance:
+  - check: daily
+    when: target_deviation() >= 7.5%
+
+execution:
+  days: 1
