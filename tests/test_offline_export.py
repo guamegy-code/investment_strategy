@@ -377,6 +377,13 @@ class OfflineExportTests(unittest.TestCase):
             (stale_fallback / "U1BZ.csv.gz").write_bytes(b"stale")
             stale_strategy_archive = root / "site" / "strategies.zip"
             stale_strategy_archive.write_bytes(b"stale")
+            stale_assets = root / "site" / "assets"
+            stale_assets.mkdir()
+            for name in (
+                "app.000000000000.css", "app.000000000000.js",
+                "plotly.000000000000.min.js", "app.css", "plotly.min.js",
+            ):
+                (stale_assets / name).write_bytes(b"stale")
 
             output = export_static_site(
                 root / "site",
@@ -405,6 +412,11 @@ class OfflineExportTests(unittest.TestCase):
             self.assertFalse(stale_sidecar.exists())
             self.assertFalse(stale_fallback.exists())
             self.assertFalse(stale_strategy_archive.exists())
+            self.assertFalse((root / "site" / "assets" / "app.000000000000.css").exists())
+            self.assertFalse((root / "site" / "assets" / "app.000000000000.js").exists())
+            self.assertFalse((root / "site" / "assets" / "plotly.000000000000.min.js").exists())
+            self.assertFalse((root / "site" / "assets" / "app.css").exists())
+            self.assertFalse((root / "site" / "assets" / "plotly.min.js").exists())
 
     def test_strategy_22_is_enabled_in_the_performance_analysis_manifest(self):
         with TemporaryDirectory() as directory:
@@ -470,6 +482,29 @@ class OfflineExportTests(unittest.TestCase):
 
             self.assertEqual(manifest["strategies"], [{
                 "id": "qqq-valuation-breakdown-defense",
+                "path": source.name,
+                "version": 1,
+            }])
+            self.assertTrue(definition["strategy"]["enabled"])
+
+    def test_strategy_25_is_enabled_in_the_performance_analysis_manifest(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            strategy_dir = root / "strategies"
+            strategy_dir.mkdir()
+            source = PROJECT_ROOT / "strategies" / "25_qqq_valuation_breakdown_balanced.yaml"
+            shutil.copy2(source, strategy_dir / source.name)
+
+            export_static_site(root / "site", strategy_dir=strategy_dir)
+            manifest = json.loads((root / "site" / "strategies" / "manifest.json").read_text(
+                encoding="utf-8"
+            ))
+            definition = yaml.safe_load((root / "site" / "strategies" / source.name).read_text(
+                encoding="utf-8"
+            ))
+
+            self.assertEqual(manifest["strategies"], [{
+                "id": "qqq-valuation-breakdown-balanced",
                 "path": source.name,
                 "version": 1,
             }])
@@ -651,8 +686,11 @@ class OfflineExportTests(unittest.TestCase):
                     }
                 },
                 "target": [
-                    {"when": "state.mode == 'BEAR'", "weights": {"BIL": "100%"}},
-                    {"weights": {"QQQ": "100%"}},
+                    {
+                        "when": "state.mode == 'BEAR'",
+                        "weights": {"QQQ": "0%", "BIL": "100%"},
+                    },
+                    {"weights": {"QQQ": "100%", "BIL": "0%"}},
                 ],
                 "rebalance": [{"when": "changed(state.mode)", "check": "daily", "days": 2}],
             }

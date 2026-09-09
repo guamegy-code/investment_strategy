@@ -300,6 +300,52 @@ test("strategy 24 Korean-commented YAML is available to the Worker runtime", () 
   assert.deepEqual(strategyTickers([definition], definition), ["QQQ", "BIL", "SPY"]);
 });
 
+test("strategy 25 Korean-commented YAML preserves the balanced state rules", () => {
+  const source = readFileSync(
+    new URL("../../strategies/25_qqq_valuation_breakdown_balanced.yaml", import.meta.url),
+    "utf8",
+  );
+  const definition = parseYaml(source);
+
+  assert.equal(definition.strategy.id, "qqq-valuation-breakdown-balanced");
+  assert.equal(definition.strategy.enabled, true);
+  assert.equal(definition.state.defense_mode.rules[3].confirm, 6);
+  assert.equal(definition.state.defense_mode.rules[4].confirm, 2);
+  assert.deepEqual(definition.target[1].weights, {QQQ: "30%", BIL: "70%"});
+  assert.deepEqual(strategyTickers([definition], definition), ["QQQ", "BIL", "SPY"]);
+});
+
+test("strategy 25 runtime enters immediately and recovers after two days", () => {
+  const source = readFileSync(
+    new URL("../../strategies/25_qqq_valuation_breakdown_balanced.yaml", import.meta.url),
+    "utf8",
+  );
+  const definition = parseYaml(source);
+  const dates = ["2025-01-02", "2025-01-03", "2025-01-06", "2025-01-07"];
+  const qqq = [
+    {Close: 105, EMA20: 103, EMA55: 100, EMA200: 98, ROC5: 3, ROC20: 5, ROC60: 8, EMA20_SLOPE5: 2, EMA200_SLOPE20: 1, VALUATION_SCORE: 70},
+    {Close: 80, EMA20: 95, EMA55: 96, EMA200: 70, ROC5: -5, ROC20: -8, ROC60: 2, EMA20_SLOPE5: -2, EMA200_SLOPE20: 1, VALUATION_SCORE: 45},
+    {Close: 105, EMA20: 103, EMA55: 100, EMA200: 98, ROC5: 3, ROC20: 5, ROC60: 8, EMA20_SLOPE5: 2, EMA200_SLOPE20: 1, VALUATION_SCORE: 45},
+    {Close: 106, EMA20: 103, EMA55: 100, EMA200: 98, ROC5: 3, ROC20: 5, ROC60: 8, EMA20_SLOPE5: 2, EMA200_SLOPE20: 1, VALUATION_SCORE: 45},
+  ];
+  const rows = (values) => dates.map((Date, index) => ({
+    Date, Open: values[index].Close, High: values[index].Close,
+    Low: values[index].Close, Volume: 1, ...values[index],
+  }));
+  const data = {
+    QQQ: rows(qqq),
+    BIL: rows(dates.map(() => ({Close: 100}))),
+    SPY: rows(dates.map(() => ({Close: 105, EMA20: 103, ROC5: 1}))),
+  };
+
+  const history = runStrategy([definition], definition, data);
+
+  assert.deepEqual(history.map(row => row.state), [
+    "NORMAL", "DEFENSE", "DEFENSE", "NORMAL",
+  ]);
+  assert.ok(history.some(row => row.target?.QQQ === 0.3 && row.target?.BIL === 0.7));
+});
+
 test("runtime rotation changes only the configured BIL sleeve", () => {
   const definition = {
     strategy: {id: "rotation", name: "Rotation", version: 1},

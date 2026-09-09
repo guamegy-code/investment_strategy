@@ -44,6 +44,7 @@
 | 2026-09-04 | Buy 3 Dip 밸류에이션 프록시 | S&P 500 CAPE 프록시에서 stage 0/1 축소 후보가 전 구간·분할 구간 모두 개선 | Nasdaq-100 직접 밸류에이션 데이터 검증 전까지 연구 후보 | [Buy 3 Dip 밸류에이션 프록시 실험](buy-3dip-valuation-proxy-experiment.md) |
 | 2026-09-07 | Buy 3 Dip 합성 밸류에이션 및 추가 튜닝 | 네 지표 합성 후 stage 0 고평가 방어를 강화하고 stage 1 감축을 줄여 전체·개발·최근 CAGR을 추가 개선 | 21번 유지, 22번 버전 2에 반영 | [Buy 3 Dip 합성 밸류에이션 최적화](buy-3dip-composite-valuation-optimization.md) |
 | 2026-09-09 | QQQ 구조적 방어와 밸류에이션 급락 방어 | 23B는 추세 방어 기준으로 유지하고, 합성점수 고점 대비 25점 하락과 가격 약세 확인을 결합한 후보를 제한적 표본 위험을 명시해 24번으로 승격 | 전략 23·24 문서화, 24번 신규 반영 | [QQQ 구조적 방어와 밸류에이션 급락 방어 검증](qqq-structural-valuation-defense-validation.md) |
+| 2026-09-09 | QQQ 밸류에이션 방어 타이밍 균형형 | 월간 밸류에이션은 유지하되 6점 극단 약세 즉시 진입, QQQ 30% 방어, 2일 회복을 결합한 중간 강도 후보가 전체·개발·최근 CAGR과 MDD를 함께 개선 | 24번 유지, 별도 전략 25 신규 반영 | [QQQ 밸류에이션 방어 타이밍 균형형 검증](qqq-valuation-defense-timing-balanced.md) |
 
 ## 관리 원칙
 

@@ -497,9 +497,9 @@ setupDashboard=async function(){
 const indicatorCatalog={
   price:['Close','MA20','MA55','MA120','MA200','EMA20','EMA55','EMA120','EMA200','BB_UPPER','BB_MIDDLE','BB_LOWER'],
   oscillator:['RSI14','DISPARITY60','MACD','MACD_SIGNAL','MACD_HIST','STOCH_K','STOCH_D'],
-  risk:['DRAWDOWN20','DRAWDOWN60','DRAWDOWN120','ROC252','TR','ATR','ATR60','ATR_PCT','VOL20','VOL60','MDD252']
+  risk:['DRAWDOWN20','DRAWDOWN60','DRAWDOWN120','ROC252','TR','ATR','ATR60','ATR_PCT','VOL20','VOL60','MDD252','VALUATION_SCORE']
 };
-const indicatorCatalogLabels={Close:'종가',MA20:'이동평균 20',MA55:'이동평균 55',MA120:'이동평균 120',MA200:'이동평균 200',EMA20:'EMA 20',EMA55:'EMA 55',EMA120:'EMA 120',EMA200:'EMA 200',BB_UPPER:'볼린저 상단',BB_MIDDLE:'볼린저 중심',BB_LOWER:'볼린저 하단',RSI14:'RSI 14',DISPARITY60:'60일 이격도',MACD:'MACD',MACD_SIGNAL:'MACD Signal',MACD_HIST:'MACD Histogram',STOCH_K:'Stochastic %K',STOCH_D:'Stochastic %D',DRAWDOWN20:'20일 낙폭',DRAWDOWN60:'60일 낙폭',DRAWDOWN120:'120일 낙폭',ROC252:'ROC 252일',TR:'TR',ATR:'ATR',ATR60:'ATR 60일',ATR_PCT:'ATR 비율',VOL20:'변동성 20일',VOL60:'변동성 60일',MDD252:'MDD 252일'};
+const indicatorCatalogLabels={Close:'종가',MA20:'이동평균 20',MA55:'이동평균 55',MA120:'이동평균 120',MA200:'이동평균 200',EMA20:'EMA 20',EMA55:'EMA 55',EMA120:'EMA 120',EMA200:'EMA 200',BB_UPPER:'볼린저 상단',BB_MIDDLE:'볼린저 중심',BB_LOWER:'볼린저 하단',RSI14:'RSI 14',DISPARITY60:'60일 이격도',MACD:'MACD',MACD_SIGNAL:'MACD Signal',MACD_HIST:'MACD Histogram',STOCH_K:'Stochastic %K',STOCH_D:'Stochastic %D',DRAWDOWN20:'20일 낙폭',DRAWDOWN60:'60일 낙폭',DRAWDOWN120:'120일 낙폭',ROC252:'ROC 252일',TR:'TR',ATR:'ATR',ATR60:'ATR 60일',ATR_PCT:'ATR 비율',VOL20:'변동성 20일',VOL60:'변동성 60일',MDD252:'MDD 252일',VALUATION_SCORE:'합성 밸류에이션 점수 (비공식)'};
 indicatorFields=panel=>indicatorCatalog[panel]||[];
 indicatorPanel=field=>Object.entries(indicatorCatalog).find(([,fields])=>fields.includes(field))?.[0]||'risk';
 function applyIndicatorCatalogLabels(){
@@ -570,12 +570,12 @@ renderIndicators=async function(){
 // Imported strategies use this single preparation path: download, calculate,
 // validate and cache. It intentionally sits after the dashboard compatibility
 // wrappers above, so existing chart behavior is left unchanged.
-const BROWSER_ENGINE_VERSION = '2026-08-30.5';
+const BROWSER_ENGINE_VERSION = '2026-09-08.1';
 const FX_TICKER_BY_SUFFIX = {'.KS': 'KRW=X', '.KQ': 'KRW=X'};
 const TDF2050_PROXY_COMPONENT_WEIGHTS = {SPY:.4081,VXUS:.3339,BND:.258};
 const KRW_ADJUSTED_SUFFIX = '_KRW';
 const DATA_PROXY_TICKER_PATTERN = /^[A-Z0-9_.^=:-]{1,24}$/;
-const KNOWN_MARKET_FIELDS = new Set(['open','high','low','close','volume','ma20','ma55','ma120','ma200','ema20','ema55','ema120','ema200','rsi14','disparity60','macd','macd_signal','macd_hist','stoch_k','stoch_d','roc5','roc20','roc40','roc60','roc90','roc120','roc252','ema20_slope5','ema200_slope20','drawdown20','drawdown60','drawdown120','tr','atr','atr60','atr_pct','bb_middle','bb_upper','bb_lower','vol20','vol60','mdd252']);
+const KNOWN_MARKET_FIELDS = new Set(['open','high','low','close','volume','ma20','ma55','ma120','ma200','ema20','ema55','ema120','ema200','rsi14','disparity60','macd','macd_signal','macd_hist','stoch_k','stoch_d','roc5','roc20','roc40','roc60','roc90','roc120','roc252','ema20_slope5','ema200_slope20','drawdown20','drawdown60','drawdown120','tr','atr','atr60','atr_pct','bb_middle','bb_upper','bb_lower','vol20','vol60','mdd252','valuation_score']);
 function definitionById(id, all=definitions){return all.find(item=>item?.strategy?.id===id)||null;}
 function krwAdjustedBaseTicker(ticker){const value=String(ticker||'').toUpperCase();return value.endsWith(KRW_ADJUSTED_SUFFIX)?value.slice(0,-KRW_ADJUSTED_SUFFIX.length):null;}
 function isKrwAdjustedTicker(ticker){return Boolean(krwAdjustedBaseTicker(ticker));}
@@ -623,13 +623,28 @@ async function saveCachedResult(key,value){const db=await openCache();return new
 function refreshIndicatorTickerCatalog(data){const select=$('indicator-ticker');if(select)select.innerHTML=Object.keys(data).sort().map(ticker=>`<option value="${ticker}">${ticker}</option>`).join('');if(indicatorControlsInitialized)setupIndicatorControls();}
 async function loadCachedTickerData(data,tickers){for(const ticker of tickers)if(!data[ticker]){const cached=await cachedPrices(ticker);if(cached)data[ticker]=addStrategyIndicators(cached.rows||cached);}}
 function latestCachedDate(rows){return rows.reduce((latest,row)=>row.Date&&row.Date>latest?row.Date:latest,'');}
+function earliestCachedDate(rows){return rows.reduce((earliest,row)=>row.Date&&(!earliest||row.Date<earliest)?row.Date:earliest,'');}
 function mergeTickerRows(existing,incoming){const merged=new Map((existing||[]).map(row=>[row.Date,row]));for(const row of incoming)merged.set(row.Date,row);return addStrategyIndicators([...merged.values()].sort((left,right)=>left.Date.localeCompare(right.Date)));}
-async function fetchProxyTickerData(data,tickers){const groups=new Map();for(const ticker of [...new Set(tickers.filter(isDataProxyTicker))]){const start=latestCachedDate(data[ticker]||[])||'2010-01-01';(groups.get(start)||groups.set(start,[]).get(start)).push(ticker);}if(!groups.size)return;if(!proxyUrl){const unavailable=[...groups.values()].flat().filter(ticker=>!data[ticker]);if(unavailable.length)throw Error(`시장 데이터가 없습니다: ${unavailable.join(', ')}`);return;}for(const [startDate,group] of groups)for(let offset=0;offset<group.length;offset+=20){const requested=group.slice(offset,offset+20),endpoint=new URL('/prices',proxyUrl);endpoint.searchParams.set('tickers',requested.join(','));endpoint.searchParams.set('start',startDate);endpoint.searchParams.set('runtime',BROWSER_ENGINE_VERSION);try{const response=await fetch(endpoint,{cache:'no-store'}),payload=await response.json();if(!response.ok)throw Error(payload.error||'시장 데이터 다운로드에 실패했습니다.');for(const [ticker,rows] of Object.entries(payload.data||{})){const incoming=rows.map(row=>({Date:row.date,Open:row.open,High:row.high,Low:row.low,Close:row.close,Volume:row.volume})),merged=mergeTickerRows(data[ticker],incoming);data[ticker]=merged;await saveCachedPrices(ticker,merged);}}catch(error){const unavailable=requested.filter(ticker=>!(data[ticker]||[]).length);if(unavailable.length){const message=error instanceof TypeError&&/fetch/i.test(error.message)?`데이터 프록시(${endpoint.origin})에 연결할 수 없습니다. Cloudflare Worker 배포 주소와 상태를 확인하세요.`:error instanceof Error?error.message:'시장 데이터 다운로드에 실패했습니다.';throw Error(message);}console.warn('시장 데이터 갱신이 지연되어 저장된 데이터를 사용합니다.',{tickers:requested,error:error instanceof Error?error.message:String(error)});}}}
+async function fetchProxyTickerData(data,tickers,historyStart=null){const groups=new Map();for(const ticker of [...new Set(tickers.filter(isDataProxyTicker))]){const rows=data[ticker]||[],earliest=earliestCachedDate(rows),start=historyStart&&(!earliest||earliest>historyStart)?historyStart:latestCachedDate(rows)||'2010-01-01';(groups.get(start)||groups.set(start,[]).get(start)).push(ticker);}if(!groups.size)return;if(!proxyUrl){const unavailable=[...groups.values()].flat().filter(ticker=>!data[ticker]);if(unavailable.length)throw Error(`시장 데이터가 없습니다: ${unavailable.join(', ')}`);return;}for(const [startDate,group] of groups)for(let offset=0;offset<group.length;offset+=20){const requested=group.slice(offset,offset+20),endpoint=new URL('/prices',proxyUrl);endpoint.searchParams.set('tickers',requested.join(','));endpoint.searchParams.set('start',startDate);endpoint.searchParams.set('runtime',BROWSER_ENGINE_VERSION);try{const response=await fetch(endpoint,{cache:'no-store'}),payload=await response.json();if(!response.ok)throw Error(payload.error||'시장 데이터 다운로드에 실패했습니다.');for(const [ticker,rows] of Object.entries(payload.data||{})){const incoming=rows.map(row=>({Date:row.date,Open:row.open,High:row.high,Low:row.low,Close:row.close,Volume:row.volume,RawClose:row.raw_close??row.close,Dividends:row.dividends??0})),merged=mergeTickerRows(data[ticker],incoming);data[ticker]=merged;await saveCachedPrices(ticker,merged);}}catch(error){const unavailable=requested.filter(ticker=>!(data[ticker]||[]).length);if(unavailable.length){const message=error instanceof TypeError&&/fetch/i.test(error.message)?`데이터 프록시(${endpoint.origin})에 연결할 수 없습니다. Cloudflare Worker 배포 주소와 상태를 확인하세요.`:error instanceof Error?error.message:'시장 데이터 다운로드에 실패했습니다.';throw Error(message);}console.warn('시장 데이터 갱신이 지연되어 저장된 데이터를 사용합니다.',{tickers:requested,error:error instanceof Error?error.message:String(error)});}}}
+
+// 22번 전략의 네 지표 합성점수를 월말에 확정하고 다음 달부터 사용한다.
+function addCompositeValuationScore(data){
+  const qqq=[...(data.QQQ||[])].sort((a,b)=>a.Date.localeCompare(b.Date)),align=rows=>{const sorted=[...(rows||[])].sort((a,b)=>a.Date.localeCompare(b.Date)),out=[];let index=0,last=null;for(const row of qqq){while(index<sorted.length&&sorted[index].Date<=row.Date)last=sorted[index++];out.push(last);}return out;};
+  if(!qqq.length||!data.SPY?.length||!data.BIL?.length)throw Error('합성 밸류에이션에는 QQQ, SPY, BIL 데이터가 필요합니다.');
+  const spy=align(data.SPY),bil=align(data.BIL),qClose=qqq.map(row=>Number(row.Close)),spyClose=spy.map(row=>Number(row?.Close)),bilClose=bil.map(row=>Number(row?.Close));
+  const lower=(values,target)=>{let low=0,high=values.length;while(low<high){const middle=(low+high)>>1;if(values[middle]<target)low=middle+1;else high=middle;}return low;},upper=(values,target)=>{let low=0,high=values.length;while(low<high){const middle=(low+high)>>1;if(values[middle]<=target)low=middle+1;else high=middle;}return low;};
+  const rolling=(values,window,minimum,selector)=>{const sorted=[],out=Array(values.length).fill(NaN);for(let index=0;index<values.length;index++){const value=values[index];if(Number.isFinite(value))sorted.splice(lower(sorted,value),0,value);const expired=index>=window?values[index-window]:NaN;if(Number.isFinite(expired))sorted.splice(lower(sorted,expired),1);if(Number.isFinite(value)&&sorted.length>=minimum)out[index]=selector(sorted,value);}return out;};
+  const median=values=>rolling(values,756,504,sorted=>{const middle=sorted.length>>1;return sorted.length%2?sorted[middle]:(sorted[middle-1]+sorted[middle])/2;}),percentile=values=>rolling(values,1260,504,(sorted,value)=>upper(sorted,value)/sorted.length);
+  const relative=qClose.map((value,index)=>Math.log(value/spyClose[index])),relativeMedian=median(relative),qqqMedian=median(qClose),relativeRank=percentile(relative.map((value,index)=>value-relativeMedian[index])),stretchRank=percentile(qClose.map((value,index)=>value/qqqMedian[index]-1)),rateRank=percentile(bilClose.map((value,index)=>index<63?NaN:(value/bilClose[index-63])**4-1));
+  const dividendYield=Array(qqq.length).fill(NaN);let start=0,sum=0;for(let index=0;index<qqq.length;index++){sum+=Number(qqq[index].Dividends||0);const cutoff=Date.parse(`${qqq[index].Date}T00:00:00Z`)-365*86400000;while(start<index&&Date.parse(`${qqq[start].Date}T00:00:00Z`)<=cutoff)sum-=Number(qqq[start++].Dividends||0);const raw=Number(qqq[index].RawClose??qqq[index].Close);dividendYield[index]=raw>0?sum/raw:NaN;}
+  const dividendRank=percentile(dividendYield),score=qqq.map((_,index)=>(relativeRank[index]*.25+stretchRank[index]*.25+rateRank[index]*.35+(1-dividendRank[index])*.15)*100);let month='',prior=NaN,active=NaN;
+  data.QQQ=qqq.map((row,index)=>{const next=row.Date.slice(0,7);if(next!==month){active=prior;month=next;}prior=score[index];return{...row,VALUATION_SCORE:active};});return data;
+}
 function buildTdf2050Proxy(components){const tickers=Object.keys(TDF2050_PROXY_COMPONENT_WEIGHTS),byDate=Object.fromEntries(tickers.map(ticker=>[ticker,new Map(components[ticker].map(row=>[row.Date,row]))])),dates=[...byDate[tickers[0]].keys()].filter(date=>tickers.every(ticker=>byDate[ticker].has(date))).sort(),target={...TDF2050_PROXY_COMPONENT_WEIGHTS},weights={...target},rows=[];let previous=null,previousValue=100,previousMonth='';for(let index=1;index<dates.length;index++){const date=dates[index],market=Object.fromEntries(tickers.map(ticker=>[ticker,byDate[ticker].get(dates[index-1])])),month=date.slice(0,7);if(!previous){rows.push({Date:date,Open:100,High:100,Low:100,Close:100,Volume:0});previous=market;previousMonth=month;continue;}if(month!==previousMonth)Object.assign(weights,target);const value=field=>previousValue*tickers.reduce((sum,ticker)=>sum+weights[ticker]*Number(market[ticker][field])/Number(previous[ticker].Close),0),open=value('Open'),close=value('Close'),high=Math.max(value('High'),open,close),low=Math.min(value('Low'),open,close);rows.push({Date:date,Open:open,High:high,Low:low,Close:close,Volume:0});const contributions=Object.fromEntries(tickers.map(ticker=>[ticker,weights[ticker]*Number(market[ticker].Close)/Number(previous[ticker].Close)])),total=Object.values(contributions).reduce((sum,value)=>sum+value,0);for(const ticker of tickers)weights[ticker]=contributions[ticker]/total;previous=market;previousValue=close;previousMonth=month;}return rows;}
 async function ensureTdf2050Proxy(data,tickers){if(!tickers.some(ticker=>ticker==='TDF2050_PROXY'||krwAdjustedBaseTicker(ticker)==='TDF2050_PROXY'))return;const components=Object.keys(TDF2050_PROXY_COMPONENT_WEIGHTS),unavailable=components.filter(ticker=>!data[ticker]);if(unavailable.length)throw Error(`TDF2050_PROXY 구성 데이터를 찾을 수 없습니다: ${unavailable.join(', ')}`);data.TDF2050_PROXY=addStrategyIndicators(buildTdf2050Proxy(data));await saveCachedPrices('TDF2050_PROXY',data.TDF2050_PROXY);}
 function buildKrwAdjustedAsset(base,fx){const fxByDate=new Map(fx.map(row=>[row.Date,Number(row.Close)])),rows=[];let lastFx=NaN;for(const row of [...base].sort((left,right)=>left.Date.localeCompare(right.Date))){const known=fxByDate.get(row.Date);if(Number.isFinite(known))lastFx=known;if(!Number.isFinite(lastFx))continue;rows.push({Date:row.Date,Open:Number(row.Open)*lastFx,High:Number(row.High)*lastFx,Low:Number(row.Low)*lastFx,Close:Number(row.Close)*lastFx,Volume:Number(row.Volume)||0});}return rows;}
 async function ensureKrwAdjustedAssets(data,tickers){for(const ticker of tickers.filter(isKrwAdjustedTicker)){const baseTicker=krwAdjustedBaseTicker(ticker),base=data[baseTicker],fx=data['KRW=X'];if(!base||!fx)throw Error(`${ticker}의 원자산 또는 USD/KRW 데이터를 찾을 수 없습니다.`);data[ticker]=addStrategyIndicators(buildKrwAdjustedAsset(base,fx));await saveCachedPrices(ticker,data[ticker]);}}
-async function downloadMissingData(def){const data=await loadData(),{tickers}=validateStrategy(def),needsTdf=tickers.some(ticker=>ticker==='TDF2050_PROXY'||krwAdjustedBaseTicker(ticker)==='TDF2050_PROXY'),tdfComponents=needsTdf?Object.keys(TDF2050_PROXY_COMPONENT_WEIGHTS):[],refreshTickers=[...new Set([...tickers,...tdfComponents])];await loadCachedTickerData(data,refreshTickers);await fetchProxyTickerData(data,refreshTickers);await ensureTdf2050Proxy(data,tickers);await ensureKrwAdjustedAssets(data,tickers);const unavailable=tickers.filter(ticker=>!data[ticker]&&!isDataProxyTicker(ticker));if(unavailable.length)throw Error(`시장 데이터가 없습니다: ${unavailable.join(', ')}`);const incomplete=tickers.filter(ticker=>!data[ticker]);if(incomplete.length)throw Error(`시세를 찾을 수 없습니다: ${incomplete.join(', ')}`);refreshIndicatorTickerCatalog(data);return data;}
+async function downloadMissingData(def){const data=await loadData(),{tickers,fields}=validateStrategy(def),needsTdf=tickers.some(ticker=>ticker==='TDF2050_PROXY'||krwAdjustedBaseTicker(ticker)==='TDF2050_PROXY'),needsComposite=fields.QQQ?.has('valuation_score'),tdfComponents=needsTdf?Object.keys(TDF2050_PROXY_COMPONENT_WEIGHTS):[],refreshTickers=[...new Set([...tickers,...tdfComponents])];await loadCachedTickerData(data,refreshTickers);await fetchProxyTickerData(data,refreshTickers,needsComposite?'2004-01-01':null);if(needsComposite){addCompositeValuationScore(data);await saveCachedPrices('QQQ',data.QQQ);}await ensureTdf2050Proxy(data,tickers);await ensureKrwAdjustedAssets(data,tickers);const unavailable=tickers.filter(ticker=>!data[ticker]&&!isDataProxyTicker(ticker));if(unavailable.length)throw Error(`시장 데이터가 없습니다: ${unavailable.join(', ')}`);const incomplete=tickers.filter(ticker=>!data[ticker]);if(incomplete.length)throw Error(`시세를 찾을 수 없습니다: ${incomplete.join(', ')}`);refreshIndicatorTickerCatalog(data);return data;}
 function portfolioPrices(market,field='close',removeFx=true,tickers=Object.keys(market)){const prices={};for(const ticker of tickers){const row=market[ticker];if(!row)continue;const fxTicker=tickerFxRate(ticker),fx=removeFx&&fxTicker?Number(market[fxTicker]?.[field]):1,price=Number(row[field])/(Number.isFinite(fx)&&fx>0?fx:1);if(Number.isFinite(price))prices[ticker]=price;}return prices;}
 function strategyHoldingTickers(def,all=definitions){if(!def.source)return [...(def.assets?.required||[])];const source=definitionById(def.source,all);if(!source)throw Error(`Unknown source strategy: ${def.source}`);return [...new Set((source.assets?.required||[]).flatMap(asset=>Object.keys(def.products?.[asset]||{[asset]:1})))];}
 function resolve(def,all,removeFx=true){if(!def.source)return new Declarative(def);const source=all[def.source];if(!source)throw Error(`source 전략을 찾을 수 없습니다: ${def.source}`);const runtime=new Declarative(source);return {step(date,market,portfolio){const actual=portfolio.weights(portfolioPrices(market,'close',removeFx)),virtual={weights:()=>Object.fromEntries((source.assets.required||[]).map(asset=>[asset,Object.keys(def.products?.[asset]||{[asset]:1}).reduce((sum,product)=>sum+(actual[product]||0),0)]))},signal=runtime.step(date,market,virtual),target={};for(const [asset,weight] of Object.entries(signal.target))for(const [product,share] of Object.entries(def.products?.[asset]||{[asset]:1}))target[product]=(target[product]||0)+weight*pct(share);return {...signal,target};}};}
@@ -637,7 +652,7 @@ function runWithData(def,data,availableDefinitions=definitions,{removeFx=true}={
 const rawRunWithData=runWithData;
 function runWithMixedValuation(def,data,availableDefinitions=definitions){const validation=validateStrategy(def,availableDefinitions),all=Object.fromEntries(availableDefinitions.map(item=>[item.strategy.id,item]));all[def.strategy.id]=def;const holdings=strategyHoldingTickers(def,availableDefinitions),valued=applyValuationData(validation.calculation,data),valuedByDate=new Map(recordsFor(validation.tickers,valued).map(row=>[row.date,row.market])),rows=recordsFor(validation.tickers,data).filter(row=>validation.tickers.every(ticker=>[...(validation.fields[ticker]||[])].every(field=>Number.isFinite(Number(row.market[ticker][field])))));if(!rows.length)throw Error('지표 초기 계산 구간 이후에 공통 거래일이 남아 있지 않습니다.');const runtime=resolve(def,all,false),portfolio=new Portfolio();for(const row of rows){const valuationMarket=valuedByDate.get(row.date);if(!valuationMarket)continue;portfolio.update(portfolioPrices(valuationMarket,'open',false,holdings),row.date);const signal=runtime.step(row.date,row.market,portfolio);if(!portfolio.history.length)portfolio.start(signal.target,signal.days,row.date,signal.reason||'INITIAL');else if(signal.rebalance)portfolio.start(signal.target,signal.days,row.date,signal.reason||'RULE');portfolio.record(row.date,portfolioPrices(valuationMarket,'close',false,holdings),signal.state);}const events=new Map(portfolio.rebalances.map(event=>[event.ExecutionDate||event.Date,event]));return portfolio.history.map(row=>{const event=events.get(row.date);return event?{...row,target:event.Target,preWeights:event.PreWeights||null,executionDays:event.ExecutionDays,reason:event.Reason}:row;});}
 runWithData=function(def,data,availableDefinitions=definitions,options={}){const calculation=strategyDependencies(def,availableDefinitions).calculation;if(calculation.valuation?.signal_currency==='LOCAL')return runWithMixedValuation(def,data,availableDefinitions);const valuationOptions=calculation.valuation?{...options,removeFx:false}:options;return rawRunWithData(def,applyValuationData(calculation,data),availableDefinitions,valuationOptions);};
-async function resultKey(def,data){const market=validateStrategy(def).tickers.map(ticker=>[ticker,(data[ticker]||[]).map(row=>[row.Date,row.Open,row.High,row.Low,row.Close,row.Volume])]);const bytes=new TextEncoder().encode(JSON.stringify([BROWSER_ENGINE_VERSION,bundle.market_data_version||'',def,market]));const digest=await crypto.subtle.digest('SHA-256',bytes);return [...new Uint8Array(digest)].map(value=>value.toString(16).padStart(2,'0')).join('');}
+async function resultKey(def,data){const market=validateStrategy(def).tickers.map(ticker=>[ticker,(data[ticker]||[]).map(row=>[row.Date,row.Open,row.High,row.Low,row.Close,row.Volume,row.RawClose,row.Dividends,row.VALUATION_SCORE])]);const bytes=new TextEncoder().encode(JSON.stringify([BROWSER_ENGINE_VERSION,bundle.market_data_version||'',def,market]));const digest=await crypto.subtle.digest('SHA-256',bytes);return [...new Uint8Array(digest)].map(value=>value.toString(16).padStart(2,'0')).join('');}
 function valuationWeightPortfolio(portfolio,valuationMarket,holdings){const prices=portfolioPrices(valuationMarket,'close',false,holdings);return{weights:()=>portfolio.weights(prices)};}
 runWithMixedValuation=function(def,data,availableDefinitions=definitions){
   const validation=validateStrategy(def,availableDefinitions),all=Object.fromEntries(availableDefinitions.map(item=>[item.strategy.id,item]));
@@ -733,7 +748,7 @@ function indicatorTickerData(data){
     if(ticker)visible.add(ticker);
   }
   if(!visible.size&&data.QQQ)visible.add('QQQ');
-  return Object.fromEntries([...visible].sort().filter(ticker=>data[ticker]).map(ticker=>[ticker,data[ticker]]));
+  return Object.fromEntries([...visible].sort().map(ticker=>[ticker,data[ticker]||[]]));
 }
 const unfilteredIndicatorSetup=setupIndicatorControls;
 setupIndicatorControls=function(){
@@ -1115,7 +1130,8 @@ renderIndicators=async function(){
   const selectedTickers=[...new Set(selectedPairs.map(([ticker])=>ticker))];
   const candleTicker=selectedTickers.length===1?selectedTickers[0]:'';
   const explicitlySelectedMovingAverages=selectedPairs.filter(([ticker,field])=>ticker===candleTicker&&AUTO_QQQ_MOVING_AVERAGES.includes(field));
-  const autoMovingAverages=candleTicker&&!explicitlySelectedMovingAverages.length?AUTO_QQQ_MOVING_AVERAGES.map(field=>`${candleTicker}|${field}`):[];
+  const strategyWithSingleQqqIndicator=Boolean($('indicator-strategy')?.value)&&selectedPairs.length===1&&candleTicker==='QQQ';
+  const autoMovingAverages=candleTicker&&!explicitlySelectedMovingAverages.length&&!strategyWithSingleQqqIndicator?AUTO_QQQ_MOVING_AVERAGES.map(field=>`${candleTicker}|${field}`):[];
   for(const key of autoMovingAverages)indicatorSelection.add(key);
   const displayedPairs=[...indicatorSelection].map(key=>key.split('|'));
   const candleCloseSelected=Boolean(candleTicker)&&indicatorSelection.has(`${candleTicker}|Close`);
@@ -1274,16 +1290,23 @@ Plotly.relayout=function(target,update,...args){
 let lastIndicatorRenderKey='';
 const indicatorDataRequests=new Map();
 function ensureSelectedIndicatorData(){
-  const selectedTickers=[...new Set([...indicatorSelection].map(key=>key.split('|')[0]).filter(Boolean))].sort(),requestKey=selectedTickers.join('|');
+  const needsCompositeValuation=indicatorSelection.has('QQQ|VALUATION_SCORE');
+  const removeFx=Boolean($('indicator-remove-fx')?.checked);
+  const selectedTickers=[...new Set([...indicatorSelection].map(key=>key.split('|')[0]).filter(Boolean))].sort(),requestKey=`${selectedTickers.join('|')}:${needsCompositeValuation?'valuation':'standard'}:${removeFx?'usd':'native'}`;
   if(indicatorDataRequests.has(requestKey))return indicatorDataRequests.get(requestKey);
   const request=(async()=>{
     const data=await loadData();
     const componentTickers=selectedTickers.some(ticker=>ticker==='TDF2050_PROXY'||krwAdjustedBaseTicker(ticker)==='TDF2050_PROXY')
       ? Object.keys(TDF2050_PROXY_COMPONENT_WEIGHTS):[];
     const sourceTickers=selectedTickers.flatMap(ticker=>isKrwAdjustedTicker(ticker)?[krwAdjustedBaseTicker(ticker),'KRW=X']:[ticker]);
-    const required=[...new Set([...sourceTickers,...componentTickers])];
+    const fxTickers=removeFx?selectedTickers.map(tickerFxRate).filter(Boolean):[];
+    const required=[...new Set([...sourceTickers,...componentTickers,...fxTickers,...(needsCompositeValuation?['QQQ','SPY','BIL']:[])])];
     await loadCachedTickerData(data,required);
-    await fetchProxyTickerData(data,required);
+    await fetchProxyTickerData(data,required,needsCompositeValuation?'2004-01-01':null);
+    if(needsCompositeValuation){
+      addCompositeValuationScore(data);
+      await saveCachedPrices('QQQ',data.QQQ);
+    }
     await ensureTdf2050Proxy(data,selectedTickers);
     await ensureKrwAdjustedAssets(data,selectedTickers);
     return data;
@@ -1302,6 +1325,7 @@ function indicatorRenderKey(){
     strategy,
     overlays,
     candle,
+    removeFx:Boolean($('indicator-remove-fx')?.checked),
     definitions:definitions.length,
   });
 }
@@ -1364,3 +1388,73 @@ function installIndicatorTabFastPath(){
   },true);
 }
 installIndicatorTabFastPath();
+
+// 지표연구의 환율 제거 옵션은 원화 환산 티커에는 원자산을 사용하고,
+// 국내 상장 종목에는 같은 날의 USD/KRW 환율을 나누어 달러 기준 가격을 만든다.
+function exchangeRateRemovedIndicatorRows(data,ticker){
+  const baseTicker=krwAdjustedBaseTicker(ticker);
+  if(baseTicker)return data[baseTicker]||data[ticker]||[];
+  const fxTicker=tickerFxRate(ticker),source=data[ticker],fxRows=data[fxTicker];
+  if(!fxTicker||!source?.length||!fxRows?.length)return source||[];
+  const fxByDate=new Map(fxRows.map(row=>[row.Date,Number(row.Close)]));
+  let lastFx=NaN;
+  const rows=[];
+  for(const row of source){
+    const known=fxByDate.get(row.Date);
+    if(Number.isFinite(known)&&known>0)lastFx=known;
+    if(!Number.isFinite(lastFx)||lastFx<=0)continue;
+    const copy={...row};
+    for(const field of ['Open','High','Low','Close'])copy[field]=Number(copy[field])/lastFx;
+    rows.push(copy);
+  }
+  return addStrategyIndicators(rows);
+}
+
+const indicatorFxHistories=new Map();
+const exchangeRateAwareIndicatorRenderer=renderIndicators;
+renderIndicators=async function(){
+  const toggle=$('indicator-remove-fx'),selected=String($('indicator-strategy')?.value||''),removeFx=Boolean(toggle?.checked);
+  const definition=definitions.find(def=>def.strategy.id===selected),originalEntry=dashboardResults.get(selected),data=await ensureSelectedIndicatorData();
+  const restored=[];
+  if(removeFx){
+    for(const ticker of new Set([...indicatorSelection].map(key=>key.split('|')[0]).filter(Boolean))){
+      const rows=exchangeRateRemovedIndicatorRows(data,ticker);
+      if(rows!==data[ticker]){restored.push([ticker,data[ticker]]);data[ticker]=rows;}
+    }
+  }
+  if(removeFx&&definition){
+    const cacheKey=`${selected}:${definition.strategy.version||''}`;
+    let history=indicatorFxHistories.get(cacheKey);
+    if(!history){
+      if(toggle)toggle.disabled=true;
+      try{
+        const strategyData=await downloadMissingData(definition);
+        history=runWithData(usdValuationDefinition(definition),strategyData,definitions);
+        indicatorFxHistories.set(cacheKey,history);
+      }finally{if(toggle)toggle.disabled=false;}
+    }
+    dashboardResults.set(selected,[definition,history]);
+  }
+  try{return await exchangeRateAwareIndicatorRenderer();}
+  finally{
+    for(const [ticker,rows] of restored)data[ticker]=rows;
+    if(definition){
+      if(originalEntry)dashboardResults.set(selected,originalEntry);
+      else dashboardResults.delete(selected);
+    }
+  }
+};
+
+const indicatorFxDashboardSetup=setupDashboard;
+setupDashboard=async function(){
+  await indicatorFxDashboardSetup();
+  const toggle=$('indicator-remove-fx');
+  if(!toggle)return;
+  const saved=loadUiState();
+  if(Object.hasOwn(saved,'indicatorRemoveFx'))toggle.checked=Boolean(saved.indicatorRemoveFx);
+  toggle.onchange=()=>{
+    localStorage.setItem(uiStateKey,JSON.stringify({...loadUiState(),indicatorRemoveFx:toggle.checked}));
+    lastIndicatorRenderKey='';
+    void renderIndicators();
+  };
+};

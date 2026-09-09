@@ -241,6 +241,21 @@ BEAR 확정 전 `structural_bear` 신호만으로 BIL 100%로 이동하던 예�
 23·24번의 성과 비교, 비용·파라미터 민감도와 표본 한계는
 [QQQ 구조적 방어와 밸류에이션 급락 방어 검증](research/qqq-structural-valuation-defense-validation.md)에 기록합니다.
 
+### 25 — QQQ Valuation Breakdown Balanced
+
+`25_qqq_valuation_breakdown_balanced.yaml`은 24번의 월간 밸류에이션 신호를 유지하면서
+일별 가격 신호에 따라 방어 속도와 강도를 조절한 균형형 전략입니다.
+
+- 밸류에이션 고점 65점과 고점 대비 25점 하락 기준은 24번과 같습니다.
+- 밸류에이션 급락일에 `risk_off_score`가 6이면 WARNING을 건너뛰고 즉시 DEFENSE가 됩니다.
+- 극단 약세가 아니면 WARNING에서 `risk_off_score` 4 이상을 6거래일 연속 확인합니다.
+- DEFENSE 목표는 QQQ 30%, BIL 70%로 24번보다 방어 강도를 높입니다.
+- `recovery_score` 4 이상과 QQQ의 EMA20 상향 회복이 2거래일 이어지면 NORMAL로 복귀합니다.
+- 23번의 추세 안전 상한과 7.5%p 리밸런싱 허용폭, 다음 거래일 시가 체결은 그대로 유지합니다.
+
+25번의 튜닝 범위, 구간별 성과와 제한된 방어 사건에 따른 과최적화 위험은
+[QQQ 밸류에이션 방어 타이밍 균형형 검증](research/qqq-valuation-defense-timing-balanced.md)에 기록합니다.
+
 ## VXUS 수익 밴드 계열
 
 ### 04 — Profit Band VXUS
