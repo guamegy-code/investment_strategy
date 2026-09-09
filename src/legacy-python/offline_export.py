@@ -378,6 +378,17 @@ def export_static_site(
     )
     css += "\n\n/* Investment Strategy web application */\n"
     css += (source_assets_dir / "research_web.css").read_text(encoding="utf-8")
+
+    # 해시가 바뀐 이전 빌드 파일을 제거해 dist를 그대로 복사해도 불필요한 자산이
+    # 누적되지 않게 한다. app.js는 오프라인 호환용 원본 이름이므로 유지한다.
+    for pattern in ("app.*.css", "app.*.js", "plotly.*.min.js"):
+        for stale_asset in assets_dir.glob(pattern):
+            stale_asset.unlink()
+    for legacy_name in ("app.css", "plotly.min.js"):
+        legacy_asset = assets_dir / legacy_name
+        if legacy_asset.is_file():
+            legacy_asset.unlink()
+
     def write_hashed_asset(stem: str, suffix: str, content: bytes) -> str:
         name = f"{stem}.{hashlib.sha256(content).hexdigest()[:12]}{suffix}"
         (assets_dir / name).write_bytes(content)
