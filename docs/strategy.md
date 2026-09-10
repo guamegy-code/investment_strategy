@@ -32,6 +32,8 @@
 | `16_state_conditioned_cross_asset_rotation.yaml` | `state-conditioned-cross-asset-rotation` | 예 | Strategy 15의 QQQ/TDF 비중을 보존하고 BIL 슬리브만 자동 교차자산으로 대체 |
 | `23_qqq_structural_defense_balanced.yaml` | `qqq-structural-defense-balanced` | 예 | 개인연금용 QQQ 100%와 4상태 추세 방어를 결합한 23B |
 | `24_qqq_valuation_breakdown_defense.yaml` | `qqq-valuation-breakdown-defense` | 예 | 합성 밸류에이션 고점 붕괴를 주 방어 신호로 쓰고 23번 추세 상한을 결합한 전략 |
+| `25_qqq_valuation_breakdown_balanced.yaml` | `qqq-valuation-breakdown-balanced` | 예 | 월간 밸류에이션 급락과 빠른 가격 확인을 결합한 개인연금 균형형 |
+| `26_band_7030_tdf_valuation_defense.yaml` | `band-7030-tdf-valuation-defense` | 예 | 15번 퇴직연금 70/30 구조에 25번 밸류에이션 방어를 결합한 전략 |
 
 다음 네 파일은 독립 규칙이 아니라 `source` 전략의 신호·상태·리밸런싱을 그대로 사용해 실제
 상품만 바꾸는 매핑입니다. 자세한 매핑은 [국내 상품 매핑](#국내-상품-매핑)에 있습니다.
@@ -255,6 +257,23 @@ BEAR 확정 전 `structural_bear` 신호만으로 BIL 100%로 이동하던 예�
 
 25번의 튜닝 범위, 구간별 성과와 제한된 방어 사건에 따른 과최적화 위험은
 [QQQ 밸류에이션 방어 타이밍 균형형 검증](research/qqq-valuation-defense-timing-balanced.md)에 기록합니다.
+
+### 26 — 70/30 TDF Valuation Defense
+
+`26_band_7030_tdf_valuation_defense.yaml`은 15번의 퇴직연금 70/30 배분과 네 상태 방어에
+25번의 밸류에이션 급락 방어를 추가한 전략입니다.
+
+- 15번의 `market_mode`와 25번의 `trend_mode`는 규칙이 같으므로 `trend_mode` 하나만 사용합니다.
+- 밸류에이션 고점 65점, 고점 대비 25점 하락, 극단 약세 즉시 진입과 일반 약세 6일 확인은
+  25번과 같습니다.
+- 밸류에이션 DEFENSE에서는 QQQ 30%, BIL 70%를 목표로 합니다.
+- 15번의 구조적 약세 사전 경보 QQQ 0%·BIL 100%와 확정 BEAR QQQ 0%·TDF2050 20%·BIL
+  80%가 밸류에이션 방어보다 우선합니다.
+- 정상·주의 구간은 QQQ 70%·TDF2050 30%, RECOVERY는 QQQ 60%·TDF2050 30%·BIL 10%입니다.
+- 위험자산으로 분류한 QQQ의 최대 비중은 70%이며, 주문은 다음 거래일 시가부터 1일에 실행합니다.
+
+후보 배분, 구간별 성과, 롤링 및 비용 민감도와 표본 한계는
+[26번 퇴직연금 밸류에이션 방어 검증](research/strategy26-retirement-valuation-defense.md)에 기록합니다.
 
 ## VXUS 수익 밴드 계열
 
