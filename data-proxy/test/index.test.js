@@ -346,6 +346,29 @@ test("strategy 25 runtime enters immediately and recovers after two days", () =>
   assert.ok(history.some(row => row.target?.QQQ === 0.3 && row.target?.BIL === 0.7));
 });
 
+test("strategy 26 Korean-commented YAML preserves retirement defense priority", () => {
+  const source = readFileSync(
+    new URL("../../strategies/26_band_7030_tdf_valuation_defense.yaml", import.meta.url),
+    "utf8",
+  );
+  const definition = parseYaml(source);
+
+  assert.equal(definition.strategy.id, "band-7030-tdf-valuation-defense");
+  assert.equal(definition.strategy.enabled, true);
+  assert.equal(definition.state.defense_mode.rules[3].confirm, 6);
+  assert.equal(definition.state.defense_mode.rules[4].confirm, 2);
+  assert.deepEqual(definition.target[0].weights, {
+    QQQ: "0%", TDF2050_PROXY: "20%", BIL: "80%",
+  });
+  assert.deepEqual(definition.target[2].weights, {
+    QQQ: "30%", TDF2050_PROXY: "0%", BIL: "70%",
+  });
+  assert.deepEqual(
+    strategyTickers([definition], definition),
+    ["QQQ", "TDF2050_PROXY", "BIL", "SPY"],
+  );
+});
+
 test("runtime rotation changes only the configured BIL sleeve", () => {
   const definition = {
     strategy: {id: "rotation", name: "Rotation", version: 1},
