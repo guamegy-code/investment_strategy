@@ -158,6 +158,13 @@ test('saved indicator tab is made visible before dashboard loading starts',()=>{
   assert.match(source,/const restoreIndicators=loadUiState\(\)\.activeView==='indicators';if\(restoreIndicators\)\{\$\('analysis-view'\)\.classList\.add\('offline-hidden'\);\$\('indicators-view'\)\.classList\.remove\('offline-hidden'\)/);
 });
 
+test('restored indicator strategy reloads its overlay history when needed',()=>{
+  assert.match(source,/async function ensureIndicatorStrategyHistory\(strategyId\)/);
+  assert.match(source,/if\(!strategyId\|\|dashboardResults\.has\(strategyId\)\)return;/);
+  assert.match(source,/dashboardResults\.set\(strategyId,\[definition,history\]\)/);
+  assert.match(source,/await ensureIndicatorStrategyHistory\(String\(\$\('indicator-strategy'\)\?\.value\|\|''\)\)/);
+});
+
 test('all charts compress non-trading dates with one shared rangebreak list',()=>{
   assert.match(source,/function tradingDayRangebreaks\(traces\)/);
   assert.match(source,/bounds:\['sat','mon'\]/);
@@ -181,6 +188,11 @@ test('hosted strategy definitions use the browser cache on refresh',()=>{
   assert.match(source,/const response=await fetch\(manifestUrl\);/);
   assert.match(source,/const yamlResponse=await fetch\(new URL\(path,manifestUrl\)\);/);
   assert.doesNotMatch(source,/fetch\(manifestUrl,\{cache:'no-store'\}\)/);
+});
+
+test('background strategy worker names reassigned function expressions',()=>{
+  assert.match(source,/if\(!item\.name\)throw Error\('Worker 함수 이름을 확인할 수 없습니다\.'\)/);
+  assert.match(source,/return `const \$\{item\.name\}=\$\{source\};`/);
 });
 
 

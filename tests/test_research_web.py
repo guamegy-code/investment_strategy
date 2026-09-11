@@ -5,6 +5,7 @@ import pandas as pd
 
 from main import parse_args
 from pension_strategies import KodexNasdaqAllocationStrategy
+from indicator_catalog import indicator_options, indicator_panel
 from research_web import (
     ResearchViewModel,
     _apply_stored_detail_range,
@@ -28,6 +29,12 @@ class BetaStrategy:
 
 class GammaStrategy:
     pass
+
+
+class FxStrategy:
+    valuation_fx_ticker = "KRW=X"
+    foreign_asset_tickers = ("QQQ",)
+    holding_tickers = ("QQQ",)
 
 
 def make_result(strategy, values, rebalances=()):
@@ -64,6 +71,29 @@ def make_result(strategy, values, rebalances=()):
         },
         "rebalances": list(rebalances),
         "market_data": {"QQQ": market_frame},
+    }
+
+
+def make_fx_result():
+    index = pd.to_datetime(["2024-01-01", "2024-01-02", "2024-01-03"])
+    qqq = pd.DataFrame({
+        "Open": [990.0, 1200.0, 1430.0],
+        "High": [1010.0, 1220.0, 1450.0],
+        "Low": [980.0, 1190.0, 1420.0],
+        "Close": [1000.0, 1210.0, 1440.0],
+        "Volume": [1, 1, 1],
+    }, index=index)
+    fx = pd.DataFrame({"Close": [1000.0, 1100.0, 1200.0]}, index=index)
+    return {
+        "strategy": FxStrategy(),
+        "history": pd.DataFrame({
+            "Portfolio": [1000.0, 1210.0, 1440.0],
+            "Positions": [{"QQQ": 1.0}] * 3,
+            "Weights": [{"QQQ": 1.0}] * 3,
+        }, index=index),
+        "summary": {},
+        "rebalances": [],
+        "market_data": {"QQQ": qqq, "KRW=X": fx},
     }
 
 
@@ -166,14 +196,14 @@ class ResearchWebTests(unittest.TestCase):
         self.assertGreaterEqual(store.refresh_count, 1)
         self.assertEqual(output[0], 2)
         self.assertEqual(output[3], "2개 전략")
-        self.assertEqual(output[8], [
+        self.assertEqual(output[6], [
             {"label": "AlphaStrategy", "value": "AlphaStrategy"},
             {"label": "GammaStrategy", "value": "GammaStrategy"},
         ])
-        self.assertEqual(output[9], ["AlphaStrategy"])
-        self.assertEqual(output[11], "AlphaStrategy")
+        self.assertEqual(output[7], ["AlphaStrategy"])
+        self.assertEqual(output[9], "AlphaStrategy")
         self.assertEqual(
-            [row["Strategy"] for row in output[12]],
+            [row["Strategy"] for row in output[10]],
             ["AlphaStrategy"],
         )
 
@@ -446,6 +476,11 @@ class ResearchWebTests(unittest.TestCase):
             stylesheet,
         )
         self.assertIn(".research-indicator-controls {", stylesheet)
+        self.assertIn(".research-indicator-fx-control {", stylesheet)
+        self.assertIn(".research-indicator-fx-toggle input:checked", stylesheet)
+        self.assertIn(".research-date-range {", stylesheet)
+        self.assertIn(".DayPicker__withBorder", stylesheet)
+        self.assertIn(".CalendarDay__selected", stylesheet)
         self.assertIn("z-index: 5", stylesheet)
         self.assertIn("overflow: visible", stylesheet)
         self.assertIn(".research-indicator-editor[open]", stylesheet)
@@ -458,6 +493,14 @@ class ResearchWebTests(unittest.TestCase):
             ".research-indicator-matrix-checklist label:has(input:checked) {",
             stylesheet,
         )
+
+    def test_indicator_catalog_includes_html_risk_and_valuation_fields(self):
+        values = {item["value"] for item in indicator_options("risk")}
+        self.assertTrue({
+            "DRAWDOWN20", "DRAWDOWN60", "DRAWDOWN120", "ATR_PCT",
+            "VOL20", "VALUATION_SCORE",
+        }.issubset(values))
+        self.assertEqual(indicator_panel("VALUATION_SCORE"), "risk")
 
     def test_rebalance_y_range_follows_the_visible_time_window(self):
         figure = self.view.rebalance_figure("AlphaStrategy").to_plotly_json()
@@ -531,7 +574,7 @@ class ResearchWebTests(unittest.TestCase):
             [100.0, 102.0, 101.0],
         )
         self.assertEqual(figure.data[0].hoverinfo, "none")
-        self.assertIsNone(figure.data[0].customdata)
+        self.assertEqual(list(figure.data[0].customdata), [100.0, 102.0, 101.0])
         self.assertEqual(figure.data[0].meta["tooltipName"], "QQQ · 종가")
         self.assertEqual(figure.data[0].meta["panel"], "price")
         self.assertEqual(
@@ -542,7 +585,7 @@ class ResearchWebTests(unittest.TestCase):
             annotation.x == 0 and annotation.xanchor == "left"
             for annotation in figure.layout.annotations[:3]
         ))
-        self.assertEqual(figure.layout.height, 972)
+        self.assertEqual(figure.layout.height, 1120)
         self.assertEqual(figure.layout.yaxis.title.text, "기준=100")
         self.assertEqual(figure.layout.dragmode, "pan")
         self.assertEqual(figure.layout.xaxis3.tickformat, "%Y.%m")
@@ -592,6 +635,35 @@ class ResearchWebTests(unittest.TestCase):
         self.assertEqual(figure.layout.legend.entrywidth, 0.2)
         self.assertEqual(figure.layout.legend.entrywidthmode, "fraction")
 
+    def test_fx_neutral_detail_and_indicator_views_remove_usdkrw_change(self):
+        view = ResearchViewModel((make_fx_result(),))
+
+        detail = view.combined_detail_figure("FxStrategy", remove_fx=True)
+        self.assertAlmostEqual(detail.data[1].y[-1], 20.0)
+
+        indicator = view.indicator_figure(
+            None, None, selected_pairs=[("QQQ", "Close")], remove_fx=True,
+        )
+        self.assertEqual(
+            [round(value, 6) for value in indicator.data[0].y],
+            [100.0, 110.0, 120.0],
+        )
+
+    def test_single_ticker_close_adds_default_moving_averages(self):
+        result = make_result(AlphaStrategy(), [100, 110, 121])
+        frame = result["market_data"]["QQQ"]
+        for period in (20, 55, 120, 200):
+            frame[f"MA{period}"] = [99.0, 100.0, 101.0]
+
+        figure = ResearchViewModel((result,)).indicator_figure(
+            None, None, selected_pairs=[("QQQ", "Close")],
+        )
+
+        self.assertEqual(
+            [str(trace.name).split()[-1] for trace in figure.data],
+            ["종가", "MA20", "MA55", "MA120", "MA200"],
+        )
+
     def test_indicator_research_draws_only_explicit_ticker_indicator_pairs(self):
         result = make_result(AlphaStrategy(), [100, 110, 121])
         result["market_data"]["BND"] = result["market_data"]["QQQ"].copy()
@@ -618,7 +690,7 @@ class ResearchWebTests(unittest.TestCase):
             ["QQQ"], ["Close"], overlay_strategy="AlphaStrategy",
         )
         cached = view._indicator_overlay_cache[
-            ("AlphaStrategy", "", "")
+            ("AlphaStrategy", "", "", False)
         ]
         view.indicator_figure(
             ["QQQ"], ["RSI14"], overlay_strategy="AlphaStrategy",
@@ -626,7 +698,7 @@ class ResearchWebTests(unittest.TestCase):
 
         self.assertEqual(len(view._indicator_overlay_cache), 1)
         self.assertIs(
-            view._indicator_overlay_cache[("AlphaStrategy", "", "")],
+            view._indicator_overlay_cache[("AlphaStrategy", "", "", False)],
             cached,
         )
 
@@ -696,7 +768,7 @@ class ResearchWebTests(unittest.TestCase):
             [round(value, 6) for value in figure.data[-1].y],
             [110.0],
         )
-        self.assertIsNone(figure.data[0].customdata)
+        self.assertEqual(list(figure.data[0].customdata), [100.0, 102.0, 101.0])
         self.assertTrue(figure.data[-2].meta["isStrategySeries"])
         tooltip_data = view.indicator_tooltip_data("AlphaStrategy")
         regular_portfolio = tooltip_data["2024-01-01"]["portfolio"]
@@ -719,7 +791,7 @@ class ResearchWebTests(unittest.TestCase):
         oscillator_trace = next(
             trace for trace in multi_panel.data if trace.name == "QQQ · RSI14"
         )
-        self.assertIsNone(oscillator_trace.customdata)
+        self.assertEqual(list(oscillator_trace.customdata), [50.0, 58.0, 54.0])
         self.assertEqual(oscillator_trace.meta["panel"], "oscillator")
         self.assertEqual(tooltip_data["2024-01-01"]["state"], "상승")
         self.assertEqual(tooltip_data["2024-01-02"]["state"], "하락")
@@ -886,7 +958,7 @@ class ResearchWebTests(unittest.TestCase):
         app = create_research_app(self.results)
 
         self.assertEqual(app.title, "Investment Strategy Research")
-        self.assertEqual(len(app.callback_map), 20)
+        self.assertEqual(len(app.callback_map), 21)
         strategy_selector = find_component(app.layout, "research-strategies")
         self.assertTrue(strategy_selector.persistence)
         self.assertEqual(strategy_selector.persistence_type, "local")
@@ -916,7 +988,7 @@ class ResearchWebTests(unittest.TestCase):
             [option["value"] for option in indicator_candles.options],
             ["", "daily", "weekly", "monthly"],
         )
-        self.assertEqual(indicator_candles.value, "")
+        self.assertEqual(indicator_candles.value, "daily")
         self.assertTrue(indicator_candles.persistence)
         chart_card = find_component_by_class(
             app.layout, "card research-card research-indicator-chart-card"
@@ -925,12 +997,13 @@ class ResearchWebTests(unittest.TestCase):
             find_component(chart_card.children[0], "research-indicator-candles"),
             indicator_candles,
         )
-        self.assertTrue(find_component(app.layout, "research-date-range").persistence)
+        self.assertTrue(find_component(app.layout, "research-start-date").persistence)
+        self.assertTrue(find_component(app.layout, "research-end-date").persistence)
         calendar_asset = (
             Path(__file__).parents[1]
-            / "src" / "legacy-python" / "assets" / "win11_date_picker.js"
+            / "src" / "legacy-python" / "assets" / "research_shared_ui.js"
         ).read_text(encoding="utf-8")
-        self.assertIn('view = "month"', calendar_asset)
+        self.assertIn('view = "day"', calendar_asset)
         self.assertIn('data-year=', calendar_asset)
         indicator_overlays = find_component(
             app.layout, "research-indicator-overlays"
@@ -957,8 +1030,18 @@ class ResearchWebTests(unittest.TestCase):
         )
         self.assertEqual(len(matrix_rows), 8)
         self.assertTrue(all(row.persistence for row in matrix_rows))
-        self.assertTrue(find_component(app.layout, "research-view-mode").persistence)
+        self.assertEqual(
+            find_component(app.layout, "research-view-mode").storage_type, "local"
+        )
+        self.assertIsNotNone(find_component(app.layout, "research-analysis-tab"))
+        self.assertIsNotNone(find_component(app.layout, "research-indicators-tab"))
         self.assertIsNotNone(find_component(app.layout, "research-detail-tooltip"))
+        detail_fx = find_component(app.layout, "research-detail-remove-fx")
+        indicator_fx = find_component(app.layout, "research-indicator-remove-fx")
+        self.assertEqual(detail_fx.value, [])
+        self.assertTrue(detail_fx.persistence)
+        self.assertEqual(indicator_fx.value, [])
+        self.assertTrue(indicator_fx.persistence)
         self.assertIsNotNone(find_component(app.layout, "research-performance-tooltip"))
         self.assertIsNotNone(find_component(app.layout, "research-drawdown-tooltip"))
         self.assertIn(
@@ -983,10 +1066,12 @@ class ResearchWebTests(unittest.TestCase):
         indicator_inputs = {item["id"] for item in indicator_callback["inputs"]}
         self.assertEqual(indicator_inputs, {
             '{"column":["ALL"],"type":"indicator-matrix-row"}',
-            "research-indicator-date-range",
+            "research-indicator-start-date",
+            "research-indicator-end-date",
             "research-indicator-strategy",
             "research-indicator-overlays",
             "research-indicator-candles",
+            "research-indicator-remove-fx",
             "research-result-version",
         })
         reload_callback = next(
@@ -1068,7 +1153,7 @@ class ResearchWebTests(unittest.TestCase):
         self.assertEqual(len(bounded_navigation_callbacks), 3)
         detail_graph = find_component(app.layout, "research-detail-graph")
         self.assertEqual(len(detail_graph.figure.data), 4)
-        self.assertEqual(detail_graph.style["height"], "520px")
+        self.assertEqual(detail_graph.style["height"], "700px")
 
         performance_inputs = {
             item["id"] for item in app.callback_map["research-performance.figure"]["inputs"]
@@ -1092,11 +1177,11 @@ class ResearchWebTests(unittest.TestCase):
 
         update_detail = detail_callback["callback"].__wrapped__
         detail, _, _, _, total_return = update_detail(
-            "BetaStrategy", "2024-01-01", "2024-01-03", 1, None
+            "BetaStrategy", "2024-01-01", "2024-01-03", [], 1, None
         )
         self.assertEqual(
             detail.layout.datarevision,
-            "BetaStrategy:2024-01-01:2024-01-03:1",
+            "BetaStrategy:2024-01-01:2024-01-03:False:1",
         )
         self.assertEqual({trace.name for trace in detail.data[:2]}, {"QQQ", "BIL"})
         self.assertEqual(detail.data[2].name, "누적 수익률")
@@ -1105,7 +1190,7 @@ class ResearchWebTests(unittest.TestCase):
 
         shared_range = {"range": ["2024-01-02", "2024-01-03"]}
         detail, *_ = update_detail(
-            "BetaStrategy", "2024-01-01", "2024-01-03", 1, shared_range
+            "BetaStrategy", "2024-01-01", "2024-01-03", [], 1, shared_range
         )
         self.assertEqual(
             tuple(detail.layout.xaxis.range),

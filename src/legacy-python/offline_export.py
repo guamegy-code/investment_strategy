@@ -323,10 +323,11 @@ def export_html(
     ).read_text(encoding="utf-8")
     template = (WEB_SOURCE_DIR / "index.html").read_text(encoding="utf-8")
     runtime = (WEB_SOURCE_DIR / "app.js").read_text(encoding="utf-8")
+    shared_ui = (assets_dir / "research_shared_ui.js").read_text(encoding="utf-8")
     document = (
         template.replace("__BUNDLE__", bundle)
         .replace("__CSS_LINK__", "")
-        .replace("__RUNTIME__", runtime)
+        .replace("__RUNTIME__", f"{shared_ui}\n{runtime}")
         .replace("__CSS__", css)
         .replace("__PLOTLY__", plotly_js)
         .replace('<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.css">', '')
@@ -381,7 +382,7 @@ def export_static_site(
 
     # 해시가 바뀐 이전 빌드 파일을 제거해 dist를 그대로 복사해도 불필요한 자산이
     # 누적되지 않게 한다. app.js는 오프라인 호환용 원본 이름이므로 유지한다.
-    for pattern in ("app.*.css", "app.*.js", "plotly.*.min.js"):
+    for pattern in ("app.*.css", "app.*.js", "shared-ui.*.js", "plotly.*.min.js"):
         for stale_asset in assets_dir.glob(pattern):
             stale_asset.unlink()
     for legacy_name in ("app.css", "plotly.min.js"):
@@ -400,6 +401,8 @@ def export_static_site(
         (Path(plotly.__file__).parent / "package_data" / "plotly.min.js").read_bytes(),
     )
     runtime_bytes = (WEB_SOURCE_DIR / "app.js").read_bytes()
+    shared_ui_bytes = (source_assets_dir / "research_shared_ui.js").read_bytes()
+    shared_ui_name = write_hashed_asset("shared-ui", ".js", shared_ui_bytes)
     runtime_name = write_hashed_asset("app", ".js", runtime_bytes)
     # Keep this source-named copy for downloadable/offline compatibility.
     (output_dir / "app.js").write_bytes(runtime_bytes)
@@ -453,7 +456,11 @@ def export_static_site(
         .replace('<script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13"></script>', '')
         .replace('<script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/l10n/ko.js"></script>', '')
         .replace("<script>__PLOTLY__</script>", f'<script defer src="./assets/{plotly_name}"></script>')
-        .replace("<script>__RUNTIME__</script>", f'<script defer src="./assets/{runtime_name}"></script>')
+        .replace(
+            "<script>__RUNTIME__</script>",
+            f'<script defer src="./assets/{shared_ui_name}"></script>'
+            f'<script defer src="./assets/{runtime_name}"></script>',
+        )
     )
     index = output_dir / "index.html"
     index.write_text(document, encoding="utf-8")

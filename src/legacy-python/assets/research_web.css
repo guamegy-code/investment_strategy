@@ -7,6 +7,12 @@
   --research-grid: #e7eaf0;
   --research-primary: #206bc4;
   --research-shadow: 0 1px 2px rgba(24, 36, 51, .04), 0 8px 24px rgba(24, 36, 51, .035);
+  --research-font-body: 15px;
+  --research-font-control: 13px;
+  --research-font-caption: 12px;
+  --research-control-height: 36px;
+  --research-control-radius: 8px;
+  --research-control-gap: 8px;
 }
 
 * { box-sizing: border-box; }
@@ -18,13 +24,15 @@ body {
   background: var(--research-bg);
   color: var(--research-text);
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", Inter, "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", sans-serif;
-  font-size: 15px;
+  font-size: var(--research-font-body);
 }
 
 .research-page {
   min-height: 100vh;
   background: var(--research-bg);
   color: var(--research-text);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", Inter, "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", sans-serif;
+  font-size: var(--research-font-body);
   transition: background-color .2s ease, color .2s ease;
 }
 
@@ -34,8 +42,9 @@ body {
 }
 
 .research-navbar {
+  display: block !important;
   min-height: 68px;
-  padding: 0;
+  padding: 0 !important;
   background: color-mix(in srgb, var(--research-surface) 94%, transparent);
   border-bottom: 1px solid var(--research-border);
   backdrop-filter: blur(12px);
@@ -74,7 +83,7 @@ body {
 .research-navbar-actions { gap: 10px; }
 .research-status { display: inline-flex; align-items: center; gap: 7px; padding: 7px 10px; }
 
-.research-content { padding-block: 32px 56px; }
+.research-content { padding-block: 32px 48px; }
 .research-page-header {
   display: flex;
   align-items: end;
@@ -86,29 +95,43 @@ body {
 .research-title { margin: 7px 0 5px; font-size: clamp(28px, 3vw, 38px); line-height: 1.16; letter-spacing: -.035em; }
 .research-subtitle { margin: 0; color: var(--research-muted); font-size: 15px; line-height: 1.55; }
 .research-count { flex: 0 0 auto; padding: 8px 11px; font-size: 12px; }
+.research-page .btn,
+.research-page .form-control,
+.research-page .form-select {
+  min-height: var(--research-control-height);
+  border-radius: var(--research-control-radius);
+  font-family: inherit;
+  font-size: var(--research-font-control);
+  line-height: 20px;
+}
+.research-page .btn { padding: 7px 11px; font-weight: 600; }
+.research-page .btn-sm { min-height: 32px; padding: 5px 9px; font-size: 12px; }
 .research-view-switch {
-  display: inline-flex;
+  display: inline-flex !important;
+  width: max-content;
   gap: 6px;
   margin-bottom: 20px;
-  padding: 4px;
+  padding: 4px !important;
   border: 1px solid var(--research-border);
   border-radius: 10px;
   background: color-mix(in srgb, var(--research-bg) 74%, var(--research-surface));
 }
-.research-view-switch label {
+.research-view-switch label,
+.research-view-switch .offline-tab {
   position: relative;
   margin: 0;
   padding: 8px 14px;
-  border-radius: 7px;
+  border-radius: 7px !important;
   color: var(--research-muted);
   cursor: pointer;
   font-size: 13px;
   font-weight: 700;
 }
-.research-view-switch label:has(input:checked) {
-  background: var(--research-surface);
-  color: var(--research-primary);
-  box-shadow: 0 1px 3px rgba(24, 36, 51, .12);
+.research-view-switch label:has(input:checked),
+.research-view-switch .offline-tab.active {
+  background: var(--research-primary) !important;
+  color: #fff !important;
+  box-shadow: 0 1px 2px rgba(32, 107, 196, .3);
 }
 .research-view-switch input {
   position: absolute;
@@ -133,8 +156,8 @@ body {
 .research-card-description { margin: 3px 0 0; color: var(--research-muted); font-size: 12px; line-height: 1.45; }
 
 .research-toolbar { margin-bottom: 20px; }
-.research-toolbar-body { display: flex; gap: 28px; align-items: start; padding: 18px 20px; }
-.research-control { display: grid; flex: 0 0 auto; gap: 8px; min-width: 280px; }
+.research-page .research-toolbar-body { display: flex; gap: 28px; align-items: start; padding: 18px 20px; }
+.research-control { display: grid; flex: 0 0 auto; gap: var(--research-control-gap); min-width: 280px; }
 .research-control .form-label { display: flex; align-items: center; gap: 6px; margin: 0; color: var(--research-muted); font-size: 12px; font-weight: 700; }
 .research-strategy-control { flex: 1 1 520px; min-width: 0; }
 .research-checklist { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -198,6 +221,63 @@ body {
   pointer-events: none;
 }
 
+/* 두 런타임이 같은 입력 마크업과 같은 달력 스크립트를 사용한다. */
+.research-date-range {
+  display: flex !important;
+  align-items: center;
+  gap: 0 !important;
+  flex: 0 0 342px;
+  width: 342px !important;
+  max-width: 100%;
+  min-height: var(--research-control-height);
+  overflow: hidden;
+  border: 1px solid var(--research-border) !important;
+  border-radius: var(--research-control-radius) !important;
+  background: var(--research-surface) !important;
+}
+
+/* Dash 뷰 컨테이너가 추가되어도 정적 HTML과 같은 탭 아래 간격을 유지한다. */
+.research-view-switch ~ #research-analysis-view,
+.research-view-switch ~ #research-indicator-view {
+  padding-top: 20px;
+}
+.research-date-range .research-date-input,
+.research-date-range > .form-control {
+  flex: 1 1 0;
+  width: 0;
+  min-width: 0;
+  height: calc(var(--research-control-height) - 2px);
+  min-height: calc(var(--research-control-height) - 2px);
+  padding: 7px 10px;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  color: var(--research-text) !important;
+  font-family: inherit;
+  font-size: 14px !important;
+  font-weight: 600;
+  line-height: 20px;
+  cursor: pointer;
+  appearance: none;
+}
+.research-page .research-date-range .research-date-input,
+.research-page .research-date-range > .form-control {
+  padding: 7px 10px !important;
+  font-size: 14px !important;
+  text-align: center;
+}
+.research-date-range .input-group-text {
+  height: calc(var(--research-control-height) - 2px);
+  min-height: calc(var(--research-control-height) - 2px);
+  padding-inline: 5px;
+  border: 0;
+  background: transparent;
+  color: var(--research-muted);
+  font-size: 13px;
+}
+
+/* 이전 Dash DatePickerRange가 남은 화면에서도 같은 밀도를 유지한다. */
+.DateRangePicker,
 .DateRangePickerInput {
   display: flex !important;
   align-items: center;
@@ -208,21 +288,115 @@ body {
   border-radius: 8px;
   background: var(--research-surface) !important;
 }
+.research-indicator-toolbar .DateRangePickerInput { width: min(342px, 100%); }
 .DateInput { width: 132px; background: transparent !important; }
 .DateInput_input, .DateInput_input_1 {
-  height: 38px;
-  padding: 8px 10px !important;
+  height: 36px;
+  padding: 7px 10px !important;
   border: 0 !important;
   background: transparent !important;
   color: var(--research-text) !important;
-  font-size: 16px !important;
+  font-family: inherit !important;
+  font-size: 14px !important;
   font-weight: 600 !important;
-  line-height: 22px !important;
+  line-height: 20px !important;
 }
 .DateRangePickerInput_arrow { padding-inline: 2px; color: var(--research-muted); }
 .DateRangePickerInput_arrow_svg { fill: currentColor; }
-.DateInput_fang { top: 39px !important; }
-.SingleDatePicker_picker, .DateRangePicker_picker { z-index: 1100; }
+.DateInput_fang { top: 37px !important; }
+/* 날짜 팝업도 HTML의 320px 카드, 12px 모서리, 36px 날짜 셀을 사용한다. */
+.SingleDatePicker_picker, .DateRangePicker_picker {
+  z-index: 1100;
+  font-family: inherit !important;
+}
+.DayPicker,
+.DayPicker__withBorder {
+  border: 1px solid #d7dce4 !important;
+  border-radius: 12px !important;
+  background: var(--research-surface) !important;
+  box-shadow: 0 18px 42px rgba(24, 36, 51, .2) !important;
+}
+.DayPicker__withBorder { overflow: hidden; }
+.DayPicker_transitionContainer { border-radius: 12px; }
+.CalendarMonthGrid,
+.CalendarMonth,
+.CalendarMonth_caption { background: var(--research-surface) !important; }
+.CalendarMonth_caption {
+  padding-top: 16px !important;
+  padding-bottom: 12px !important;
+  color: var(--research-text) !important;
+  font-family: inherit !important;
+  font-size: 15px !important;
+  font-weight: 700 !important;
+}
+.DayPicker_weekHeader { color: var(--research-muted) !important; }
+.DayPicker_weekHeader_li {
+  color: var(--research-muted) !important;
+  font-family: inherit !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+}
+.DayPickerNavigation_button {
+  top: 12px !important;
+  width: 32px !important;
+  height: 32px !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 7px !important;
+  background: transparent !important;
+}
+.DayPickerNavigation_button:hover,
+.DayPickerNavigation_button:focus-visible { background: #eef3fa !important; }
+.DayPickerNavigation_svg__horizontal { fill: var(--research-text) !important; }
+.CalendarDay {
+  width: 36px !important;
+  height: 36px !important;
+  border: 0 !important;
+  background: transparent !important;
+  color: var(--research-text) !important;
+  font-family: inherit !important;
+  font-size: 14px !important;
+  font-weight: 600 !important;
+  line-height: 36px !important;
+}
+.CalendarDay__default:hover,
+.CalendarDay__default:active { border: 0 !important; background: #e9f2ff !important; }
+.CalendarDay__selected,
+.CalendarDay__selected:active,
+.CalendarDay__selected:hover { border: 0 !important; background: var(--research-primary) !important; color: #fff !important; }
+.CalendarDay__selected_span,
+.CalendarDay__hovered_span,
+.CalendarDay__hovered_span:hover { border: 0 !important; background: #e9f2ff !important; color: var(--research-text) !important; }
+.CalendarDay__outside { color: #97a3b4 !important; }
+.CalendarDay__blocked_out_of_range { color: #c1c9d2 !important; }
+
+/* Dash React Select와 HTML select의 외형을 공통 입력 토큰으로 맞춘다. */
+.research-page .Select-control {
+  min-height: var(--research-control-height) !important;
+  border-color: var(--research-border) !important;
+  border-radius: var(--research-control-radius) !important;
+  background: var(--research-surface) !important;
+  font-family: inherit;
+  font-size: var(--research-font-control);
+}
+.research-page .Select-placeholder,
+.research-page .Select--single > .Select-control .Select-value {
+  line-height: calc(var(--research-control-height) - 2px) !important;
+}
+.research-page .Select-value-label,
+.research-page .Select-placeholder { color: var(--research-text) !important; }
+.research-page .Select-input { height: calc(var(--research-control-height) - 2px); }
+.research-page .Select-input > input { height: 30px; padding: 0; font: inherit; }
+.research-page .Select-menu-outer {
+  overflow: hidden;
+  border-color: var(--research-border);
+  border-radius: var(--research-control-radius);
+  background: var(--research-surface);
+  color: var(--research-text);
+  font-family: inherit;
+  font-size: var(--research-font-control);
+}
+.research-page .Select-option { padding: 8px 10px; }
 
 .win11-date-picker {
   position: fixed;
@@ -234,10 +408,12 @@ body {
   background: #fff;
   box-shadow: 0 18px 42px rgba(24, 36, 51, .2);
   color: #182433;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", Inter, "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", sans-serif;
+  font-size: 15px;
 }
 .win11-date-picker[hidden] { display: none; }
 .win11-date-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
-.win11-date-title { min-width: 0; border: 0; background: transparent; color: #182433; font: 700 15px inherit; cursor: pointer; }
+.win11-date-title { min-width: 0; border: 0; background: transparent; color: #182433; font-family: inherit; font-size: 15px; font-weight: 700; cursor: pointer; }
 .win11-date-nav { width: 32px; height: 32px; border: 0; border-radius: 7px; background: transparent; color: #182433; font-size: 21px; line-height: 1; cursor: pointer; }
 .win11-date-nav:hover, .win11-date-nav:focus-visible, .win11-date-title:hover, .win11-date-title:focus-visible { background: #eef3fa; outline: none; }
 .win11-date-weekdays, .win11-date-days { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
@@ -327,9 +503,24 @@ body {
   padding: 16px;
 }
 .research-detail-actions { display: flex; align-items: center; gap: 16px; }
-.research-detail-fx-toggle { margin: 0; white-space: nowrap; }
+.research-detail-fx-toggle {
+  display: flex;
+  align-items: center;
+  margin: 0;
+  padding: 0 !important;
+  font-size: 13px;
+  white-space: nowrap;
+}
+.research-detail-actions > .research-detail-dropdown { order: 1; }
+.research-detail-actions > .research-detail-fx-toggle { order: 2; }
 .research-detail-select { width: min(360px, 100%); }
+.research-detail-actions .research-detail-dropdown { width: 360px; max-width: 100%; }
 .research-detail-dropdown { font-size: 13px; }
+.research-detail-select > .research-detail-dropdown {
+  height: var(--research-control-height);
+  min-height: var(--research-control-height);
+  padding: 7px 40px 7px 12px;
+}
 .Select-control, .Select-menu-outer {
   border-color: var(--research-border) !important;
   background: var(--research-surface) !important;
@@ -540,12 +731,72 @@ body:has(.research-navigation-graph .nsewdrag:active) .dragcover {
 }
 .research-indicator-toolbar {
   display: grid;
-  grid-template-columns: auto minmax(230px, 1fr) minmax(210px, .8fr);
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
   gap: 18px;
   align-items: end;
   padding: 18px 20px;
 }
+.research-page .research-indicator-toolbar { padding: 18px 20px; }
+.research-page select.research-indicator-strategy {
+  height: var(--research-control-height);
+  min-height: var(--research-control-height);
+  padding: 7px 40px 7px 12px;
+}
 .research-indicator-control { display: grid; gap: 8px; min-width: 0; }
+.research-indicator-inline-options > .research-indicator-control {
+  display: flex;
+  min-height: var(--research-control-height);
+  align-items: center;
+}
+.research-indicator-inline-options > .research-indicator-control:last-child { flex: 1 1 auto; }
+.research-indicator-fx-control { display: flex; min-height: var(--research-control-height); align-items: center; }
+.research-indicator-fx-toggle,
+.research-detail-fx-toggle { margin: 0; }
+.research-indicator-fx-toggle label,
+.research-detail-fx-toggle label,
+label.research-detail-fx-toggle {
+  display: flex !important;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--research-text);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.research-indicator-fx-toggle input,
+.research-detail-fx-toggle input {
+  appearance: none;
+  float: none !important;
+  display: inline-block !important;
+  flex: 0 0 26px;
+  width: 26px !important;
+  height: 13px !important;
+  min-height: 13px !important;
+  margin: 0 !important;
+  border: 1px solid var(--research-border);
+  border-radius: 999px;
+  background: var(--research-muted);
+  cursor: pointer;
+  transition: background .15s ease;
+}
+.research-indicator-fx-toggle input::before,
+.research-detail-fx-toggle input::before {
+  content: "";
+  display: block;
+  width: .72em;
+  height: .72em;
+  margin: .08em;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 20%);
+  transition: transform .15s ease;
+}
+.research-indicator-fx-toggle input:checked,
+.research-detail-fx-toggle input:checked { background: var(--research-primary); }
+.research-indicator-fx-toggle input:checked::before,
+.research-detail-fx-toggle input:checked::before { transform: translateX(1em); }
 .research-indicator-inline-options {
   display: flex;
   min-height: 36px;

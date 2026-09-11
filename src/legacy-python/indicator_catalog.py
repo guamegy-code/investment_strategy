@@ -8,19 +8,23 @@ INDICATORS = {
     "Disparity": ["DISPARITY60"],
     "MACD": ["MACD", "MACD_SIGNAL", "MACD_HIST"],
     "Stochastic": ["STOCH_K", "STOCH_D"],
+    "Drawdown": ["DRAWDOWN20", "DRAWDOWN60", "DRAWDOWN120"],
     "ROC": ["ROC252"],
     "TR": ["TR"],
-    "ATR": ["ATR", "ATR60"],
+    "ATR": ["ATR", "ATR60", "ATR_PCT"],
     "Bollinger": ["BB_UPPER", "BB_MIDDLE", "BB_LOWER"],
-    "Volatility": ["VOL60"],
+    "Volatility": ["VOL20", "VOL60"],
     "MDD": ["MDD252"],
+    "Valuation": ["VALUATION_SCORE"],
 }
 
 INDEXED_INDICATORS = {"Price", "MA", "EMA", "Bollinger"}
 PANEL_BY_INDICATOR = {
     **{name: "price" for name in ("Price", "MA", "EMA", "Bollinger")},
     **{name: "oscillator" for name in ("RSI", "Disparity", "MACD", "Stochastic")},
-    **{name: "risk" for name in ("ROC", "TR", "ATR", "Volatility", "MDD")},
+    **{name: "risk" for name in (
+        "Drawdown", "ROC", "TR", "ATR", "Volatility", "MDD", "Valuation",
+    )},
 }
 DETAIL_ROWS = {"MA", "EMA", "Bollinger", "MACD", "Stochastic", "ATR"}
 PANEL_ORDER = ("price", "oscillator", "risk")
@@ -40,6 +44,12 @@ INDICATOR_LABELS = {
     "BB_LOWER": "볼린저 하단",
     "VOL60": "변동성 60일",
     "MDD252": "MDD 252일",
+    "DRAWDOWN20": "20일 낙폭",
+    "DRAWDOWN60": "60일 낙폭",
+    "DRAWDOWN120": "120일 낙폭",
+    "ATR_PCT": "ATR 비율",
+    "VOL20": "변동성 20일",
+    "VALUATION_SCORE": "합성 밸류에이션 점수 (비공식)",
 }
 
 
