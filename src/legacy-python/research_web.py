@@ -34,6 +34,7 @@ from indicator_catalog import (
 )
 from strategy_domain import strategy_display_name
 from strategy_runtime import StrategyResultSnapshot
+from indicators import Indicator
 
 
 # TradingView Markets에서 참고한 밝은 금융 정보 화면의 대비·간격 원칙입니다.
@@ -439,6 +440,19 @@ def _apply_detail_navigation(
             xaxis_options["minallowed"] = start_value
             xaxis_options["maxallowed"] = end_value
 
+        # Static HTML charts collapse weekends and market holidays.  Keep the
+        # Dash time axis equally dense so candles, states and rebalance marks
+        # share the same trading-day geometry.
+        observed = {date.normalize() for date in dates}
+        missing_days = [
+            date.strftime("%Y-%m-%d")
+            for date in pd.date_range(start_at.normalize(), end_at.normalize(), freq="B")
+            if date.normalize() not in observed
+        ]
+        xaxis_options["rangebreaks"] = [{"bounds": ["sat", "mon"]}]
+        if missing_days:
+            xaxis_options["rangebreaks"].append({"values": missing_days})
+
         if start_at.year == end_at.year:
             year_marks = [(0.5, str(start_at.year))]
         else:
@@ -664,6 +678,131 @@ def _indexed_portfolio(history: pd.DataFrame) -> pd.Series:
     return portfolio / portfolio.iloc[0]
 
 
+def _fx_rate_from_result(result: dict[str, Any]) -> pd.Series:
+    """Return the USD/KRW close series embedded in a completed result."""
+    strategy = result.get("strategy")
+    ticker = getattr(strategy, "valuation_fx_ticker", None) or getattr(
+        strategy, "FX_RATE_TICKER", None
+    )
+    if not ticker:
+        return pd.Series(dtype=float)
+    market_data = result.get("market_data")
+    if isinstance(market_data, dict):
+        frame = market_data.get(ticker)
+        if isinstance(frame, pd.DataFrame) and "Close" in frame:
+            return pd.to_numeric(frame["Close"], errors="coerce")
+        return pd.Series(dtype=float)
+    if not isinstance(market_data, pd.DataFrame):
+        return pd.Series(dtype=float)
+    column = f"{ticker}_Close"
+    if column not in market_data:
+        return pd.Series(dtype=float)
+    return pd.to_numeric(market_data[column], errors="coerce")
+
+
+def _foreign_holding_tickers(strategy: Any) -> tuple[str, ...]:
+    """Identify USD-denominated holdings whose KRW valuation contains FX."""
+    configured = getattr(strategy, "foreign_asset_tickers", None)
+    if configured:
+        return tuple(str(ticker) for ticker in configured)
+    holdings = getattr(strategy, "holding_tickers", ()) or ()
+    return tuple(
+        str(ticker) for ticker in holdings
+        if str(ticker).upper() != "KRW=X"
+        and not str(ticker).upper().endswith((".KS", ".KQ"))
+    )
+
+
+def _fx_neutral_history(result: dict[str, Any]) -> pd.DataFrame:
+    """Remove the changing USD/KRW component while preserving trade history.
+
+    The backtest already contains the realised KRW portfolio and positions.  We
+    therefore fix only USD-denominated position values at the first available
+    USD/KRW rate, rather than re-running signals with a different currency.
+    This keeps the strategy's original decisions, costs, and rebalance dates.
+    """
+    history = result.get("history")
+    if not isinstance(history, pd.DataFrame):
+        return pd.DataFrame()
+    adjusted = history.copy()
+    if "Portfolio" not in adjusted or "Positions" not in adjusted:
+        return adjusted
+    rates = _fx_rate_from_result(result)
+    if rates.empty:
+        return adjusted
+    rates = rates.reindex(adjusted.index.union(rates.index)).sort_index().ffill()
+    rates = rates.reindex(adjusted.index)
+    eligible = rates[rates.gt(0)].dropna()
+    if eligible.empty:
+        return adjusted
+    start_rate = float(eligible.iloc[0])
+    multiplier = start_rate / rates.where(rates.gt(0)) - 1.0
+    market_data = result.get("market_data")
+    exposed_value = pd.Series(0.0, index=adjusted.index)
+    for ticker in _foreign_holding_tickers(result.get("strategy")):
+        if isinstance(market_data, dict):
+            frame = market_data.get(ticker)
+            prices = frame.get("Close") if isinstance(frame, pd.DataFrame) else None
+        elif isinstance(market_data, pd.DataFrame):
+            prices = market_data.get(f"{ticker}_Close")
+        else:
+            prices = None
+        if prices is None:
+            continue
+        shares = adjusted["Positions"].map(
+            lambda positions: float((positions or {}).get(ticker, 0.0))
+            if isinstance(positions, dict) else 0.0
+        )
+        exposed_value = exposed_value.add(
+            shares * pd.to_numeric(prices, errors="coerce").reindex(
+                adjusted.index
+            ), fill_value=0.0
+        )
+    if not exposed_value.any():
+        return adjusted
+    adjusted["Portfolio"] = (
+        pd.to_numeric(adjusted["Portfolio"], errors="coerce")
+        + exposed_value * multiplier.fillna(0.0)
+    )
+    return adjusted
+
+
+def _fx_neutral_market_frame(
+    frame: pd.DataFrame, rates: pd.Series,
+) -> pd.DataFrame:
+    """Convert an OHLC frame to USD and recalculate price-derived indicators."""
+    if frame.empty or rates.empty:
+        return frame
+    rate = rates.reindex(frame.index.union(rates.index)).sort_index().ffill()
+    rate = rate.reindex(frame.index).where(lambda values: values.gt(0))
+    if rate.dropna().empty:
+        return frame
+    adjusted = frame.copy()
+    for column in ("Open", "High", "Low", "Close"):
+        if column in adjusted:
+            adjusted[column] = pd.to_numeric(adjusted[column], errors="coerce") / rate
+    return Indicator.add_indicators(adjusted)
+
+
+def _portfolio_metrics(history: pd.DataFrame) -> dict[str, float | None]:
+    """Calculate the detail KPIs from the currently displayed portfolio path."""
+    values = _indexed_portfolio(history)
+    if values.empty:
+        return {"CAGR": None, "MDD": None, "Sharpe": None, "TotalReturn": None}
+    elapsed_days = max((values.index[-1] - values.index[0]).days, 1)
+    years = elapsed_days / 365.25
+    cagr = float(values.iloc[-1] ** (1 / years) - 1) if years else 0.0
+    drawdown = values / values.cummax() - 1
+    daily_returns = values.pct_change().dropna()
+    volatility = float(daily_returns.std(ddof=1) * np.sqrt(252)) if len(daily_returns) > 1 else 0.0
+    return {
+        "CAGR": cagr,
+        "MDD": float(drawdown.min()),
+        "Sharpe": cagr / volatility if volatility else 0.0,
+        "TotalReturn": float(values.iloc[-1] - 1),
+    }
+
+
 def _weight_frame(history: pd.DataFrame) -> pd.DataFrame:
     if "Weights" not in history:
         return pd.DataFrame(index=history.index)
@@ -848,7 +987,7 @@ class ResearchViewModel:
 
     results: tuple[dict[str, Any], ...]
     _indicator_overlay_cache: dict[
-        tuple[str, str, str], dict[str, Any]
+        tuple[str, str, str, bool], dict[str, Any]
     ] = field(default_factory=dict, init=False, repr=False, compare=False)
     _indicator_figure_cache: dict[tuple[Any, ...], go.Figure] = field(
         default_factory=dict, init=False, repr=False, compare=False,
@@ -891,11 +1030,12 @@ class ResearchViewModel:
 
     def _indicator_overlay_data(
         self, selected_name: str | None, start=None, end=None,
+        remove_fx: bool = False,
     ) -> dict[str, Any] | None:
         """Cache strategy data that is unchanged when indicator pairs change."""
         if not selected_name:
             return None
-        key = (selected_name, str(start or ""), str(end or ""))
+        key = (selected_name, str(start or ""), str(end or ""), remove_fx)
         if key in self._indicator_overlay_cache:
             return self._indicator_overlay_cache[key]
         result = next(
@@ -906,7 +1046,10 @@ class ResearchViewModel:
         if result is None or "Portfolio" not in result["history"]:
             return None
 
-        history = _filtered_history(result["history"], start, end)
+        source_history = (
+            _fx_neutral_history(result) if remove_fx else result["history"]
+        )
+        history = _filtered_history(source_history, start, end)
         indexed = _indexed_portfolio(history)
         values = indexed * 100
         states = (
@@ -955,9 +1098,12 @@ class ResearchViewModel:
 
     def indicator_tooltip_data(
         self, selected_name: str | None, start=None, end=None,
+        remove_fx: bool = False,
     ) -> dict[str, dict[str, Any]]:
         """Return date-keyed strategy context independently of indicator traces."""
-        data = self._indicator_overlay_data(selected_name, start, end)
+        data = self._indicator_overlay_data(
+            selected_name, start, end, remove_fx,
+        )
         if data is None:
             return {}
         state_labels = {
@@ -1078,6 +1224,7 @@ class ResearchViewModel:
         overlay_options: Iterable[str] | None = None,
         selected_pairs: Iterable[tuple[str, str]] | None = None,
         candle_timeframes: Iterable[str] | None = None,
+        remove_fx: bool = False,
     ) -> go.Figure:
         """Return a defensive copy of a recently built indicator figure."""
         ticker_values = tuple(selected_tickers or ())
@@ -1092,6 +1239,7 @@ class ResearchViewModel:
         cache_key = (
             ticker_values, column_values, str(start or ""), str(end or ""),
             str(overlay_strategy or ""), overlay_values, pair_values, candle_values,
+            remove_fx,
         )
         cached = self._indicator_figure_cache.get(cache_key)
         if cached is not None:
@@ -1105,6 +1253,7 @@ class ResearchViewModel:
             overlay_values,
             selected_pairs=pair_values,
             candle_timeframes=candle_values,
+            remove_fx=remove_fx,
         )
         if len(self._indicator_figure_cache) >= 8:
             oldest_key = next(iter(self._indicator_figure_cache))
@@ -1122,6 +1271,7 @@ class ResearchViewModel:
         overlay_options: Iterable[str] | None = None,
         selected_pairs: Iterable[tuple[str, str]] | None = None,
         candle_timeframes: Iterable[str] | None = None,
+        remove_fx: bool = False,
     ) -> go.Figure:
         """Build synchronized price, oscillator, and risk research panels."""
         frames = self.market_frames
@@ -1138,10 +1288,25 @@ class ResearchViewModel:
             for ticker, column in pairs
             if ticker in frames and indicator_panel(column) is not None
         ))
+        # Mirror the browser chart: a single price series gets its core moving
+        # averages automatically, unless the user deliberately compares only
+        # QQQ with a strategy overlay.
+        selected_tickers_once = list(dict.fromkeys(ticker for ticker, _ in pairs))
+        auto_ma = ("MA20", "MA55", "MA120", "MA200")
+        if (
+            len(selected_tickers_once) == 1
+            and (selected_tickers_once[0], "Close") in pairs
+            and not any((selected_tickers_once[0], column) in pairs for column in auto_ma)
+            and not (overlay_strategy and len(pairs) == 1 and selected_tickers_once[0] == "QQQ")
+        ):
+            pairs.extend(
+                (selected_tickers_once[0], column)
+                for column in auto_ma if column in frames[selected_tickers_once[0]]
+            )
         tickers = list(dict.fromkeys(ticker for ticker, _ in pairs))
         columns = list(dict.fromkeys(column for _, column in pairs))
         overlay_data = self._indicator_overlay_data(
-            overlay_strategy, start, end,
+            overlay_strategy, start, end, remove_fx,
         )
         overlay_result = overlay_data["result"] if overlay_data else None
         has_strategy_return = overlay_data is not None
@@ -1196,9 +1361,23 @@ class ResearchViewModel:
             overlay_data["events"] if overlay_data is not None else []
         )
         style_index = 0
+        fx_rates = pd.Series(dtype=float)
+        if remove_fx:
+            fx_source = overlay_result or next(
+                (item for item in self.results if not _fx_rate_from_result(item).empty),
+                None,
+            )
+            if fx_source is not None:
+                fx_rates = _fx_rate_from_result(fx_source)
         filtered_frames: dict[str, pd.DataFrame] = {}
         for ticker in tickers:
-            frame = _filtered_history(frames[ticker], start, end)
+            frame = frames[ticker]
+            if (
+                remove_fx and ticker.upper() != "KRW=X"
+                and not ticker.upper().endswith((".KS", ".KQ"))
+            ):
+                frame = _fx_neutral_market_frame(frame, fx_rates)
+            frame = _filtered_history(frame, start, end)
             filtered_frames[ticker] = frame
             for column in columns:
                 if (ticker, column) not in pairs:
@@ -1211,6 +1390,7 @@ class ResearchViewModel:
                 values = frame[column].dropna()
                 if values.empty:
                     continue
+                raw_values = values.copy()
                 if indicator_is_indexed(column):
                     close = frame.get("Close", pd.Series(dtype=float)).dropna()
                     if close.empty or float(close.iloc[0]) == 0:
@@ -1223,7 +1403,7 @@ class ResearchViewModel:
                 ]
                 label = INDICATOR_LABELS.get(column, column)
                 trace_name = f"{ticker} · {label}"
-                figure.add_trace(go.Scattergl(
+                figure.add_trace(go.Scatter(
                     x=values.index,
                     y=values,
                     mode="lines",
@@ -1231,6 +1411,7 @@ class ResearchViewModel:
                     line={"color": color, "width": 1.5, "dash": dash},
                     meta={"tooltipName": trace_name, "panel": panel},
                     hoverinfo="none",
+                    customdata=raw_values.reindex(values.index).to_numpy(),
                     connectgaps=False,
                 ), row=row, col=1)
                 style_index += 1
@@ -1275,7 +1456,7 @@ class ResearchViewModel:
                     ), row=price_row, col=1)
 
         if has_strategy_return and "price" in panels and not strategy_values.empty:
-            figure.add_trace(go.Scattergl(
+            figure.add_trace(go.Scatter(
                 x=strategy_values.index,
                 y=strategy_values,
                 mode="lines",
@@ -1337,7 +1518,7 @@ class ResearchViewModel:
                 dates = [date for date, _ in strategy_events]
                 if dates and not strategy_values.empty:
                     marker_values = strategy_values.reindex(dates, method="ffill")
-                    figure.add_trace(go.Scattergl(
+                    figure.add_trace(go.Scatter(
                         x=marker_values.index, y=marker_values,
                         mode="markers", name=f"{overlay_strategy} · 리밸런싱",
                         showlegend=False,
@@ -1348,7 +1529,7 @@ class ResearchViewModel:
 
         figure = _apply_chart_style(
             figure,
-            height=342 + 210 * len(panels),
+            height=700 + 210 * max(0, len(panels) - 1),
         )
         figure.update_layout(hovermode="x unified")
         for annotation in figure.layout.annotations[:len(panels)]:
@@ -1441,6 +1622,7 @@ class ResearchViewModel:
 
     def combined_detail_figure(
         self, selected_name: str | None, start=None, end=None,
+        remove_fx: bool = False,
     ) -> go.Figure:
         """Split cumulative return by each asset's current allocation."""
         result = next(
@@ -1453,7 +1635,10 @@ class ResearchViewModel:
                 _apply_chart_style(figure), show_range_controls=True
             )
 
-        history = _filtered_history(result["history"], start, end)
+        source_history = (
+            _fx_neutral_history(result) if remove_fx else result["history"]
+        )
+        history = _filtered_history(source_history, start, end)
         indexed = _indexed_portfolio(history)
         cumulative_return = (indexed - 1) * 100
         weights, labels = _allocation_display_frame(
@@ -1581,17 +1766,11 @@ def _indicator_layout_configuration(
     )
     default_columns = {
         "price": [
-            column for column in ("Close", "EMA55", "EMA200")
+            column for column in ("Close", "EMA20", "EMA55")
             if column in available_columns
         ],
-        "oscillator": [
-            column for column in ("RSI14", "MACD")
-            if column in available_columns
-        ],
-        "risk": [
-            column for column in ("ROC252", "VOL60", "MDD252")
-            if column in available_columns
-        ],
+        "oscillator": [],
+        "risk": [],
     }
     if selected_pairs is None:
         active_pairs = [
@@ -1869,22 +2048,23 @@ def create_research_app(
         ),
         dcc.Store(id="research-result-version", data=initial_snapshot.version),
         dcc.Store(id="research-theme", storage_type="local", data="light"),
+        dcc.Store(id="research-view-mode", storage_type="local", data="analysis"),
         dcc.Store(id="research-detail-range", data={"autorange": True}),
         dcc.Store(id="research-indicator-tooltip-data", data={}),
         html.Main([
             html.Nav(html.Div([
                 html.Div([
-                    html.Span(_icon("chart-line"), className="research-brand-mark"),
+                    html.Span("⌁", className="research-brand-mark"),
                     html.Div([
                         html.Div("Investment Strategy", className="research-brand-name"),
-                        html.Div("Quantitative research", className="research-brand-caption"),
+                        html.Div("퀀트 리서치", className="research-brand-caption"),
                     ]),
                 ], className="research-brand"),
                 html.Div([
-                    html.Span([html.Span(className="status-dot status-dot-animated bg-green"), "Read only"], className="badge bg-green-lt research-status"),
-                    html.Button(html.I(id="research-theme-icon", className="ti ti-moon", **{"aria-hidden": "true"}),
+                    html.Span("● 준비 완료", className="research-status"),
+                    html.Button("◐",
                                 id="research-theme-toggle", n_clicks=0,
-                                className="btn btn-icon btn-ghost-secondary", title="다크 모드로 전환",
+                                className="btn", title="화면 테마 전환",
                                 **{"aria-label": "화면 테마 전환"}),
                 ], className="research-navbar-actions"),
             ], className="research-container"), className="navbar navbar-expand-md research-navbar"),
@@ -1892,9 +2072,9 @@ def create_research_app(
             html.Div([
                 html.Header([
                     html.Div([
-                        html.Div("BACKTEST DASHBOARD", className="research-eyebrow"),
+                        html.Div("백테스트 대시보드", className="research-eyebrow"),
                         html.H1("투자 전략 리서치", className="research-title"),
-                        html.P("완료된 백테스트 결과를 한 화면에서 비교하고 분석합니다.", className="research-subtitle"),
+                        html.P("전략 성과를 비교하고 종목별 지표를 분석합니다.", className="research-subtitle"),
                     ]),
                     html.Span(
                         f"{len(names)}개 전략",
@@ -1909,32 +2089,38 @@ def create_research_app(
                     style={"display": "none"},
                 ),
 
-                dcc.RadioItems(
-                    id="research-view-mode",
-                    options=[
-                        {"label": "성과 분석", "value": "analysis"},
-                        {"label": "지표 연구", "value": "indicators"},
-                    ],
-                    value="analysis",
-                    inline=True,
-                    persistence=True,
-                    persistence_type="local",
-                    className="research-view-switch",
-                ),
+                html.Div([
+                    html.Button(
+                        "성과 분석", id="research-analysis-tab", n_clicks=0,
+                        className="nav-link offline-tab active", type="button",
+                    ),
+                    html.Button(
+                        "지표 연구", id="research-indicators-tab", n_clicks=0,
+                        className="nav-link offline-tab", type="button",
+                    ),
+                ], className="nav nav-pills research-view-switch"),
 
                 html.Div([
 
                 html.Section(html.Div([
                     html.Div([
-                        html.Label([_icon("calendar"), "분석 기간"], className="form-label"),
-                        dcc.DatePickerRange(
-                            id="research-date-range", min_date_allowed=start, max_date_allowed=end,
-                            start_date=start, end_date=end, display_format="YYYY.MM.DD",
-                            persistence=True, persistence_type="local",
-                        ),
+                        html.Label("분석 기간", className="form-label"),
+                        html.Div([
+                            dcc.Input(
+                                id="research-start-date", type="text", value=start,
+                                readOnly=True, persistence=True, persistence_type="local",
+                                className="form-control research-date-input",
+                            ),
+                            html.Span("—", className="input-group-text"),
+                            dcc.Input(
+                                id="research-end-date", type="text", value=end,
+                                readOnly=True, persistence=True, persistence_type="local",
+                                className="form-control research-date-input",
+                            ),
+                        ], className="input-group input-group-flat offline-date-range research-date-range"),
                     ], className="research-control"),
                     html.Div([
-                        html.Label([_icon("adjustments-horizontal"), "비교 전략"], className="form-label"),
+                        html.Label("비교 전략", className="form-label"),
                         dcc.Checklist(
                             id="research-strategies",
                             options=_strategy_options(view),
@@ -1997,7 +2183,14 @@ def create_research_app(
                                 value=names[0] if names else None, clearable=False,
                                 className="research-detail-dropdown",
                             ),
-                        ], className="research-detail-select"),
+                            dcc.Checklist(
+                                id="research-detail-remove-fx",
+                                options=[{"label": "달러 기준으로 보기", "value": "usd"}],
+                                value=[], inline=True,
+                                persistence=True, persistence_type="local",
+                                className="research-detail-fx-toggle",
+                            ),
+                        ], className="research-detail-actions"),
                     ], className="card-header research-detail-header"),
                     html.Section(
                         metric_cards,
@@ -2011,7 +2204,7 @@ def create_research_app(
                                 className="research-graph research-detail-graph research-combined-detail-graph",
                                 figure=initial_detail_figure,
                                 clear_on_unhover=True,
-                                style={"height": "520px", "minHeight": "520px", "width": "100%", "display": "block"},
+                                style={"height": "700px", "minHeight": "700px", "width": "100%", "display": "block"},
                             ),
                             dcc.Tooltip(
                                 id="research-detail-tooltip",
@@ -2055,7 +2248,7 @@ def create_research_app(
                             html.Div([
                                 html.H2("지표 연구", className="card-title"),
                                 html.P(
-                                    "종목과 지표를 조합해 전략 조건과 시장 국면을 탐색합니다.",
+                                "종목과 지표를 조합해 시장 구간을 분석합니다.",
                                     className="research-card-description",
                                 ),
                             ]),
@@ -2063,16 +2256,21 @@ def create_research_app(
                         html.Div([
                             html.Div([
                                 html.Label("분석 기간", className="form-label"),
-                                dcc.DatePickerRange(
-                                    id="research-indicator-date-range",
-                                    min_date_allowed=indicator_start,
-                                    max_date_allowed=indicator_end,
-                                    start_date=indicator_start,
-                                    end_date=indicator_end,
-                                    display_format="YYYY.MM.DD",
-                                    persistence=True,
-                                    persistence_type="local",
-                                ),
+                                html.Div([
+                                    dcc.Input(
+                                        id="research-indicator-start-date", type="text",
+                                        value=indicator_start, readOnly=True,
+                                        persistence=True, persistence_type="local",
+                                        className="form-control research-date-input",
+                                    ),
+                                    html.Span("—", className="input-group-text"),
+                                    dcc.Input(
+                                        id="research-indicator-end-date", type="text",
+                                        value=indicator_end, readOnly=True,
+                                        persistence=True, persistence_type="local",
+                                        className="form-control research-date-input",
+                                    ),
+                                ], className="input-group input-group-flat offline-date-range research-date-range"),
                             ], className="research-indicator-control"),
                             html.Div([
                                 html.Label("전략 표시", className="form-label"),
@@ -2082,13 +2280,24 @@ def create_research_app(
                                         {"label": "표시 안 함", "value": ""},
                                         *[{"label": name, "value": name} for name in names],
                                     ],
-                                    value="",
+                                    value=names[0] if names else "",
                                     clearable=False,
                                     persistence=True,
                                     persistence_type="local",
                                     className="research-indicator-strategy",
                                 ),
                             ], className="research-indicator-control"),
+                            html.Div([
+                            html.Div([
+                                dcc.Checklist(
+                                    id="research-indicator-remove-fx",
+                                    options=[{"label": "달러 기준으로 보기", "value": "usd"}],
+                                    value=[], inline=True,
+                                    persistence=True, persistence_type="local",
+                                    # HTML의 form-switch와 같은 스위치 모양을 사용한다.
+                                    className="research-indicator-fx-toggle",
+                                ),
+                            ], className="research-indicator-control research-indicator-fx-control"),
                             html.Div([
                                 html.Label("전략 이벤트", className="form-label"),
                                 dcc.Checklist(
@@ -2110,6 +2319,7 @@ def create_research_app(
                                     className="research-indicator-overlay-hint",
                                 ),
                             ], className="research-indicator-control"),
+                            ], className="research-indicator-control research-indicator-inline-options"),
                         ], className="card-body research-indicator-toolbar"),
                     ], className="card research-card research-indicator-controls"),
 
@@ -2118,7 +2328,7 @@ def create_research_app(
                             html.Div([
                                 html.H2("표시 지표", className="card-title"),
                                 html.P(
-                                    "선택한 종목과 지표 조합",
+                                "선택된 종목과 지표 조합",
                                     className="research-card-description",
                                 ),
                             ], className="research-indicator-selector-title"),
@@ -2131,12 +2341,12 @@ def create_research_app(
                         html.Details([
                             html.Summary([
                                 html.Span(
-                                    _icon("adjustments-horizontal"),
+                                    "☷",
                                     className="research-indicator-editor-icon",
                                 ),
                                 html.Span("종목·지표 편집"),
                                 html.Span(
-                                    _icon("chevron-down"),
+                                    "⌄",
                                     className="research-indicator-editor-chevron",
                                 ),
                             ], className="research-indicator-editor-summary"),
@@ -2173,7 +2383,7 @@ def create_research_app(
                                         {"label": "주봉", "value": "weekly"},
                                         {"label": "월봉", "value": "monthly"},
                                     ],
-                                    value="", inline=True,
+                                    value="daily", inline=True,
                                     persistence=True, persistence_type="local",
                                     className="research-indicator-checklist",
                                 ),
@@ -2205,7 +2415,7 @@ def create_research_app(
                         className="card research-card research-indicator-chart-card",
                     ),
                 ], id="research-indicator-view", style={"display": "none"}),
-            ], className="research-container research-content"),
+            ], className="research-container research-content offline-main"),
         ], id="research-page", className="research-page"),
     ], className="research-app-shell")
 
@@ -2214,19 +2424,15 @@ def create_research_app(
         Output("research-reload-error", "children"),
         Output("research-reload-error", "style"),
         Output("research-strategy-count", "children"),
-        Output("research-date-range", "min_date_allowed"),
-        Output("research-date-range", "max_date_allowed"),
-        Output("research-date-range", "start_date"),
-        Output("research-date-range", "end_date"),
+        Output("research-start-date", "value"),
+        Output("research-end-date", "value"),
         Output("research-strategies", "options"),
         Output("research-strategies", "value"),
         Output("research-detail-strategy", "options"),
         Output("research-detail-strategy", "value"),
         Output("research-summary-grid", "rowData"),
-        Output("research-indicator-date-range", "min_date_allowed"),
-        Output("research-indicator-date-range", "max_date_allowed"),
-        Output("research-indicator-date-range", "start_date"),
-        Output("research-indicator-date-range", "end_date"),
+        Output("research-indicator-start-date", "value"),
+        Output("research-indicator-end-date", "value"),
         Output("research-indicator-strategy", "options"),
         Output("research-indicator-strategy", "value"),
         Output("research-indicator-matrix-body", "children"),
@@ -2260,7 +2466,7 @@ def create_research_app(
         if detail_name not in active_names:
             detail_name = active_names[0] if active_names else None
         if indicator_strategy not in active_names:
-            indicator_strategy = ""
+            indicator_strategy = active_names[0] if active_names else ""
 
         selected_pairs = [
             (ticker, row_id["column"])
@@ -2297,8 +2503,6 @@ def create_research_app(
             f"{len(active_names)}개 전략",
             active_start,
             active_end,
-            active_start,
-            active_end,
             strategy_options,
             preserved_names,
             strategy_options,
@@ -2306,12 +2510,25 @@ def create_research_app(
             active_view.summary_rows(preserved_names),
             indicator_config["start"],
             indicator_config["end"],
-            indicator_config["start"],
-            indicator_config["end"],
             indicator_options_for_strategy,
             indicator_strategy,
             indicator_config["panels"],
         )
+
+    @app.callback(
+        Output("research-view-mode", "data"),
+        Input("research-analysis-tab", "n_clicks"),
+        Input("research-indicators-tab", "n_clicks"),
+        State("research-view-mode", "data"),
+        prevent_initial_call=True,
+    )
+    def switch_research_view(_analysis_clicks, _indicator_clicks, current_mode):
+        """HTML과 동일한 두 버튼을 사용하면서 선택 화면은 로컬에 보존한다."""
+        if ctx.triggered_id == "research-analysis-tab":
+            return "analysis"
+        if ctx.triggered_id == "research-indicators-tab":
+            return "indicators"
+        return current_mode or "analysis"
 
     app.clientside_callback(
         """
@@ -2319,13 +2536,17 @@ def create_research_app(
             const indicators = mode === "indicators";
             return [
                 indicators ? {display: "none"} : {},
-                indicators ? {} : {display: "none"}
+                indicators ? {} : {display: "none"},
+                indicators ? "nav-link offline-tab" : "nav-link offline-tab active",
+                indicators ? "nav-link offline-tab active" : "nav-link offline-tab"
             ];
         }
         """,
         Output("research-analysis-view", "style"),
         Output("research-indicator-view", "style"),
-        Input("research-view-mode", "value"),
+        Output("research-analysis-tab", "className"),
+        Output("research-indicators-tab", "className"),
+        Input("research-view-mode", "data"),
     )
 
     app.clientside_callback(
@@ -2380,15 +2601,17 @@ def create_research_app(
     @app.callback(
         Output("research-indicator-tooltip-data", "data"),
         Input("research-indicator-strategy", "value"),
-        Input("research-indicator-date-range", "start_date"),
-        Input("research-indicator-date-range", "end_date"),
+        Input("research-indicator-start-date", "value"),
+        Input("research-indicator-end-date", "value"),
+        Input("research-indicator-remove-fx", "value"),
         Input("research-result-version", "data"),
     )
     def update_indicator_tooltip_data(
-        overlay_strategy, selected_start, selected_end, _version,
+        overlay_strategy, selected_start, selected_end, fx_options, _version,
     ):
         return current_view().indicator_tooltip_data(
             overlay_strategy, selected_start, selected_end,
+            remove_fx="usd" in (fx_options or []),
         )
 
     @app.callback(
@@ -2396,11 +2619,12 @@ def create_research_app(
         Output("research-indicator-selection-summary", "children"),
         Output("research-indicator-candle-control", "style"),
         Input({"type": "indicator-matrix-row", "column": ALL}, "value"),
-        Input("research-indicator-date-range", "start_date"),
-        Input("research-indicator-date-range", "end_date"),
+        Input("research-indicator-start-date", "value"),
+        Input("research-indicator-end-date", "value"),
         Input("research-indicator-strategy", "value"),
         Input("research-indicator-overlays", "value"),
         Input("research-indicator-candles", "value"),
+        Input("research-indicator-remove-fx", "value"),
         Input("research-result-version", "data"),
         State({"type": "indicator-matrix-row", "column": ALL}, "id"),
     )
@@ -2411,6 +2635,7 @@ def create_research_app(
         overlay_strategy,
         overlay_options,
         candle_timeframes,
+        fx_options,
         version,
         row_ids,
     ):
@@ -2428,13 +2653,14 @@ def create_research_app(
             overlay_options,
             selected_pairs=selected_pairs,
             candle_timeframes=candle_timeframes,
+            remove_fx="usd" in (fx_options or []),
         )
         figure.update_layout(
             datarevision=(
                 f"indicators:{selected_pairs}:"
                 f"{overlay_strategy}:"
                 f"{','.join(overlay_options or [])}:"
-                f"{candle_timeframes or ''}:{version}"
+                f"{candle_timeframes or ''}:{fx_options or ''}:{version}"
             ),
             uirevision=f"indicator-range:{selected_start}:{selected_end}",
         )
@@ -2457,8 +2683,8 @@ def create_research_app(
     @app.callback(
         Output("research-performance", "figure"),
         Input("research-strategies", "value"),
-        Input("research-date-range", "start_date"),
-        Input("research-date-range", "end_date"),
+        Input("research-start-date", "value"),
+        Input("research-end-date", "value"),
         Input("research-result-version", "data"),
     )
     def update_performance(
@@ -2477,8 +2703,8 @@ def create_research_app(
     @app.callback(
         Output("research-drawdown", "figure"),
         Input("research-strategies", "value"),
-        Input("research-date-range", "start_date"),
-        Input("research-date-range", "end_date"),
+        Input("research-start-date", "value"),
+        Input("research-end-date", "value"),
         Input("research-result-version", "data"),
     )
     def update_drawdown(
@@ -2501,8 +2727,9 @@ def create_research_app(
         Output("research-kpi-sharpe", "children"),
         Output("research-kpi-total-return", "children"),
         Input("research-detail-strategy", "value"),
-        Input("research-date-range", "start_date"),
-        Input("research-date-range", "end_date"),
+        Input("research-start-date", "value"),
+        Input("research-end-date", "value"),
+        Input("research-detail-remove-fx", "value"),
         Input("research-result-version", "data"),
         State("research-detail-range", "data"),
     )
@@ -2510,21 +2737,27 @@ def create_research_app(
         selected_name,
         selected_start,
         selected_end,
+        fx_options,
         version,
         stored_range,
     ):
         active_view = current_view()
-        summary = next(
-            (
-                row for row in active_view.summary_rows()
-                if row["Strategy"] == selected_name
-            ),
-            {},
+        remove_fx = "usd" in (fx_options or [])
+        result = next(
+            (item for item in active_view.results
+             if strategy_name(item) == selected_name),
+            None,
+        )
+        source_history = _fx_neutral_history(result) if remove_fx and result else (
+            result.get("history") if result else pd.DataFrame()
+        )
+        metrics = _portfolio_metrics(
+            _filtered_history(source_history, selected_start, selected_end)
         )
         detail_figure = active_view.combined_detail_figure(
-            selected_name, selected_start, selected_end
+            selected_name, selected_start, selected_end, remove_fx=remove_fx,
         )
-        revision = f"{selected_name}:{selected_start}:{selected_end}:{version}"
+        revision = f"{selected_name}:{selected_start}:{selected_end}:{remove_fx}:{version}"
         detail_figure.update_layout(datarevision=revision, uirevision=revision)
         _apply_stored_detail_range(detail_figure, stored_range)
         bounded_range = _bounded_detail_range(detail_figure, stored_range)
@@ -2540,15 +2773,10 @@ def create_research_app(
             detail_figure.layout.yaxis.update(range=y_range, autorange=False)
         return (
             detail_figure,
-            _metric_value(summary.get("CAGR"), "percent"),
-            _metric_value(summary.get("MDD"), "percent"),
-            _metric_value(summary.get("Sharpe"), "number"),
-            _metric_value(
-                active_view.total_return(
-                    selected_name, selected_start, selected_end
-                ),
-                "percent",
-            ),
+            _metric_value(metrics["CAGR"], "percent"),
+            _metric_value(metrics["MDD"], "percent"),
+            _metric_value(metrics["Sharpe"], "number"),
+            _metric_value(metrics["TotalReturn"], "percent"),
         )
 
     @app.callback(
@@ -2629,8 +2857,11 @@ def create_research_app(
         register_bounded_navigation(bounded_graph_id)
 
     comparison_tooltip_script = """
-        function(hoverData, graphId, figure, indicatorTooltipData) {
+        function(hoverData, clickData, graphId, figure, indicatorTooltipData) {
             const noUpdate = window.dash_clientside.no_update;
+            const triggered = (window.dash_clientside.callback_context.triggered || [])
+                .at(0)?.prop_id || "";
+            hoverData = triggered.endsWith(".clickData") ? clickData : hoverData;
             if (!hoverData || !hoverData.points || !hoverData.points.length) {
                 return [false, noUpdate, noUpdate, noUpdate];
             }
@@ -2813,6 +3044,7 @@ def create_research_app(
             Output(tooltip_id, "children"),
             Output(tooltip_id, "direction"),
             Input(graph_id, "hoverData"),
+            Input(graph_id, "clickData"),
             State(graph_id, "id"),
             State(graph_id, "figure"),
             State("research-indicator-tooltip-data", "data"),
@@ -2820,8 +3052,11 @@ def create_research_app(
 
     app.clientside_callback(
         """
-        function(hoverData, graphId) {
+        function(hoverData, clickData, graphId) {
             const noUpdate = window.dash_clientside.no_update;
+            const triggered = (window.dash_clientside.callback_context.triggered || [])
+                .at(0)?.prop_id || "";
+            hoverData = triggered.endsWith(".clickData") ? clickData : hoverData;
             if (!hoverData || !hoverData.points || !hoverData.points.length) {
                 return [false, noUpdate, noUpdate, noUpdate];
             }
@@ -2896,6 +3131,7 @@ def create_research_app(
         Output("research-detail-tooltip", "children"),
         Output("research-detail-tooltip", "direction"),
         Input("research-detail-graph", "hoverData"),
+        Input("research-detail-graph", "clickData"),
         State("research-detail-graph", "id"),
     )
 
@@ -2905,13 +3141,12 @@ def create_research_app(
             const current = currentTheme || "light";
             const next = nClicks ? (current === "dark" ? "light" : "dark") : current;
             const pageClass = next === "dark" ? "research-page research-theme-dark" : "research-page";
-            const iconClass = next === "dark" ? "ti ti-sun" : "ti ti-moon";
             const title = next === "dark" ? "라이트 모드로 전환" : "다크 모드로 전환";
-            return [pageClass, iconClass, title, next];
+            return [pageClass, "◐", title, next];
         }
         """,
         Output("research-page", "className"),
-        Output("research-theme-icon", "className"),
+        Output("research-theme-toggle", "children"),
         Output("research-theme-toggle", "title"),
         Output("research-theme", "data"),
         Input("research-theme-toggle", "n_clicks"),

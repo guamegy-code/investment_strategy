@@ -722,7 +722,13 @@ function backgroundRun(def,data,all){
     `const KRW_ADJUSTED_SUFFIX=${JSON.stringify(KRW_ADJUSTED_SUFFIX)};`,
     `const KNOWN_MARKET_FIELDS=new Set(${JSON.stringify([...KNOWN_MARKET_FIELDS])});`,
     definitionById,tickerFxRate,krwAdjustedBaseTicker,isKrwAdjustedTicker,strategyDependencies,expressionStrings,requiredMarketFields,validateStrategy,pct,normalizeExpr,evaluate,period,recordsFor,marketRow,stateName,rotationNumber,sameRotationMix,selectRotation,rotationExplanation,installRotation,installRotationStability,installRotationSuspension,installFinalTargetRebalance,applyRotationRiskCap,installRotationRiskCap,addStrategyIndicators,applyValuationData,portfolioPrices,strategyHoldingTickers,resolve,Portfolio,Declarative,rotationOptionalTickers,validateCalculatedHistory,runWithData
-  ].map(item=>typeof item==='function'?item.toString():item).join('\n');
+  ].map(item=>{
+    if(typeof item!=='function')return item;
+    const source=item.toString();
+    if(/^(?:async\s+)?function\s+[A-Za-z_$][\w$]*\s*\(|^class\s+[A-Za-z_$][\w$]*/.test(source))return source;
+    if(!item.name)throw Error('Worker 함수 이름을 확인할 수 없습니다.');
+    return `const ${item.name}=${source};`;
+  }).join('\n');
   return new Promise((resolve,reject)=>{
     const source=`${runtime}\ninstallRotation(Declarative);\ninstallRotationStability(Declarative);\ninstallRotationSuspension(Declarative);\ninstallFinalTargetRebalance(Declarative);\ninstallRotationRiskCap(Declarative);\nself.onmessage=event=>{try{self.postMessage({history:runWithData(event.data.def,event.data.data,event.data.all)});}catch(error){self.postMessage({error:error.message||String(error)});}};`;
     const url=URL.createObjectURL(new Blob([source],{type:'text/javascript'})),worker=new Worker(url);
@@ -1503,3 +1509,27 @@ function localizeIndicatorFxControls(){
   if(toggle?.nextElementSibling)toggle.nextElementSibling.textContent='달러 기준으로 보기';
 }
 localizeIndicatorFxControls();
+
+// 지표 연구에서 선택한 전략은 비교 목록에서 잠시 제외됐더라도 유지한다.
+// 새로고침 뒤에는 dashboardResults가 비교 목록 기준으로 다시 만들어지므로,
+// 선택값만 복원되고 오버레이 히스토리가 없는 상태가 될 수 있다.
+const indicatorStrategyHistoryLoads=new Map();
+async function ensureIndicatorStrategyHistory(strategyId){
+  if(!strategyId||dashboardResults.has(strategyId))return;
+  if(!indicatorStrategyHistoryLoads.has(strategyId)){
+    const definition=definitions.find(item=>item?.strategy?.id===strategyId);
+    if(!definition)return;
+    const load=(async()=>{
+      const cached=await loadPrecomputedResults();
+      const history=cached[strategyId]?.length?cached[strategyId]:await run(definition);
+      if(history?.length)dashboardResults.set(strategyId,[definition,history]);
+    })().finally(()=>indicatorStrategyHistoryLoads.delete(strategyId));
+    indicatorStrategyHistoryLoads.set(strategyId,load);
+  }
+  await indicatorStrategyHistoryLoads.get(strategyId);
+}
+const restoredIndicatorStrategyRenderer=renderIndicators;
+renderIndicators=async function(){
+  await ensureIndicatorStrategyHistory(String($('indicator-strategy')?.value||''));
+  return restoredIndicatorStrategyRenderer();
+};

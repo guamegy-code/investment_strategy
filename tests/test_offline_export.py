@@ -354,6 +354,8 @@ class OfflineExportTests(unittest.TestCase):
             self.assertIn("VALUATION_SCORE:'합성 밸류에이션 점수 (비공식)'", document)
             self.assertIn("strategyWithSingleQqqIndicator", document)
             self.assertIn("function exchangeRateRemovedIndicatorRows(data,ticker)", document)
+            self.assertIn("window.ResearchSharedUi", document)
+            self.assertIn("researchDatePickerBound", document)
             self.assertNotIn("<script src=", document)
 
     def test_static_site_uses_manifest_and_excludes_market_data(self):
@@ -399,12 +401,14 @@ class OfflineExportTests(unittest.TestCase):
             self.assertEqual(len(list((root / "site" / "assets").glob("app.*.css"))), 1)
             self.assertEqual(len(list((root / "site" / "assets").glob("plotly.*.min.js"))), 1)
             self.assertEqual(len(list((root / "site" / "assets").glob("app.*.js"))), 1)
+            self.assertEqual(len(list((root / "site" / "assets").glob("shared-ui.*.js"))), 1)
             self.assertTrue((root / "site" / "strategies" / "sample.yaml").is_file())
             self.assertEqual(manifest["strategies"], [{"id": "sample", "path": "sample.yaml", "version": 1}])
             self.assertIn('"strategy_manifest_url": "./strategies/manifest.json"', document)
             self.assertIn('"static_site": true', document)
             self.assertIn('<script defer src="./assets/plotly.', document)
             self.assertIn('<script defer src="./assets/app.', document)
+            self.assertIn('<script defer src="./assets/shared-ui.', document)
             self.assertIn('<link rel="stylesheet" href="./assets/app.', document)
             self.assertIn("Cache-Control: public, max-age=31536000, immutable", (root / "site" / "_headers").read_text(encoding="utf-8"))
             self.assertNotIn('"data": "H4sI', document)
