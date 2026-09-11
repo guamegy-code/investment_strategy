@@ -230,9 +230,9 @@ function dateAnnotations(start,end,y){if(!start||!end)return[];const first=new D
 
 chartLayout=function(title,{slider=false,selector=true,separateSelector=false,legendColumns=2,legendItems=1,legendPlotGap=6,selectorLegendGap=14,height=450,start=null,end=null}={}){const rows=Math.max(1,Math.ceil(legendItems/Math.max(1,legendColumns))),top=selector?(separateSelector?Math.max(96,32+selectorLegendGap+19*rows+legendPlotGap):96):48,bottom=slider?78:54,plotHeight=Math.max(height-top-bottom,1),legendY=1+legendPlotGap/plotHeight,selectorY=legendY+(19*rows+selectorLegendGap)/plotHeight,sliderLabelY=-.235,buttons=[{count:1,label:'1년',step:'year',stepmode:'backward'},{count:3,label:'3년',step:'year',stepmode:'backward'},{count:5,label:'5년',step:'year',stepmode:'backward'},{label:'전체',step:'all'}],xaxis={fixedrange:false,type:'date',tickformat:'%Y.%m',tickformatstops:[{dtickrange:[null,'M1'],value:'%Y.%m.%d'},{dtickrange:['M1',null],value:'%Y.%m'}],nticks:8,hoverformat:'%Y.%m.%d',gridcolor:'#e7eaf0',linecolor:'#dce1e7',zeroline:false,automargin:true};if(slider)xaxis.rangeslider={visible:true,thickness:.09,bgcolor:'rgba(106,109,120,.06)',bordercolor:'#dce1e7',borderwidth:1,range:start&&end?[start,end]:undefined};if(selector)xaxis.rangeselector={buttons,x:separateSelector?0:1,xanchor:separateSelector?'left':'right',y:separateSelector?selectorY:1.18,yanchor:'bottom',bgcolor:'rgba(106,109,120,.08)',activecolor:'rgba(41,98,255,.18)',bordercolor:'#dce1e7',borderwidth:1,font:{size:11}};if(start&&end){xaxis.minallowed=start;xaxis.maxallowed=end;}return {height,dragmode:'pan',margin:{l:56,r:20,t:top,b:bottom,autoexpand:true},colorway:dashPalette,paper_bgcolor:'transparent',plot_bgcolor:'transparent',hovermode:'x unified',hoverdistance:-1,spikedistance:-1,showlegend:true,xaxis,yaxis:{gridcolor:'#e7eaf0',linecolor:'#dce1e7',zeroline:false,fixedrange:true,automargin:true,tickfont:{size:12},title:{text:title==='낙폭 경로'?'낙폭 (%)':'수익률 (%)',font:{size:13},standoff:10}},legend:{orientation:'h',y:separateSelector?legendY:1.02,x:0,yanchor:'bottom',entrywidth:separateSelector?1/Math.max(1,legendColumns):undefined,entrywidthmode:separateSelector?'fraction':undefined,font:{size:12}},annotations:slider?dateAnnotations(start,end,sliderLabelY):[],font:{family:'-apple-system,BlinkMacSystemFont,"SF Pro Text",Inter,"Apple SD Gothic Neo","Noto Sans KR","Malgun Gothic",sans-serif',color:'#182433',size:13}};};
 
-function positionTooltip(card,plot,kind,pointer){const graph=plot.getBoundingClientRect(),anchorX=Number.isFinite(pointer?.clientX)?pointer.clientX:graph.left+graph.width/2,anchorY=Number.isFinite(pointer?.clientY)?pointer.clientY:graph.top+graph.height/2,placeLeft=anchorX>graph.left+graph.width/2,placeAbove=anchorY>graph.top+graph.height/2;let left,top;if(kind==='comparison'){left=anchorX-card.offsetWidth/2;top=placeAbove?anchorY-card.offsetHeight-18:anchorY+18;}else{left=placeLeft?anchorX-card.offsetWidth-14:anchorX+14;top=anchorY-card.offsetHeight/2;}card.style.left=`${Math.max(12,Math.min(window.innerWidth-card.offsetWidth-12,left))}px`;card.style.top=`${Math.max(12,Math.min(window.innerHeight-card.offsetHeight-12,top))}px`;}
+function positionTooltip(card,plot,kind,pointer){const graph=plot.getBoundingClientRect();let cx=pointer?.clientX,cy=pointer?.clientY;if(cx===undefined&&pointer?.touches?.length){cx=pointer.touches[0].clientX;cy=pointer.touches[0].clientY;}const anchorX=Number.isFinite(cx)?cx:graph.left+graph.width/2,anchorY=Number.isFinite(cy)?cy:graph.top+graph.height/2,placeLeft=anchorX>graph.left+graph.width/2,placeAbove=anchorY>graph.top+graph.height/2;let left,top;if(kind==='comparison'){left=anchorX-card.offsetWidth/2;top=placeAbove?anchorY-card.offsetHeight-18:anchorY+18;}else{left=placeLeft?anchorX-card.offsetWidth-14:anchorX+14;top=anchorY-card.offsetHeight/2;}card.style.left=`${Math.max(12,Math.min(window.innerWidth-card.offsetWidth-12,left))}px`;card.style.top=`${Math.max(12,Math.min(window.innerHeight-card.offsetHeight-12,top))}px`;}
 
-bindChartTooltip=function(plotId,kind){const plot=$(plotId);if(!plot||plot.dataset.dashTooltipBound)return;plot.dataset.dashTooltipBound='1';let card;const hide=()=>{if(card)card.style.display='none';};document.addEventListener('mousemove',event=>{const rect=plot.getBoundingClientRect();if(event.clientX<rect.left||event.clientX>rect.right||event.clientY<rect.top||event.clientY>rect.bottom)hide();},{passive:true});plot.on('plotly_hover',event=>{const all=event.points||[],points=all.filter(point=>kind==='indicator'?point.data?.meta&&!point.data.meta.excludeTooltip:Boolean(point.customdata));if(!points.length)return hide();const date=String(points[0].x||points[0].customdata?.date||'').slice(0,10).replaceAll('-','.');let html;if(kind==='comparison'){const rows=points.filter(point=>point.customdata?.name).map(point=>tooltipRow(point.customdata.name,point.customdata.value));if(!rows.length)return hide();html=tooltipCard(points[0].customdata.date||date,rows);}else if(kind==='detail'){const point=points.find(item=>item.customdata?.assets);if(!point)return hide();const data=point.customdata,targets=data.assets.some(asset=>asset.target),rows=[tooltipRow('누적 수익률',data.return,null,targets),'<div class="research-custom-tooltip-separator"></div>',...data.assets.map(asset=>tooltipRow(asset.name,asset.current,asset.target,targets))];html=tooltipCard(data.date,rows,{detail:true,targets,footer:data.executionDays?`분할 체결 ${data.executionDays}거래일`:''});points.splice(0,points.length,point);}else{const panel=points[0].data.meta.panel,strategy=points.find(point=>point.data.meta.isStrategySeries)?.customdata,strategyContext=panel==='price'?strategy:null,targets=strategyContext?.assets?.some(asset=>asset.target)||false,rows=[];if(strategyContext){const state=strategyContext.state?` (${strategyContext.state})`:'';rows.push(tooltipRow(`누적 수익률${state}`,strategyContext.return,null,targets),'<div class="research-custom-tooltip-separator"></div>',...strategyContext.assets.map(asset=>tooltipRow(asset.name,asset.current,asset.target,targets)),'<div class="research-indicator-tooltip-section-separator"></div>');}rows.push(...points.filter(point=>!point.data.meta.isStrategySeries).map(point=>tooltipRow(point.data.meta.tooltipName,tooltipIndicatorValue(point),null,targets)));if(!rows.length)return hide();html=tooltipCard(date,rows,{targets,footer:strategyContext?.executionDays?`분할 체결 ${strategyContext.executionDays}거래일`:''});}if(!card){card=document.createElement('div');card.className=`offline-chart-tooltip research-chart-tooltip research-${kind}-tooltip`;document.body.append(card);}card.innerHTML=html;card.style.display='block';positionTooltip(card,plot,kind,event.event);});};
+bindChartTooltip=function(plotId,kind){const plot=$(plotId);if(!plot||plot.dataset.dashTooltipBound)return;plot.dataset.dashTooltipBound='1';let card;const hide=()=>{if(card)card.style.display='none';};const checkOutside=event=>{let cx=event.clientX,cy=event.clientY;if(cx===undefined&&event.changedTouches?.length){cx=event.changedTouches[0].clientX;cy=event.changedTouches[0].clientY;}else if(cx===undefined&&event.touches?.length){cx=event.touches[0].clientX;cy=event.touches[0].clientY;}if(cx===undefined)return;const rect=plot.getBoundingClientRect();if(cx<rect.left||cx>rect.right||cy<rect.top||cy>rect.bottom)hide();};document.addEventListener('touchstart',checkOutside,{passive:true});plot.on('plotly_unhover',hide);['plotly_hover', 'plotly_click'].forEach(evt => plot.on(evt, event=>{const all=event.points||[],points=all.filter(point=>kind==='indicator'?point.data?.meta&&!point.data.meta.excludeTooltip:Boolean(point.customdata));if(!points.length)return hide();const date=String(points[0].x||points[0].customdata?.date||'').slice(0,10).replaceAll('-','.');let html;if(kind==='comparison'){const rows=points.filter(point=>point.customdata?.name).map(point=>tooltipRow(point.customdata.name,point.customdata.value));if(!rows.length)return hide();html=tooltipCard(points[0].customdata.date||date,rows);}else if(kind==='detail'){const point=points.find(item=>item.customdata?.assets);if(!point)return hide();const data=point.customdata,targets=data.assets.some(asset=>asset.target),rows=[tooltipRow('누적 수익률',data.return,null,targets),'<div class="research-custom-tooltip-separator"></div>',...data.assets.map(asset=>tooltipRow(asset.name,asset.current,asset.target,targets))];html=tooltipCard(data.date,rows,{detail:true,targets,footer:data.executionDays?`분할 체결 ${data.executionDays}거래일`:''});points.splice(0,points.length,point);}else{const panel=points[0].data.meta.panel,strategy=points.find(point=>point.data.meta.isStrategySeries)?.customdata,strategyContext=panel==='price'?strategy:null,targets=strategyContext?.assets?.some(asset=>asset.target)||false,rows=[];if(strategyContext){const state=strategyContext.state?` (${strategyContext.state})`:'';rows.push(tooltipRow(`누적 수익률${state}`,strategyContext.return,null,targets),'<div class="research-custom-tooltip-separator"></div>',...strategyContext.assets.map(asset=>tooltipRow(asset.name,asset.current,asset.target,targets)),'<div class="research-indicator-tooltip-section-separator"></div>');}rows.push(...points.filter(point=>!point.data.meta.isStrategySeries).map(point=>tooltipRow(point.data.meta.tooltipName,tooltipIndicatorValue(point),null,targets)));if(!rows.length)return hide();html=tooltipCard(date,rows,{targets,footer:strategyContext?.executionDays?`분할 체결 ${strategyContext.executionDays}거래일`:''});}if(!card){card=document.createElement('div');card.className=`offline-chart-tooltip research-chart-tooltip research-${kind}-tooltip`;document.body.append(card);}card.innerHTML=html;card.style.display='block';positionTooltip(card,plot,kind,event.event);}));};
 
 function detailTooltipPayload(history,returns,tickers){return history.map((row,index)=>{const target=row.target&&typeof row.target==='object'?row.target:null,preWeights=row.preWeights&&typeof row.preWeights==='object'?row.preWeights:null;return {date:row.date.replaceAll('-','.'),return:percentText(returns[index]),assets:tickers.map(ticker=>({name:ticker,current:percentText(((preWeights||row.weights||{})[ticker]||0)*100),target:target?percentText((target[ticker]||0)*100):null})),executionDays:target?row.executionDays:null,state:row.state||''};});}
 
@@ -413,7 +413,7 @@ renderIndicators=async function(){
   const plot=$('indicator-plot');
   if(!plot?.data)return;
   const buttons=[{count:1,label:'1년',step:'year',stepmode:'backward'},{count:3,label:'3년',step:'year',stepmode:'backward'},{count:5,label:'5년',step:'year',stepmode:'backward'},{label:'전체',step:'all'}];
-  const legendItems=plot.data.filter(trace=>trace.showlegend!==false&&trace.name).length,rows=Math.max(1,Math.ceil(legendItems/5)),height=Number(plot.layout.height||plot.clientHeight),margin=plot.layout.margin||{},plotHeight=Math.max(height-Number(margin.t||0)-Number(margin.b||0),1),legendY=Number(plot.layout.legend?.y||1),selectorY=legendY+(19*rows+24)/plotHeight;
+  const {rows}=indicatorLegendGeometry(plot),height=Number(plot.layout.height||plot.clientHeight),margin=plot.layout.margin||{},plotHeight=Math.max(height-Number(margin.t||0)-Number(margin.b||0),1),legendY=Number(plot.layout.legend?.y||1),selectorY=legendY+(19*rows+24)/plotHeight;
   await Plotly.relayout(plot,{'xaxis.rangeselector':{buttons,x:0,xanchor:'left',y:selectorY,yanchor:'bottom',bgcolor:'rgba(106,109,120,.08)',activecolor:'rgba(41,98,255,.18)',bordercolor:'#dce1e7',borderwidth:1,font:{size:11}}});
 };
 const responsiveDetailHoverRenderer=renderDetail;
@@ -1226,7 +1226,7 @@ bindChartTooltip=function(plotId,kind){
   const plot=$(plotId);
   if(!plot||plot.dataset.candleDateBound)return;
   plot.dataset.candleDateBound='1';
-  plot.on('plotly_hover',event=>{
+  ['plotly_hover', 'plotly_click'].forEach(evt => plot.on(evt, event=>{
     const points=event.points||[],candlePoint=points.find(point=>point.data?.type==='candlestick'),candleTrace=candlePoint?.data||(plot.data||[]).find(trace=>trace.type==='candlestick');
     const heading=document.querySelector('.research-indicator-tooltip .research-custom-tooltip-date');
     const grid=heading?.parentElement?.querySelector('.research-custom-tooltip-grid');
@@ -1246,7 +1246,7 @@ bindChartTooltip=function(plotId,kind){
     if(heading)heading.textContent=date;
     const candleRow=[...grid.querySelectorAll('.research-custom-tooltip-row')].find(row=>row.querySelector('.research-custom-tooltip-label')?.textContent===candleTrace.name);
     if(candleRow){const value=candleRow.querySelector('.research-custom-tooltip-value');if(value)value.textContent=`시 ${tooltipNumber(raw.open)}\n고 ${tooltipNumber(raw.high)}\n저 ${tooltipNumber(raw.low)}\n종 ${tooltipNumber(raw.close)}`;grid.prepend(candleRow);}
-  });
+  }));
 };
 const matchedPriceHeightReact=Plotly.react.bind(Plotly);
 Plotly.react=function(target,traces,layout,...args){
@@ -1369,6 +1369,45 @@ setupDashboard=async function(){
   };
 };
 
+// 실제 범례 문자열의 픽셀 폭을 측정해 각 항목이 옆 열을 침범하지 않는 범위에서
+// 사용할 수 있는 최대 열 수를 계산한다. 전략명이나 종목명이 길어지면 자동으로
+// 열 수를 줄이고 다음 줄로 넘긴다.
+function indicatorLegendGeometry(plot){
+  const traces=(plot?.data||[]).filter(trace=>trace.showlegend!==false&&trace.name);
+  const layout=plot?.layout||{},fullLayout=plot?._fullLayout||{},margin=layout.margin||fullLayout.margin||{};
+  const plotWidth=Number(plot?.clientWidth||fullLayout.width||layout.width||1200);
+  const availableWidth=Math.max(1,Number(fullLayout?._size?.w)||plotWidth-Number(margin.l||0)-Number(margin.r||0));
+  const fontSize=Number(fullLayout.legend?.font?.size||layout.legend?.font?.size||12);
+  const fontFamily=fullLayout.legend?.font?.family||layout.legend?.font?.family||'-apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", sans-serif';
+  const canvas=indicatorLegendGeometry.canvas||(indicatorLegendGeometry.canvas=document.createElement('canvas'));
+  const context=canvas.getContext('2d');
+  if(context)context.font=`${fontSize}px ${fontFamily}`;
+  const longest=traces.reduce((width,trace)=>Math.max(width,context?context.measureText(String(trace.name)).width:String(trace.name).length*fontSize*.65),0);
+  // 선 표본, 항목 간 여백, Plotly 내부 패딩을 문자열 폭에 더한다.
+  const entryWidth=Math.min(availableWidth,Math.max(170,Math.ceil(longest+64)));
+  const columns=Math.max(1,Math.min(5,Math.floor(availableWidth/entryWidth)));
+  return {items:traces.length,entryWidth,columns,rows:Math.max(1,Math.ceil(traces.length/columns))};
+}
+const fullWidthIndicatorLegendRenderer=renderIndicators;
+renderIndicators=async function(){
+  await fullWidthIndicatorLegendRenderer();
+  const plot=$('indicator-plot');
+  if(!plot?.data||window.innerWidth<=760)return;
+  const {entryWidth,rows}=indicatorLegendGeometry(plot);
+  // 이전 렌더링의 큰 상단 여백을 그대로 유지하지 않고 현재 행 수에 맞춰 다시 계산한다.
+  const requiredTop=Math.max(96,32+24+19*rows+42);
+  const height=Number(plot.layout.height||plot.clientHeight||450),bottom=Number(plot.layout.margin?.b||54),plotHeight=Math.max(height-requiredTop-bottom,1),legendY=1+42/plotHeight;
+  const selectorAxis=Object.keys(plot.layout||{}).find(key=>/^xaxis\d*$/.test(key)&&plot.layout[key]?.rangeselector);
+  const update={
+    'legend.entrywidth':entryWidth,
+    'legend.entrywidthmode':'pixels',
+    'legend.y':legendY,
+    'margin.t':requiredTop,
+  };
+  if(selectorAxis)update[`${selectorAxis}.rangeselector.y`]=legendY+(19*rows+24)/plotHeight;
+  await Plotly.relayout(plot,update);
+};
+
 function installIndicatorTabFastPath(){
   const tab=$('indicators-tab');
   if(!tab||tab.dataset.fastIndicatorTabBound)return;
@@ -1458,3 +1497,9 @@ setupDashboard=async function(){
     void renderIndicators();
   };
 };
+
+function localizeIndicatorFxControls(){
+  const toggle=$('indicator-remove-fx');
+  if(toggle?.nextElementSibling)toggle.nextElementSibling.textContent='달러 기준으로 보기';
+}
+localizeIndicatorFxControls();

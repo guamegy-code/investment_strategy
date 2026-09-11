@@ -20,6 +20,8 @@ results/*
 dist/*.html
 data-proxy/node_modules/
 data-proxy/.wrangler/
+.wrangler/
+tmp/
 
 # VS Code
 .vscode/
