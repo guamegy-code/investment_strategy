@@ -557,6 +557,19 @@ body:has(.research-navigation-graph .nsewdrag:active) .dragcover {
   padding: 18px 20px;
 }
 .research-indicator-control { display: grid; gap: 8px; min-width: 0; }
+.research-indicator-inline-options {
+  display: flex;
+  min-height: 36px;
+  align-items: center;
+  gap: 10px;
+  align-self: end;
+}
+.research-indicator-inline-options .research-detail-fx-toggle {
+  align-self: center;
+}
+.research-indicator-inline-options .research-indicator-checklist {
+  align-items: center;
+}
 .research-indicator-control .form-label {
   margin: 0;
   color: var(--research-muted);
@@ -709,20 +722,20 @@ body:has(.research-navigation-graph .nsewdrag:active) .dragcover {
   scrollbar-gutter: stable;
 }
 .research-indicator-matrix-table {
-  width: max(100%, calc(170px + var(--indicator-ticker-count) * 74px));
-  min-width: calc(170px + var(--indicator-ticker-count) * 74px);
+  width: max(100%, calc(170px + var(--indicator-ticker-count) * 154px));
+  min-width: calc(170px + var(--indicator-ticker-count) * 154px);
 }
 .research-indicator-matrix-header,
 .research-indicator-matrix-row {
   display: grid;
-  grid-template-columns: minmax(160px, 1.35fr) repeat(var(--indicator-ticker-count), minmax(68px, .65fr));
+  grid-template-columns: minmax(160px, 1.35fr) repeat(var(--indicator-ticker-count), minmax(150px, .65fr));
   align-items: stretch;
 }
 .research-indicator-matrix-header {
   position: sticky;
   top: 0;
   z-index: 2;
-  min-height: 40px;
+  min-height: 54px;
   border-bottom: 1px solid var(--research-border);
   background: var(--research-bg);
 }
@@ -762,12 +775,12 @@ body:has(.research-navigation-graph .nsewdrag:active) .dragcover {
   background: var(--research-bg);
 }
 .research-indicator-column-toggle {
-  padding: 7px 5px;
+  padding: 7px 8px;
   border-left: 1px solid var(--research-border);
   cursor: pointer;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 .research-indicator-row-toggle {
   position: sticky;
@@ -893,6 +906,7 @@ body:has(.research-navigation-graph .nsewdrag:active) .dragcover {
   .research-detail-kpi-grid { padding: 12px 16px; }
   .research-detail-graph { height: 380px; }
   .research-indicator-toolbar { grid-template-columns: 1fr; }
+  .research-indicator-inline-options { flex-wrap: wrap; }
   .research-indicator-selector-header { display: grid; }
   .research-indicator-selection-summary { justify-content: flex-start; }
   .research-indicator-editor-summary,

@@ -413,7 +413,7 @@ renderIndicators=async function(){
   const plot=$('indicator-plot');
   if(!plot?.data)return;
   const buttons=[{count:1,label:'1년',step:'year',stepmode:'backward'},{count:3,label:'3년',step:'year',stepmode:'backward'},{count:5,label:'5년',step:'year',stepmode:'backward'},{label:'전체',step:'all'}];
-  const legendItems=plot.data.filter(trace=>trace.showlegend!==false&&trace.name).length,rows=Math.max(1,Math.ceil(legendItems/5)),height=Number(plot.layout.height||plot.clientHeight),margin=plot.layout.margin||{},plotHeight=Math.max(height-Number(margin.t||0)-Number(margin.b||0),1),legendY=Number(plot.layout.legend?.y||1),selectorY=legendY+(19*rows+24)/plotHeight;
+  const {rows}=indicatorLegendGeometry(plot),height=Number(plot.layout.height||plot.clientHeight),margin=plot.layout.margin||{},plotHeight=Math.max(height-Number(margin.t||0)-Number(margin.b||0),1),legendY=Number(plot.layout.legend?.y||1),selectorY=legendY+(19*rows+24)/plotHeight;
   await Plotly.relayout(plot,{'xaxis.rangeselector':{buttons,x:0,xanchor:'left',y:selectorY,yanchor:'bottom',bgcolor:'rgba(106,109,120,.08)',activecolor:'rgba(41,98,255,.18)',bordercolor:'#dce1e7',borderwidth:1,font:{size:11}}});
 };
 const responsiveDetailHoverRenderer=renderDetail;
@@ -1369,6 +1369,45 @@ setupDashboard=async function(){
   };
 };
 
+// 실제 범례 문자열의 픽셀 폭을 측정해 각 항목이 옆 열을 침범하지 않는 범위에서
+// 사용할 수 있는 최대 열 수를 계산한다. 전략명이나 종목명이 길어지면 자동으로
+// 열 수를 줄이고 다음 줄로 넘긴다.
+function indicatorLegendGeometry(plot){
+  const traces=(plot?.data||[]).filter(trace=>trace.showlegend!==false&&trace.name);
+  const layout=plot?.layout||{},fullLayout=plot?._fullLayout||{},margin=layout.margin||fullLayout.margin||{};
+  const plotWidth=Number(plot?.clientWidth||fullLayout.width||layout.width||1200);
+  const availableWidth=Math.max(1,Number(fullLayout?._size?.w)||plotWidth-Number(margin.l||0)-Number(margin.r||0));
+  const fontSize=Number(fullLayout.legend?.font?.size||layout.legend?.font?.size||12);
+  const fontFamily=fullLayout.legend?.font?.family||layout.legend?.font?.family||'-apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", sans-serif';
+  const canvas=indicatorLegendGeometry.canvas||(indicatorLegendGeometry.canvas=document.createElement('canvas'));
+  const context=canvas.getContext('2d');
+  if(context)context.font=`${fontSize}px ${fontFamily}`;
+  const longest=traces.reduce((width,trace)=>Math.max(width,context?context.measureText(String(trace.name)).width:String(trace.name).length*fontSize*.65),0);
+  // 선 표본, 항목 간 여백, Plotly 내부 패딩을 문자열 폭에 더한다.
+  const entryWidth=Math.min(availableWidth,Math.max(170,Math.ceil(longest+64)));
+  const columns=Math.max(1,Math.min(5,Math.floor(availableWidth/entryWidth)));
+  return {items:traces.length,entryWidth,columns,rows:Math.max(1,Math.ceil(traces.length/columns))};
+}
+const fullWidthIndicatorLegendRenderer=renderIndicators;
+renderIndicators=async function(){
+  await fullWidthIndicatorLegendRenderer();
+  const plot=$('indicator-plot');
+  if(!plot?.data||window.innerWidth<=760)return;
+  const {entryWidth,rows}=indicatorLegendGeometry(plot);
+  // 이전 렌더링의 큰 상단 여백을 그대로 유지하지 않고 현재 행 수에 맞춰 다시 계산한다.
+  const requiredTop=Math.max(96,32+24+19*rows+42);
+  const height=Number(plot.layout.height||plot.clientHeight||450),bottom=Number(plot.layout.margin?.b||54),plotHeight=Math.max(height-requiredTop-bottom,1),legendY=1+42/plotHeight;
+  const selectorAxis=Object.keys(plot.layout||{}).find(key=>/^xaxis\d*$/.test(key)&&plot.layout[key]?.rangeselector);
+  const update={
+    'legend.entrywidth':entryWidth,
+    'legend.entrywidthmode':'pixels',
+    'legend.y':legendY,
+    'margin.t':requiredTop,
+  };
+  if(selectorAxis)update[`${selectorAxis}.rangeselector.y`]=legendY+(19*rows+24)/plotHeight;
+  await Plotly.relayout(plot,update);
+};
+
 function installIndicatorTabFastPath(){
   const tab=$('indicators-tab');
   if(!tab||tab.dataset.fastIndicatorTabBound)return;
@@ -1458,3 +1497,9 @@ setupDashboard=async function(){
     void renderIndicators();
   };
 };
+
+function localizeIndicatorFxControls(){
+  const toggle=$('indicator-remove-fx');
+  if(toggle?.nextElementSibling)toggle.nextElementSibling.textContent='달러 기준으로 보기';
+}
+localizeIndicatorFxControls();
