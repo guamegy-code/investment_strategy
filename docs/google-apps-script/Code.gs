@@ -25,7 +25,7 @@ function setupSpreadsheet() {
   ensureSheet_(spreadsheet, SHEETS.PERSONAL,
     ['전략 ID', '전략 YAML']);
   ensureSheet_(spreadsheet, SHEETS.EVENTS,
-    ['발송 시각', '이벤트 키', '시장 기준일', '전략 ID', '전략명', '상태', '사유', '실행 일수', '목표 비중', '결과']);
+    ['발송 시각', '이벤트 키', '시장 기준일', '전략 ID', '전략명', '상태', '사유', '실행 일수', '목표 비중', '결과', '알림 유형', '시장 요약']);
   ensureSheet_(spreadsheet, SHEETS.LOG,
     ['실행 시각', '평가 전략 수', '발송 건수', '결과', '상세']);
   const subscriptions = spreadsheet.getSheetByName(SHEETS.SUBSCRIPTIONS);
@@ -58,10 +58,25 @@ function runNotificationCheck() {
     let sent = 0;
     evaluations.forEach(evaluation => {
       updateSubscription_(evaluation);
-      if (!evaluation.rebalance_required || eventAlreadySent_(eventKey_(evaluation))) return;
-      sendTelegram_(messageFor_(evaluation));
-      recordEvent_(evaluation);
-      sent++;
+      let alerts = Array.isArray(evaluation.alerts) ? evaluation.alerts.slice() : [];
+      if (!alerts.length && evaluation.rebalance_required) alerts.push({...evaluation, type: 'REBALANCE'});
+      alerts = alerts.filter(alert => !eventAlreadySent_(eventKey_(alert)));
+      const weekly = isWeeklySummaryDay_() ? evaluation.weekly_summary : null;
+      if (weekly && !eventAlreadySent_(eventKey_(weekly))) {
+        const sameDate = alerts.slice().reverse().find(alert => alert.market_data_at === weekly.market_data_at);
+        if (sameDate) {
+          sameDate.includes_weekly = true;
+          sameDate.coalesced_weekly = weekly;
+        } else {
+          alerts.push(weekly);
+        }
+      }
+      alerts.forEach(alert => {
+        sendTelegram_(messageFor_(alert));
+        recordEvent_(alert, 'SENT');
+        if (alert.coalesced_weekly) recordEvent_(alert.coalesced_weekly, 'COALESCED');
+        sent++;
+      });
     });
     logRun_(subscriptions.length, sent, 'SUCCESS', '');
   } catch (error) {
@@ -111,6 +126,11 @@ function withinNotificationWindow_() {
   return hour >= 7 && hour < 10;
 }
 
+function isWeeklySummaryDay_(date) {
+  const parts = Utilities.formatDate(date || new Date(), KST, 'yyyy-MM-dd').split('-').map(Number);
+  return new Date(Date.UTC(parts[0], parts[1] - 1, parts[2])).getUTCDay() === 6;
+}
+
 function enabledSubscriptions_() {
   const sheet = requireSpreadsheet_().getSheetByName(SHEETS.SUBSCRIPTIONS);
   return sheet.getDataRange().getValues().slice(1)
@@ -158,7 +178,7 @@ function sendTelegram_(text) {
 }
 
 function eventKey_(evaluation) {
-  return [evaluation.strategy_id, evaluation.strategy_version, evaluation.market_data_at, evaluation.reason || '', JSON.stringify(evaluation.target_weights || {})].join('|');
+  return [evaluation.type || 'REBALANCE', evaluation.strategy_id, evaluation.strategy_version, evaluation.market_data_at, evaluation.reason_text || evaluation.reason || '', JSON.stringify(evaluation.target_weights || {})].join('|');
 }
 
 function eventAlreadySent_(key) {
@@ -166,15 +186,15 @@ function eventAlreadySent_(key) {
   return sheet.getLastRow() > 1 && sheet.getRange(2, 2, sheet.getLastRow() - 1, 1).getValues().flat().includes(key);
 }
 
-function recordEvent_(evaluation) {
+function recordEvent_(evaluation, result) {
   const sheet = requireSpreadsheet_().getSheetByName(SHEETS.EVENTS);
-  sheet.appendRow([new Date(), eventKey_(evaluation), evaluation.market_data_at, evaluation.strategy_id, evaluation.strategy_name, evaluation.state, evaluation.reason || '', evaluation.execution_days || '', formatWeights_(evaluation.target_weights), 'SENT']);
+  sheet.appendRow([new Date(), eventKey_(evaluation), evaluation.market_data_at, evaluation.strategy_id, evaluation.strategy_name, formatStates_(evaluation.state_values, evaluation.state), evaluation.reason_text || evaluation.reason || '', evaluation.execution_days || '', formatWeights_(evaluation.target_weights), result || 'SENT', evaluation.type || 'REBALANCE', formatMarket_(evaluation.market)]);
 }
 
 function updateSubscription_(evaluation) {
   const sheet = requireSpreadsheet_().getSheetByName(SHEETS.SUBSCRIPTIONS);
   const rows = sheet.getDataRange().getValues();
-  rows.slice(1).forEach((row, index) => { if (String(row[1]) === evaluation.strategy_id) sheet.getRange(index + 2, 4, 1, 2).setValues([[evaluation.market_data_at, '정상']]); });
+  rows.slice(1).forEach((row, index) => { if (String(row[1]) === evaluation.strategy_id) sheet.getRange(index + 2, 4, 1, 2).setValues([[evaluation.market_data_at, formatStates_(evaluation.state_values, evaluation.state) || '정상']]); });
 }
 
 function logRun_(strategies, sent, result, detail) {
@@ -183,6 +203,75 @@ function logRun_(strategies, sent, result, detail) {
   Logger.log(`${result}: ${detail}`);
 }
 function formatWeights_(weights) { return Object.entries(weights || {}).map(([ticker, weight]) => `${ticker} ${(Number(weight) * 100).toFixed(1)}%`).join('\n'); }
-function messageFor_(event) { return `[리밸런싱 알림]\n\n전략: ${event.strategy_name}\n시장 기준일: ${event.market_data_at}\n상태: ${event.state || '-'}\n사유: ${event.reason || '-'}\n실행 기간: ${event.execution_days || 1}일\n\n목표 비중\n${formatWeights_(event.target_weights)}`; }
+function formatWeightChanges_(event) {
+  const current = event.current_weights || {}, target = event.target_weights || {};
+  return Object.keys(target).map(ticker => {
+    const before = Number(current[ticker] || 0) * 100, after = Number(target[ticker] || 0) * 100, change = after - before;
+    return `${ticker} ${before.toFixed(1)}% → ${after.toFixed(1)}% (${change >= 0 ? '+' : ''}${change.toFixed(1)}%p)`;
+  }).join('\n');
+}
+function formatStates_(states, legacy) {
+  const labels = {trend_mode: '추세', market_mode: '추세', defense_mode: '밸류에이션', stage: '하락 단계', valuation_level: '평가 단계'};
+  const order = ['trend_mode', 'market_mode', 'defense_mode', 'stage', 'valuation_level'];
+  const text = order.filter(key => Object.prototype.hasOwnProperty.call(states || {}, key)).map(key => `${labels[key]} ${states[key]}`).join(' / ');
+  return text || legacy || '';
+}
+function formatConfiguredValue_(item) {
+  const value = Number(item.value), digits = item.decimals === undefined ? 1 : Number(item.decimals);
+  if (!Number.isFinite(value)) return '-';
+  if (item.format === 'ratio_percent') return `${(value * 100).toFixed(digits)}%`;
+  if (item.format === 'percent') return `${value.toFixed(digits)}%`;
+  return value.toFixed(digits);
+}
+function formatConfiguredStates_(event) {
+  const items = event.notification_display?.states || [];
+  if (event.notification_display) return items.map(item => `${item.label} ${item.value}`).join(' / ');
+  return formatStates_(event.state_values, event.state);
+}
+function percent_(value, digits) { return Number.isFinite(Number(value)) ? `${Number(value).toFixed(digits === undefined ? 1 : digits)}%` : '-'; }
+function formatMarket_(market) {
+  const qqq = market?.qqq || {};
+  const parts = [`1일 ${percent_(qqq.roc1)}`, `5일 ${percent_(qqq.roc5)}`, `20일 ${percent_(qqq.roc20)}`];
+  if (Number.isFinite(Number(qqq.drawdown120))) parts.push(`120일 고점 대비 ${percent_(Number(qqq.drawdown120) * 100)}`);
+  return `QQQ ${parts.join(' / ')}`;
+}
+function formatConfiguredMarket_(event) {
+  const items = event.notification_display?.market || [];
+  if (!event.notification_display) return formatMarket_(event.market);
+  if (!items.length) return '';
+  const groups = {};
+  items.forEach(item => { if (!groups[item.ticker]) groups[item.ticker] = []; groups[item.ticker].push(`${item.label} ${formatConfiguredValue_(item)}`); });
+  return Object.entries(groups).map(([ticker, values]) => `${ticker} ${values.join(' / ')}`).join('\n');
+}
+function formatSignals_(event) {
+  const configured = event.notification_display?.variables || [];
+  if (event.notification_display) return configured.map(item => `${item.label} ${formatConfiguredValue_({...item, format: 'number'})}${item.max === null || item.max === undefined ? '' : `/${item.max}`}`).join(' / ');
+  const variables = event.variables || {}, qqq = event.market?.qqq || {}, parts = [];
+  if (Number.isFinite(Number(variables.risk_off_score))) parts.push(`약세 ${Number(variables.risk_off_score)}/6`);
+  if (Number.isFinite(Number(variables.recovery_score))) parts.push(`회복 ${Number(variables.recovery_score)}/6`);
+  if (Number.isFinite(Number(qqq.valuation_score))) parts.push(`밸류에이션 ${Number(qqq.valuation_score).toFixed(1)}`);
+  return parts.join(' / ');
+}
+function formatConfirmations_(confirmations) {
+  return (confirmations || []).map(item => `${item.name} → ${item.desired} ${item.days}/${item.required_days}일`).join('\n');
+}
+function messageFor_(event) {
+  const type = event.type || 'REBALANCE';
+  const titles = {REBALANCE: '[리밸런싱 실행]', PREALERT: '[사전주의 · 매매 없음]', WEEKLY: '[주간 시장 브리핑]'};
+  const lines = [titles[type] || '[투자 전략 알림]', '', `전략: ${event.strategy_name}`, `시장 기준일: ${event.market_data_at}`];
+  if (event.mapped_products && event.source_strategy_id) lines.push(`기준 전략: ${event.source_strategy_id}`);
+  lines.push(`상태: ${formatConfiguredStates_(event) || '-'}`, formatConfiguredMarket_(event));
+  const signals = formatSignals_(event); if (signals) lines.push(`신호: ${signals}`);
+  if (event.reason_text || event.reason) lines.push(`판단: ${event.reason_text || event.reason}`);
+  const confirmations = formatConfirmations_(event.confirmations); if (confirmations) lines.push(`확인 진행\n${confirmations}`);
+  lines.push(`목표 괴리: ${(Number(event.target_deviation || 0) * 100).toFixed(1)}%p`);
+  if (type === 'REBALANCE') {
+    lines.push('', '현재 → 목표 비중', formatWeightChanges_(event), `실행: 다음 거래일 시가부터 ${event.execution_days || 1}일`);
+  } else {
+    lines.push('', '현재 비중', formatWeights_(event.current_weights), '목표 비중', formatWeights_(event.target_weights), '현재 행동: 리밸런싱 없음');
+  }
+  if (event.includes_weekly) lines[0] += ' · 주간 점검 포함';
+  return lines.filter(line => line !== undefined && line !== null).join('\n');
+}
 function requiredProperty_(properties, key) { const value = properties.getProperty(key); if (!value) throw new Error(`Script Properties에 ${key}를 설정하세요.`); return value; }
-function ensureSheet_(spreadsheet, name, headers) { const sheet = spreadsheet.getSheetByName(name) || spreadsheet.insertSheet(name); if (sheet.getLastRow() === 0) sheet.appendRow(headers); return sheet; }
+function ensureSheet_(spreadsheet, name, headers) { const sheet = spreadsheet.getSheetByName(name) || spreadsheet.insertSheet(name); if (sheet.getLastRow() === 0) sheet.appendRow(headers); else sheet.getRange(1, 1, 1, headers.length).setValues([headers]); return sheet; }

@@ -7,7 +7,7 @@
   "required": ["strategy"],
   "oneOf": [
     {"required": ["assets", "target"]},
-    {"required": ["source", "products"]}
+    {"required": ["source", "products"], "not": {"required": ["notifications"]}}
   ],
   "properties": {
     "strategy": {
@@ -101,6 +101,91 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {"days": {"type": ["string", "integer"]}}
+    },
+    "notifications": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "weekly": {"type": "boolean"},
+        "states": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["label"],
+            "properties": {
+              "label": {"type": "string", "minLength": 1},
+              "alerts": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["to"],
+                  "properties": {
+                    "from": {"type": ["string", "number", "boolean"]},
+                    "to": {"type": ["string", "number", "boolean"]},
+                    "message": {"type": "string", "minLength": 1}
+                  }
+                }
+              }
+            }
+          }
+        },
+        "variables": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["label"],
+            "properties": {
+              "label": {"type": "string", "minLength": 1},
+              "max": {"type": "number"},
+              "decimals": {"type": "integer", "minimum": 0, "maximum": 6}
+            }
+          }
+        },
+        "market": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["ticker", "field", "label"],
+            "properties": {
+              "ticker": {"type": "string", "minLength": 1},
+              "field": {"type": "string", "minLength": 1},
+              "label": {"type": "string", "minLength": 1},
+              "format": {"enum": ["number", "percent", "ratio_percent", "price"]},
+              "decimals": {"type": "integer", "minimum": 0, "maximum": 6}
+            }
+          }
+        },
+        "confirmation_alerts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["state", "values"],
+            "properties": {
+              "state": {"type": "string", "minLength": 1},
+              "values": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": ["string", "number", "boolean"]}}
+            }
+          }
+        },
+        "prealerts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "when", "reset_when", "message"],
+            "properties": {
+              "id": {"type": "string", "minLength": 1},
+              "when": {"type": "string", "minLength": 1},
+              "reset_when": {"type": "string", "minLength": 1},
+              "message": {"type": "string", "minLength": 1}
+            }
+          }
+        }
+      }
     },
     "rotation": {
       "type": "object",

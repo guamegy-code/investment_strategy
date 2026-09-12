@@ -385,7 +385,7 @@ def _required_market_fields(
             if ticker is not None:
                 found[ticker].add(node.attr.upper())
 
-    for section in ("variables", "state", "target", "rebalance", "execution"):
+    for section in ("variables", "state", "target", "rebalance", "execution", "notifications"):
         inspect(definition.get(section, {}))
     rotation = definition.get("rotation")
     if isinstance(rotation, Mapping):
@@ -413,7 +413,7 @@ def _validate_definition(raw: Any, source: str) -> dict[str, Any]:
         definition,
         {
             "strategy", "assets", "parameters", "variables", "state",
-            "target", "rebalance", "execution", "rotation", "source", "products",
+            "target", "rebalance", "execution", "notifications", "rotation", "source", "products",
         },
         "strategy definition",
     )
@@ -666,6 +666,73 @@ def _validate_definition(raw: Any, source: str) -> dict[str, Any]:
     if not isinstance(execution, Mapping):
         raise StrategyDefinitionError("execution must be a mapping")
     _reject_unknown(execution, {"days"}, "execution")
+    notifications = definition.get("notifications", {})
+    if not isinstance(notifications, Mapping):
+        raise StrategyDefinitionError("notifications must be a mapping")
+    _reject_unknown(
+        notifications,
+        {"weekly", "states", "variables", "market", "confirmation_alerts", "prealerts"},
+        "notifications",
+    )
+    if "weekly" in notifications and not isinstance(notifications["weekly"], bool):
+        raise StrategyDefinitionError("notifications.weekly must be true or false")
+    for section in ("states", "variables"):
+        configured = _require_mapping(notifications.get(section, {}), f"notifications.{section}")
+        for name, item in configured.items():
+            item = _require_mapping(item, f"notifications.{section}.{name}")
+            allowed = {"label", "alerts"} if section == "states" else {"label", "max", "decimals"}
+            _reject_unknown(item, allowed, f"notifications.{section}.{name}")
+            if not str(item.get("label", "")).strip():
+                raise StrategyDefinitionError(f"notifications.{section}.{name}.label is required")
+            known = state if section == "states" else definition.get("variables", {})
+            if name not in known:
+                raise StrategyDefinitionError(f"notifications.{section}.{name} is not defined")
+            if section == "states" and "alerts" in item:
+                alerts = item["alerts"]
+                if not isinstance(alerts, list):
+                    raise StrategyDefinitionError(f"notifications.states.{name}.alerts must be a list")
+                for index, alert in enumerate(alerts):
+                    alert = _require_mapping(alert, f"notifications.states.{name}.alerts[{index}]")
+                    _reject_unknown(alert, {"from", "to", "message"}, f"notifications.states.{name}.alerts[{index}]")
+                    if "to" not in alert:
+                        raise StrategyDefinitionError(f"notifications.states.{name}.alerts[{index}].to is required")
+                    if "message" in alert and not str(alert["message"]).strip():
+                        raise StrategyDefinitionError(f"notifications.states.{name}.alerts[{index}].message must not be empty")
+    market_notifications = notifications.get("market", [])
+    if not isinstance(market_notifications, list):
+        raise StrategyDefinitionError("notifications.market must be a list")
+    for index, item in enumerate(market_notifications):
+        item = _require_mapping(item, f"notifications.market[{index}]")
+        _reject_unknown(item, {"ticker", "field", "label", "format", "decimals"}, f"notifications.market[{index}]")
+        for field in ("ticker", "field", "label"):
+            if not str(item.get(field, "")).strip():
+                raise StrategyDefinitionError(f"notifications.market[{index}].{field} is required")
+        known_tickers = {str(value) for value in required + observations}
+        if str(item["ticker"]) not in known_tickers:
+            raise StrategyDefinitionError(f"notifications.market[{index}].ticker is not configured")
+    confirmation_alerts = notifications.get("confirmation_alerts", [])
+    if not isinstance(confirmation_alerts, list):
+        raise StrategyDefinitionError("notifications.confirmation_alerts must be a list")
+    for index, item in enumerate(confirmation_alerts):
+        item = _require_mapping(item, f"notifications.confirmation_alerts[{index}]")
+        _reject_unknown(item, {"state", "values"}, f"notifications.confirmation_alerts[{index}]")
+        if not str(item.get("state", "")).strip() or not isinstance(item.get("values"), list) or not item["values"]:
+            raise StrategyDefinitionError(f"notifications.confirmation_alerts[{index}] requires state and values")
+        if str(item["state"]) not in state:
+            raise StrategyDefinitionError(f"notifications.confirmation_alerts[{index}].state is not defined")
+    prealerts = notifications.get("prealerts", [])
+    if not isinstance(prealerts, list):
+        raise StrategyDefinitionError("notifications.prealerts must be a list")
+    ids = set()
+    for index, item in enumerate(prealerts):
+        item = _require_mapping(item, f"notifications.prealerts[{index}]")
+        _reject_unknown(item, {"id", "when", "reset_when", "message"}, f"notifications.prealerts[{index}]")
+        for field in ("id", "when", "reset_when", "message"):
+            if not str(item.get(field, "")).strip():
+                raise StrategyDefinitionError(f"notifications.prealerts[{index}].{field} is required")
+        if item["id"] in ids:
+            raise StrategyDefinitionError("notifications.prealerts ids must be unique")
+        ids.add(item["id"])
     return definition
 
 
