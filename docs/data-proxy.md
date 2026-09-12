@@ -17,7 +17,10 @@ GET /prices?tickers=QQQ,BND&start=2010-01-01&end=2026-08-15
 
 `POST /notification-evaluations`는 Google Apps Script 알림 컨트롤러 전용의 인증된
 엔드포인트입니다. 요청된 전략만 읽고, `MARKET_DATA` KV 네임스페이스에 저장된 종목
-데이터의 새 구간만 갱신한 뒤 리밸런싱 이벤트를 반환합니다. 배포 전에는
+데이터의 새 구간만 갱신한 뒤 리밸런싱·선별 사전주의 이벤트와 현재 주간 요약 데이터를 반환합니다.
+응답의 `alerts`에는 전체 상태값, 상태 변화, 확인 진행도, QQQ 시장 요약, 현재·목표·증감 비중이
+들어갑니다. `weekly_summary`는 Apps Script가 토요일 발송 여부를 결정할 때 사용합니다.
+상품연결 전략은 원본의 상태 정보를 유지하되 비중을 실제 상품 코드로 변환합니다. 배포 전에는
 `STRATEGY_MANIFEST_URL` 설정, KV 네임스페이스 생성,
 그리고 `NOTIFICATION_API_KEY` Worker 비밀값 등록이 필요합니다. Apps Script 예제는
 `docs/google-apps-script/`에 있습니다.

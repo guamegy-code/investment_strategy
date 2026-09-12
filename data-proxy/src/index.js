@@ -5,6 +5,7 @@ import {
   parseYaml,
   runStrategy,
   runStrategyIncremental,
+  selectNotificationAlerts,
   strategySnapshot,
   strategyTickers,
 } from "./strategy-runtime.js";
@@ -442,21 +443,54 @@ async function notificationEvaluation(request, env) {
   }
   const lastDates = body.last_evaluated_dates || {}, evaluations = [];
   for (const definition of selected) {
-    const result = runStrategyIncremental(definitions, definition, data, snapshots.get(definition.strategy.id));
-    if (result.snapshot !== snapshots.get(definition.strategy.id)) await saveNotificationSnapshot(env, definition.strategy.id, result.snapshot);
-    const history = result.history, marketDataAt = result.snapshot.date || snapshots.get(definition.strategy.id).date, prior = String(lastDates[definition.strategy.id] || "");
+    const previousSnapshot = snapshots.get(definition.strategy.id);
+    const result = runStrategyIncremental(definitions, definition, data, previousSnapshot);
+    const notification = selectNotificationAlerts(result.history, previousSnapshot.notification || {
+      deviation_armed: Number(previousSnapshot.notification_context?.target_deviation || 0) >= .05,
+      latest_context: previousSnapshot.notification_context || null,
+    });
+    const latestContext = notification.state.latest_context || result.snapshot.notification_context || previousSnapshot.notification_context || null;
+    const nextSnapshot = {...result.snapshot, notification: notification.state, notification_context: latestContext};
+    await saveNotificationSnapshot(env, definition.strategy.id, nextSnapshot);
+    const history = result.history, marketDataAt = nextSnapshot.date || previousSnapshot.date, prior = String(lastDates[definition.strategy.id] || "");
     const events = history.filter(row => row.target && row.date > prior);
     const event = events.at(-1);
-    evaluations.push({
+    const alertMetadata = {
       strategy_id: definition.strategy.id,
       strategy_name: definition.strategy.name,
       strategy_version: String(definition.strategy.version || ""),
+    };
+    const alerts = notification.alerts.map(alert => ({...alertMetadata, ...alert}));
+    const weeklySummary = latestContext && latestContext.notification_display?.weekly !== false ? {
+      ...alertMetadata,
+      type: "WEEKLY",
+      market_data_at: marketDataAt,
+      state_values: latestContext.state_values || {},
+      reason_text: "정기 시장 상황 점검",
+      current_weights: latestContext.current_weights || {},
+      target_weights: latestContext.target_weights || {},
+      weight_changes: latestContext.weight_changes || {},
+      target_deviation: Number(latestContext.target_deviation || 0),
+      variables: latestContext.variables || {},
+      confirmations: latestContext.confirmations || [],
+      market: latestContext.market || {},
+      notification_display: latestContext.notification_display || null,
+      mapped_products: Boolean(latestContext.mapped_products),
+      source_strategy_id: latestContext.source_strategy_id || null,
+      source_current_weights: latestContext.source_current_weights || null,
+      source_target_weights: latestContext.source_target_weights || null,
+    } : null;
+    evaluations.push({
+      ...alertMetadata,
       market_data_at: marketDataAt,
       rebalance_required: Boolean(event),
       target_weights: event?.target || null,
       execution_days: event?.executionDays || null,
       reason: event?.reason || null,
       state: history.at(-1)?.state || "",
+      state_values: latestContext?.state_values || {},
+      alerts,
+      weekly_summary: weeklySummary,
     });
   }
   return response({market_data_updated: true, evaluations});
@@ -466,7 +500,14 @@ async function notificationSeed(request, env) {
   requireNotificationAuth(request, env);
   const body = await request.json(), id = String(body.strategy_id || "").trim(), snapshot = body.snapshot;
   if (!id || !snapshot?.date || !snapshot?.portfolio || !snapshot?.runtime) throw new Error("strategy_id and complete snapshot are required");
-  await saveNotificationSnapshot(env, id, snapshot);
+  const context = snapshot.notification_context || null;
+  await saveNotificationSnapshot(env, id, {
+    ...snapshot,
+    notification: snapshot.notification || {
+      deviation_armed: Number(context?.target_deviation || 0) >= .05,
+      latest_context: context,
+    },
+  });
   return response({strategy_id: id, seeded_at: snapshot.date});
 }
 
@@ -495,7 +536,15 @@ async function notificationBootstrap(request, env) {
   }
   const seeded = [];
   for (const definition of selected) {
-    const snapshot = strategySnapshot(definitions, definition, data);
+    const baseSnapshot = strategySnapshot(definitions, definition, data);
+    const context = baseSnapshot.notification_context || null;
+    const snapshot = {
+      ...baseSnapshot,
+      notification: {
+        deviation_armed: Number(context?.target_deviation || 0) >= .05,
+        latest_context: context,
+      },
+    };
     await saveNotificationSnapshot(env, definition.strategy.id, snapshot);
     seeded.push({strategy_id: definition.strategy.id, seeded_at: snapshot.date});
   }

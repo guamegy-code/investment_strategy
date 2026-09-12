@@ -67,6 +67,32 @@ execution:
 | `rebalance[]` | `days` | 이 규칙이 실행될 때의 분할 실행일수 | 아니요 |
 | 최상위 | `execution` | 리밸런싱 실행 설정 | 아니요 |
 | `execution` | `days` | 분할 실행일수, 기본값 `1` | 아니요 |
+| 최상위 | `notifications` | 알림 표시·즉시 상태·확인·사전주의 규칙 | 아니요 |
+| `notifications` | `weekly` | 주간 시장 브리핑 생성 여부, 기본값 `true` | 아니요 |
+| `notifications` | `states` | 메시지에 표시하고 상태 전환을 감시할 상태 설정 | 아니요 |
+| `notifications.states.<이름>` | `label` | 상태의 표시 이름 | 예 |
+| `notifications.states.<이름>` | `alerts` | 즉시 알릴 상태 전환 규칙. 생략하면 모든 전환을 알림 | 아니요 |
+| `notifications.states.<이름>.alerts[]` | `from` | 전환 전 상태. 생략하면 모든 출발 상태에 적용 | 아니요 |
+| `notifications.states.<이름>.alerts[]` | `to` | 전환 후 상태 | 예 |
+| `notifications.states.<이름>.alerts[]` | `message` | 전환 정보 뒤에 붙일 상세 설명 | 아니요 |
+| `notifications` | `variables` | 메시지에 표시할 계산 변수 설정 | 아니요 |
+| `notifications.variables.<이름>` | `label` | 계산 변수의 표시 이름 | 예 |
+| `notifications.variables.<이름>` | `max` | 점수형 변수의 최대값 | 아니요 |
+| `notifications.variables.<이름>` | `decimals` | 표시할 소수점 자릿수, 기본값 `0` | 아니요 |
+| `notifications` | `market` | 메시지에 표시할 시장 지표 목록 | 아니요 |
+| `notifications.market[]` | `ticker` | 지표를 읽을 설정 자산 | 예 |
+| `notifications.market[]` | `field` | 표시할 시장 데이터 필드 | 예 |
+| `notifications.market[]` | `label` | 시장 지표의 표시 이름 | 예 |
+| `notifications.market[]` | `format` | `number`, `price`, `percent`, `ratio_percent` 중 표시 형식 | 아니요 |
+| `notifications.market[]` | `decimals` | 표시할 소수점 자릿수, 기본값 `1` | 아니요 |
+| `notifications` | `confirmation_alerts` | 연속 확인 시작을 즉시 알릴 상태값 목록 | 아니요 |
+| `notifications.confirmation_alerts[]` | `state` | 확인 진행을 감시할 상태 이름 | 예 |
+| `notifications.confirmation_alerts[]` | `values` | 확인 시작을 알릴 목표 상태값 목록 | 예 |
+| `notifications` | `prealerts` | 상태 전환과 독립적인 사전주의 규칙 목록 | 아니요 |
+| `notifications.prealerts[]` | `id` | 중복 억제 상태를 구분하는 고유 ID | 예 |
+| `notifications.prealerts[]` | `when` | 사전주의를 발생시킬 DSL 조건 | 예 |
+| `notifications.prealerts[]` | `reset_when` | 같은 사전주의를 다시 허용할 DSL 조건 | 예 |
+| `notifications.prealerts[]` | `message` | 사전주의에 표시할 설명 | 예 |
 | 최상위 | `rotation` | 현금 슬리브만 자동 대체하는 교차자산 선택 규칙 | 아니요 |
 | `rotation` | `replace` | 자동 대체할 안전자산 티커 | 예 |
 | `rotation` | `assets` | 비교할 후보 자산 티커 목록 | 예 |
@@ -379,3 +405,99 @@ products:
 합산하여 원본 전략의 리밸런싱 조건에 전달한다.
 한국 거래소 상품의 환율 정보는 상품 코드의 접미사를 기준으로 파이썬 엔진이
 자동으로 판단하므로 YAML에 별도 환율 항목을 작성하지 않는다.
+
+## 알림 규칙
+
+`notifications`는 선택 항목이며 목표 비중이나 리밸런싱 판단을 바꾸지 않는다. 기존
+전략에 이 항목이 없어도 DSL 호환성은 유지된다. 이때 엔진은 정의된 상태와 변수, 첫 번째
+위험자산(없으면 첫 번째 필수 자산), 단순한 `target_deviation()` 조건을 이용해 기본 알림을
+구성한다. 명시적으로 설정하면 전략 작성자가 알림 내용과 발생 시점을 정할 수 있다.
+
+```yaml
+notifications:
+  weekly: true
+  states:
+    risk_regime:
+      label: 위험 국면
+      alerts:
+        - {from: NORMAL, to: DEFENSIVE, message: 방어 조건이 확인되었습니다}
+        - {from: DEFENSIVE, to: RECOVERY, message: 회복 조건이 확인되었습니다}
+  variables:
+    signal_count: {label: 충족 신호, max: 4}
+  market:
+    - {ticker: VTI, field: roc1, label: 1일, format: percent}
+    - {ticker: VTI, field: drawdown120, label: 120일 고점 대비, format: ratio_percent}
+  confirmation_alerts:
+    - {state: risk_regime, values: [DEFENSIVE, RECOVERY]}
+  prealerts:
+    - id: allocation-drift
+      when: target_deviation() >= 3%
+      reset_when: target_deviation() < 2%
+      message: 목표 비중과 현재 비중의 차이가 커졌습니다
+```
+
+- `weekly`: 주간 시장 브리핑 생성 여부다. 기본값은 `true`다.
+- `states.<name>.label`: 메시지에 표시할 상태명이다. `alerts`를 생략하면 해당 상태의
+  모든 변화를 `위험 국면: NORMAL → DEFENSIVE`처럼 알린다. `alerts[].from`과
+  `alerts[].to`를 작성하면 나열한 전환만 알리고, 선택 항목인 `message`로 이유를 덧붙인다.
+  실제 메시지에는
+  `위험 국면: NORMAL → DEFENSIVE · 방어 조건이 확인되었습니다`처럼 전환과 설명을 함께
+  표시한다. `from`을 생략하면 출발 상태와 관계없이 `to`로 바뀌는 모든 전환에 적용한다.
+  구체적인 `from` 규칙과 생략한 규칙이 함께 일치하면 구체적인 규칙을 우선한다.
+
+```yaml
+# 모든 risk_regime 전환을 기본 형식으로 알림
+states:
+  risk_regime:
+    label: 위험 국면
+
+# 지정한 전환만 알림. message가 없으면 전환 정보만 표시
+states:
+  risk_regime:
+    label: 위험 국면
+    alerts:
+      - {from: NORMAL, to: DEFENSIVE}
+      - {from: DEFENSIVE, to: RECOVERY, message: 회복 조건이 확인되었습니다}
+```
+- `variables`: 메시지에 표시할 계산 변수다. `max`를 쓰면 `충족 신호 3/4`처럼 표시한다.
+- `market`: 메시지에 표시할 종목 지표다. 계산할 수 없는 초기 구간의 값은 생략한다.
+- `confirmation_alerts`: 상태 변경에 연속 확인일이 설정된 경우, 지정한 상태값을 향한 확인이
+  시작될 때 진행 상황을 알린다.
+- `prealerts`: 기존 DSL 표현식으로 독립적인 사전주의 조건을 만든다. `id`별로 한 번만
+  보내고 `reset_when`이 참이 된 뒤에만 다시 보낸다. 임계값의 의미는 전략마다 다르므로
+  알림 DSL에 공통 실행 임계값을 따로 두지 않는다.
+
+실제 리밸런싱 여부와 실행일수는 각각 `rebalance[].when`과 `execution.days`가 유일하게
+결정한다. 예를 들어 비중 괴리를 쓰지 않고 상태 전환이나 달력만으로 리밸런싱하는 전략도
+동일한 알림 구조를 사용할 수 있다.
+
+실제 상품 매핑 전략은 별도 알림 설정을 갖지 않고 기준 전략의 `notifications`를 상속한다.
+상태와 시장 신호는 기준 전략 기준으로 설명하되 현재·목표·변경 비중은 실제 상품으로 표시한다.
+
+### 알림 값 표시 형식
+
+`market[]`의 `format`은 원본 지표 값을 메시지에 어떻게 표시할지 지정한다.
+
+| `format` | 원본 값의 단위 | 원본 값 예시 | 메시지 표시 | 용도 |
+|---|---:|---:|---:|---|
+| `number` | 일반 숫자 | `72.345` | `72.3` | 점수, 배수, 일반 지표 |
+| `price` | 가격 숫자 | `245.678` | `245.7` | 종가, 이동평균 등 가격 지표 |
+| `percent` | 이미 퍼센트 단위인 숫자 | `-2.35` | `-2.4%` | `roc1`, `roc5`, `roc20` 등 |
+| `ratio_percent` | 1을 100%로 보는 비율 | `-0.0835` | `-8.4%` | `drawdown120`, 비율형 변동성 등 |
+
+`percent`는 원본 값에 100을 곱하지 않는다. 반면 `ratio_percent`는 원본 값에 100을
+곱해서 표시한다. 따라서 수익률 지표가 `-2.35`처럼 퍼센트 단위로 저장되어 있다면
+`percent`를 사용하고, 낙폭이 `-0.0835`처럼 비율로 저장되어 있다면
+`ratio_percent`를 사용한다.
+
+`decimals`로 표시할 소수점 자릿수를 `0`부터 `6`까지 지정할 수 있으며 기본값은 `1`이다.
+
+```yaml
+market:
+  - {ticker: VTI, field: close, label: 종가, format: price, decimals: 2}
+  - {ticker: VTI, field: roc5, label: 5일 수익률, format: percent, decimals: 1}
+  - {ticker: VTI, field: drawdown120, label: 120일 낙폭, format: ratio_percent, decimals: 1}
+```
+
+위 설정에서 원본 값이 각각 `245.678`, `-2.35`, `-0.0835`라면 알림에는
+`종가 245.68 / 5일 수익률 -2.4% / 120일 낙폭 -8.4%`로 표시된다.
