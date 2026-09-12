@@ -204,6 +204,40 @@ target:
       QQQ: 100%
       BIL: 0%
 
+# 알림 전용 규칙이다. 목표 비중과 매매 판단에는 영향을 주지 않는다.
+notifications:
+  weekly: true
+  states:
+    trend_mode:
+      label: 추세
+      alerts:
+        - {to: BEAR, message: 장기 하락 추세가 확인됨}
+        - {from: BEAR, to: RECOVERY, message: 반등 조건이 확인됨}
+    defense_mode:
+      label: 밸류에이션
+      alerts:
+        - {from: NORMAL, to: WARNING, message: 밸류에이션 급락을 감지해 가격 약세를 추가 확인 중}
+        - {to: DEFENSE, message: 밸류에이션 급락과 가격 약세가 확인되어 방어 진입}
+        - {from: WARNING, to: NORMAL, message: 밸류에이션 점수가 회복되어 경고 해제}
+        - {from: DEFENSE, to: NORMAL, message: 가격 회복 조건이 확인되어 방어 종료}
+  variables:
+    risk_off_score: {label: 약세, max: 6}
+    recovery_score: {label: 회복, max: 6}
+  market:
+    - {ticker: QQQ, field: roc1, label: 1일, format: percent}
+    - {ticker: QQQ, field: roc5, label: 5일, format: percent}
+    - {ticker: QQQ, field: roc20, label: 20일, format: percent}
+    - {ticker: QQQ, field: drawdown120, label: 120일 고점 대비, format: ratio_percent}
+    - {ticker: QQQ, field: valuation_score, label: 밸류에이션, format: number}
+  confirmation_alerts:
+    - {state: defense_mode, values: [DEFENSE, NORMAL]}
+    - {state: trend_mode, values: [BEAR, RECOVERY, BULL]}
+  prealerts:
+    - id: target-deviation
+      when: target_deviation() >= 5%
+      reset_when: target_deviation() < 4%
+      message: 목표 비중 괴리가 실행 기준에 접근 (5.0%p 이상 / 실행 7.5%p)
+
 rebalance:
   # 목표 비중과 실제 비중의 최대 차이가 7.5%p 이상일 때만 주문한다.
   - check: daily
