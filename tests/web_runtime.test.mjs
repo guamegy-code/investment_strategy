@@ -180,6 +180,14 @@ test('refresh persists graph legend and last-moment control changes',()=>{
   assert.match(source,/saveIndicatorLegendState\(\)/);
 });
 
+test('notification markers bypass legacy result caches and never leave an empty legend',()=>{
+  assert.match(source,/const NOTIFICATION_CONTEXT_VERSION = 1/);
+  assert.match(source,/requireNotificationContext=false/);
+  assert.match(source,/cached\?\.notificationContextVersion===NOTIFICATION_CONTEXT_VERSION/);
+  assert.match(source,/run\(definition,\{requireNotificationContext:true\}\)/);
+  assert.match(source,/if\(items\.length\)traces\.push\(\{/);
+});
+
 test('all charts compress non-trading dates with one shared rangebreak list',()=>{
   assert.match(source,/function tradingDayRangebreaks\(traces\)/);
   assert.match(source,/bounds:\['sat','mon'\]/);

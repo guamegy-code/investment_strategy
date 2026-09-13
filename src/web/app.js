@@ -665,6 +665,7 @@ renderIndicators=async function(){
 // validate and cache. It intentionally sits after the dashboard compatibility
 // wrappers above, so existing chart behavior is left unchanged.
 const BROWSER_ENGINE_VERSION = '2026-09-12.1';
+const NOTIFICATION_CONTEXT_VERSION = 1;
 const FX_TICKER_BY_SUFFIX = {'.KS': 'KRW=X', '.KQ': 'KRW=X'};
 const TDF2050_PROXY_COMPONENT_WEIGHTS = {SPY:.4081,VXUS:.3339,BND:.258};
 const KRW_ADJUSTED_SUFFIX = '_KRW';
@@ -870,7 +871,7 @@ function backgroundRun(def,data,all){
     worker.postMessage({def,data,all});
   });
 }
-async function run(def){const data=await downloadMissingData(def),key=await resultKey(def,data),cached=await cachedResult(key).catch(()=>null);if(cached?.history){try{return validateCalculatedHistory(cached.history);}catch(error){console.warn('유효하지 않은 계산 캐시를 다시 계산합니다.',error);}}let history;try{history=await backgroundRun(def,data,definitions);}catch(error){console.warn(`Worker calculation unavailable for ${def.strategy.id}; using the main thread.`,error);history=runWithData(def,data);}validateCalculatedHistory(history);saveCachedResult(key,{history,savedAt:new Date().toISOString()}).catch(()=>{});return history;}
+async function run(def,{requireNotificationContext=false}={}){const data=await downloadMissingData(def),key=await resultKey(def,data),cached=await cachedResult(key).catch(()=>null),hasRequiredContext=!requireNotificationContext||cached?.notificationContextVersion===NOTIFICATION_CONTEXT_VERSION;if(cached?.history&&hasRequiredContext){try{return validateCalculatedHistory(cached.history);}catch(error){console.warn('유효하지 않은 계산 캐시를 다시 계산합니다.',error);}}let history;try{history=await backgroundRun(def,data,definitions);}catch(error){console.warn(`Worker calculation unavailable for ${def.strategy.id}; using the main thread.`,error);history=runWithData(def,data);}validateCalculatedHistory(history);saveCachedResult(key,{history,notificationContextVersion:NOTIFICATION_CONTEXT_VERSION,savedAt:new Date().toISOString()}).catch(()=>{});return history;}
 globalThis.OfflineStrategyRuntime={...globalThis.OfflineStrategyRuntime,addStrategyIndicators,validateStrategy,strategyDependencies,runWithData};
 function indicatorTickerData(data){
   const visible=new Set();
@@ -1907,12 +1908,12 @@ renderIndicators=async function(){
   if(wantsNotifications&&definition&&!history.some(row=>row.notificationContext)&&
     !indicatorNotificationHydrations.has(selected)){
     indicatorNotificationHydrations.add(selected);
-    void run(definition).then(enriched=>{
+    void run(definition,{requireNotificationContext:true}).then(enriched=>{
       if(enriched?.length){
         dashboardResults.set(selected,[definition,enriched]);
         if(String($('indicator-strategy')?.value||'')===selected)void renderIndicators();
       }
-    }).catch(error=>console.warn('Unable to enrich notification markers',error));
+    }).catch(error=>{indicatorNotificationHydrations.delete(selected);console.warn('Unable to enrich notification markers',error);});
   }
   return preparedIndicatorEventRenderer();
 };
@@ -2060,7 +2061,7 @@ Plotly.react=function(target,traces,layout,...args){
         ...events.stateChanges.map(item=>({...item,notificationKind:'state'})),
         ...events.prealerts.map(item=>({...item,notificationKind:'prealert'})),
       ].sort((left,right)=>String(left.row?.date||left.date).localeCompare(String(right.row?.date||right.date)));
-      traces.push({
+      if(items.length)traces.push({
         type:'scattergl',x:items.length?items.map(item=>item.row?.date||item.date):[null],
         y:items.length?items.map(item=>strategyValueAt(String(item.row?.date||item.date||'').slice(0,10))):[null],
         name:labels.notifications,showlegend:true,...axis,mode:'markers',
