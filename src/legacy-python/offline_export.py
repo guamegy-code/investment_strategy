@@ -14,9 +14,9 @@ import shutil
 
 import plotly
 import pandas as pd
-import yaml
 
 from config import DATA_DIR, PROJECT_ROOT, RESULT_DIR
+from strategy_dsl import load_strategy_yaml
 
 
 WEB_SOURCE_DIR = Path(__file__).resolve().parents[1] / "web"
@@ -272,7 +272,7 @@ def build_bundle(
     strategies = []
     definition_paths: dict[str, Path] = {}
     for path in sorted((*strategy_dir.glob("*.yaml"), *strategy_dir.glob("*.yml"))):
-        definition = yaml.safe_load(path.read_text(encoding="utf-8"))
+        definition = load_strategy_yaml(path)
         definition["_yaml_file"] = path.name
         strategies.append(definition)
         strategy_id = str((definition.get("strategy") or {}).get("id") or "")
@@ -375,7 +375,7 @@ def export_static_site(
     manifest = []
     definitions_by_id = {}
     for path in sorted((*strategy_dir.glob("*.yaml"), *strategy_dir.glob("*.yml"))):
-        definition = yaml.safe_load(path.read_text(encoding="utf-8"))
+        definition = load_strategy_yaml(path)
         metadata = definition.get("strategy") or {}
         strategy_id = str(metadata.get("id") or "")
         if not strategy_id:
@@ -410,6 +410,8 @@ def export_static_site(
         enabled_definitions, ensure_ascii=False, separators=(",", ":")
     ).encode("utf-8")
     enabled_name = f"enabled.{hashlib.sha256(enabled_bytes).hexdigest()[:12]}.json"
+    for stale_bundle in strategies_dir.glob("enabled.*.json"):
+        stale_bundle.unlink()
     (strategies_dir / enabled_name).write_bytes(enabled_bytes)
     definition_paths = {
         strategy_id: strategy_dir / str(definition["_yaml_file"])

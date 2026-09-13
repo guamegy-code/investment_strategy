@@ -203,6 +203,7 @@ function logRun_(strategies, sent, result, detail) {
   Logger.log(`${result}: ${detail}`);
 }
 function formatWeights_(weights) { return Object.entries(weights || {}).map(([ticker, weight]) => `${ticker} ${(Number(weight) * 100).toFixed(1)}%`).join('\n'); }
+function formatWeightsInline_(weights) { return Object.entries(weights || {}).map(([ticker, weight]) => `${ticker} ${(Number(weight) * 100).toFixed(1)}%`).join(' / '); }
 function formatWeightChanges_(event) {
   const current = event.current_weights || {}, target = event.target_weights || {};
   return Object.keys(target).map(ticker => {
@@ -257,7 +258,7 @@ function formatConfirmations_(confirmations) {
 }
 function messageFor_(event) {
   const type = event.type || 'REBALANCE';
-  const titles = {REBALANCE: '[리밸런싱 실행]', PREALERT: '[사전주의 · 매매 없음]', WEEKLY: '[주간 시장 브리핑]'};
+  const titles = {REBALANCE: '[리밸런싱 예정]', PREALERT: '[사전주의 · 매매 없음]', WEEKLY: '[주간 시장 브리핑]'};
   const lines = [titles[type] || '[투자 전략 알림]', '', `전략: ${event.strategy_name}`, `시장 기준일: ${event.market_data_at}`];
   if (event.mapped_products && event.source_strategy_id) lines.push(`기준 전략: ${event.source_strategy_id}`);
   lines.push(`상태: ${formatConfiguredStates_(event) || '-'}`, formatConfiguredMarket_(event));
@@ -266,7 +267,20 @@ function messageFor_(event) {
   const confirmations = formatConfirmations_(event.confirmations); if (confirmations) lines.push(`확인 진행\n${confirmations}`);
   lines.push(`목표 괴리: ${(Number(event.target_deviation || 0) * 100).toFixed(1)}%p`);
   if (type === 'REBALANCE') {
-    lines.push('', '현재 → 목표 비중', formatWeightChanges_(event), `실행: 다음 거래일 시가부터 ${event.execution_days || 1}일`);
+    if (event.target_changed && Object.keys(event.previous_target_weights || {}).length) {
+      lines.push(
+        '',
+        '목표 비중',
+        formatWeightsInline_(event.previous_target_weights),
+        `→ ${formatWeightsInline_(event.target_weights)}`,
+        '',
+        '현재 비중',
+        formatWeightsInline_(event.current_weights),
+      );
+    } else {
+      lines.push('', '현재 → 목표 비중', formatWeightChanges_(event));
+    }
+    lines.push(`실행 예정: 다음 거래일 시가부터 ${event.execution_days || 1}일`);
   } else {
     lines.push('', '현재 비중', formatWeights_(event.current_weights), '목표 비중', formatWeights_(event.target_weights), '현재 행동: 리밸런싱 없음');
   }

@@ -177,6 +177,59 @@ def rotation_market(*, shy_eligible=True, kospi_eligible=False):
 
 
 class DeclarativeStrategyTests(unittest.TestCase):
+    def test_confirmation_started_alert_uses_nested_state_rule(self):
+        strategy = DeclarativeStrategy(definition(
+            state={
+                "mode": {
+                    "initial": "NORMAL",
+                    "rules": [
+                        {
+                            "when": "QQQ.Close < QQQ.EMA200",
+                            "set": "DEFENSE",
+                            "confirm": 2,
+                        },
+                        {"otherwise": True, "set": "NORMAL"},
+                    ],
+                },
+            },
+            notifications={
+                "states": {
+                    "mode": {
+                        "label": "방어 상태",
+                        "alerts": [{
+                            "on": "confirmation_started",
+                            "to": ["DEFENSE", "NORMAL"],
+                        }],
+                    },
+                },
+            },
+        ))
+        observations = market(close=90.0)
+
+        strategy.evaluate(
+            pd.Timestamp("2025-01-02"), observations, PortfolioStub()
+        )
+        self.assertEqual(strategy.notification_context["confirmation_started"], [{
+            "name": "mode", "desired": "DEFENSE", "days": 1,
+            "required_days": 2,
+        }])
+
+        strategy.evaluate(
+            pd.Timestamp("2025-01-03"), observations, PortfolioStub()
+        )
+        self.assertEqual(strategy.notification_context["confirmation_started"], [])
+        self.assertEqual(strategy.notification_context["state_changes"], [{
+            "name": "mode", "previous": "NORMAL", "current": "DEFENSE",
+        }])
+
+    def test_legacy_confirmation_alerts_key_is_rejected(self):
+        with self.assertRaises(StrategyDefinitionError):
+            DeclarativeStrategy(definition(notifications={
+                "confirmation_alerts": [{
+                    "state": "mode", "values": ["DEFENSE"],
+                }],
+            }))
+
     def test_evaluation_records_notification_context_for_research_charts(self):
         strategy = DeclarativeStrategy(definition(
             state={

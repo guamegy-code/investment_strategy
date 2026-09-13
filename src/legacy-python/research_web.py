@@ -708,6 +708,29 @@ def _indicator_notification_events(history: pd.DataFrame) -> dict[str, list[dict
             continue
         policy = context.get("notification_policy") or {}
         configured_states = policy.get("states") or {}
+        target_details_used = False
+        def target_details() -> str:
+            nonlocal target_details_used
+            if target_details_used or not (
+                context.get("target_changed")
+                and context.get("rebalance_required")
+                and context.get("previous_target_weights")
+            ):
+                return ""
+            target_details_used = True
+            format_weights = lambda weights: " / ".join(
+                f"{ticker} {float(weight) * 100:.1f}%"
+                for ticker, weight in (weights or {}).items()
+            )
+            return (
+                "<br>목표 비중"
+                f"<br>{format_weights(context['previous_target_weights'])}"
+                f"<br>→ {format_weights(context.get('target_weights'))}"
+                "<br>현재 비중"
+                f"<br>{format_weights(context.get('current_weights'))}"
+                "<br>실행 예정: 다음 거래일 시가부터 "
+                f"{int(context.get('execution_days') or 1)}일"
+            )
         for change in context.get("state_changes") or []:
             name = str(change.get("name", ""))
             previous = change.get("previous")
@@ -734,7 +757,9 @@ def _indicator_notification_events(history: pd.DataFrame) -> dict[str, list[dict
             message = alert.get("message") if isinstance(alert, dict) else None
             events["state_changes"].append({
                 "date": pd.Timestamp(date),
-                "text": f"{transition}<br>{message}" if message else transition,
+                "text": (
+                    f"{transition}<br>{message}" if message else transition
+                ) + target_details(),
             })
         for rule in context.get("prealerts") or []:
             rule_id = str(rule.get("id", ""))
@@ -1198,14 +1223,10 @@ class ResearchViewModel:
         )
         tooltip_data = {}
         notifications_by_date: dict[str, list[dict[str, str]]] = {}
-        for kind, label in (
-            ("state_changes", "상태 변경"),
-            ("prealerts", "사전 경고"),
-        ):
+        for kind in ("state_changes", "prealerts"):
             for event in data["notifications"].get(kind, []):
                 date_key = pd.Timestamp(event["date"]).strftime("%Y-%m-%d")
                 notifications_by_date.setdefault(date_key, []).append({
-                    "label": label,
                     "text": str(event["text"]),
                 })
         for position, (date, detail) in enumerate(data["details"].items()):
@@ -3215,8 +3236,7 @@ def create_research_app(
                             ""
                         ),
                         ...notifications.map(note => component(
-                            "Div", "research-notification-tooltip-note", [
-                                component("Strong", "", note.label),
+                            "Div", "research-notification-tooltip-note research-notification-tooltip-note-unlabeled", [
                                 span("", fullNotification(note.text))
                             ]
                         ))

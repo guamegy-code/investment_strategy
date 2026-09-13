@@ -74,6 +74,19 @@ function expressionStrings(value){if(value===null||value===undefined)return[];if
 function requiredMarketFields(def){const fields={};const add=(ticker,...names)=>{fields[ticker]??=new Set();for(const name of names)fields[ticker].add(name);};for(const text of expressionStrings([def.variables,def.state,def.target,def.rebalance,def.execution]))for(const match of String(text).matchAll(/\b([A-Z][A-Z0-9_=X-]*)\.([A-Za-z_][\w]*)/g))add(match[1],match[2].toLowerCase());if(def.rotation){add(def.rotation.sleeve,'roc60','roc120','roc252');for(const candidate of def.rotation.candidates||[])add(candidate.ticker,'close','ema200','roc60','roc120','roc252','vol60');}return fields;}
 export function mapProductTarget(sourceTarget,def,source,actual){const target={},riskAssets=new Set(source.assets?.risk||[]),riskCap=Number(source.parameters?.canonical_risk_weight??.70);for(const[asset,weight]of Object.entries(sourceTarget)){const products=def.products?.[asset]||{[asset]:1},items=Object.entries(products),currentWeight=items.reduce((sum,[product])=>sum+(actual[product]||0),0),preserveMix=items.length>1&&riskAssets.has(asset)&&currentWeight>riskCap+1e-8&&weight>riskCap+1e-8;let allocated=0;for(const[index,[product,configuredShare]]of items.entries()){const share=preserveMix?(actual[product]||0)/currentWeight:pct(configuredShare),productWeight=index===items.length-1?weight-allocated:weight*share;target[product]=(target[product]||0)+productWeight;allocated+=productWeight;}}return target;}
 function preparedRows(calculation,tickers,data,fields,afterDate=''){const valued=applyValuation(calculation,data),signals=calculation.valuation?.signal_currency==='LOCAL'?data:valued,valuedByDate=new Map(recordsFor(tickers,valued).map(row=>[row.date,row.market]));return recordsFor(tickers,signals).filter(row=>row.date>afterDate&&valuedByDate.has(row.date)&&tickers.every(ticker=>[...(fields[ticker]||[])].every(field=>Number.isFinite(Number(row.market[ticker][field]))))).map(row=>({...row,valuationMarket:valuedByDate.get(row.date)}));}
+const restoreDeclarativeSnapshot=Declarative.prototype.restore;
+Declarative.prototype.restore=function(snapshot){
+  if(!snapshot)return;
+  const initialState={...this.state};
+  restoreDeclarativeSnapshot.call(this,{
+    ...snapshot,
+    state:{...initialState,...(snapshot.state||{})},
+    previous:{...initialState,...(snapshot.previous||{})},
+    candidates:{...(snapshot.candidates||{})},
+    lastState:{...(snapshot.lastState||{})},
+    lastRebalance:{...(snapshot.lastRebalance||{})},
+  });
+};
 function resolve(def,all){
   if(!def.source)return new Declarative(def);
   const source=all.get(def.source),runtime=new Declarative(source);
@@ -89,7 +102,6 @@ function resolve(def,all){
       const signal=runtime.step(date,market,virtual),target=mapProductTarget(signal.target,def,source,actual);
       const sourceContext=signal.notificationContext||{};
       const currentWeights=Object.fromEntries(Object.keys(target).map(ticker=>[ticker,Number(actual[ticker]||0)]));
-      const targetDeviation=Math.max(...Object.entries(target).map(([ticker,weight])=>Math.abs(currentWeights[ticker]-weight)),0);
       const notificationContext={
         ...sourceContext,
         mapped_products:true,
@@ -97,9 +109,15 @@ function resolve(def,all){
         source_current_weights:{...(sourceContext.current_weights||{})},
         source_target_weights:{...(sourceContext.target_weights||signal.target)},
         current_weights:currentWeights,
+        previous_target_weights:Object.keys(sourceContext.previous_target_weights||{}).length
+          ? mapProductTarget(sourceContext.previous_target_weights,def,source,actual)
+          : {},
         target_weights:{...target},
         weight_changes:Object.fromEntries(Object.entries(target).map(([ticker,weight])=>[ticker,weight-(currentWeights[ticker]||0)])),
-        target_deviation:targetDeviation,
+        // The source runtime receives a virtual portfolio whose product weights
+        // are aggregated by source asset.  Keep that strategic deviation here;
+        // an individual product split must not create a portfolio rebalance.
+        target_deviation:Number(sourceContext.target_deviation||0),
       };
       return{...signal,target,notificationContext};
     }
@@ -177,7 +195,6 @@ function notificationPolicy(definition){
       {ticker:representative,field:'roc20',label:'20일',format:'percent'},
       {ticker:representative,field:'drawdown120',label:'120일 고점 대비',format:'ratio_percent'},
     ]:[],
-    confirmation_alerts:Object.keys(definition.state||{}).map(state=>({state,values:['*']})),
     prealerts:threshold?[{id:'target-deviation',when:`target_deviation() >= ${threshold*2/3}`,reset_when:`target_deviation() < ${threshold*8/15}`,message:`목표 비중 괴리가 ${((threshold*2/3)*100).toFixed(1)}%p에 도달 (리밸런싱 조건 ${threshold*100}%p)`}]:[],
   };
 }
@@ -196,10 +213,16 @@ function requiredConfirmationDays(definition,name,value){
   return Math.max(1,...rules.filter(rule=>String(rule.set)===String(value)).map(rule=>Number(rule.confirm||1)));
 }
 
+function notificationAlertTargets(alert){return Array.isArray(alert?.to)?alert.to:[alert?.to];}
+function notificationAlertMatches(alert,event,value){
+  return String(alert?.on||'changed')===event&&notificationAlertTargets(alert).some(target=>target==='*'||String(target)===String(value));
+}
+
 function transitionExplanation(change,policy){
   const configured=policy?.states?.[change.name],alerts=configured?.alerts||[];
-  const exact=alerts.find(item=>Object.prototype.hasOwnProperty.call(item,'from')&&String(item.from)===String(change.previous)&&String(item.to)===String(change.current));
-  const general=alerts.find(item=>!Object.prototype.hasOwnProperty.call(item,'from')&&String(item.to)===String(change.current));
+  const changed=alerts.filter(item=>notificationAlertMatches(item,'changed',change.current));
+  const exact=changed.find(item=>Object.prototype.hasOwnProperty.call(item,'from')&&String(item.from)===String(change.previous));
+  const general=changed.find(item=>!Object.prototype.hasOwnProperty.call(item,'from'));
   const transition=`${configured?.label||change.name}: ${change.previous} → ${change.current}`,message=(exact||general)?.message;
   return message?`${transition} · ${message}`:transition;
 }
@@ -209,6 +232,7 @@ function installNotificationContext(StrategyClass){
   if(baseStep.__notificationContextInstalled)return StrategyClass;
   function step(date,market,portfolio){
     const previousState={...(this.state||{})},previousCandidates={...(this.candidates||{})};
+    const previousTargetWeights={...(this.notificationTargetWeights||{})};
     const signal=baseStep.call(this,date,market,portfolio);
     const holdingTickers=this.def.assets?.required||Object.keys(signal.target||{});
     const prices=Object.fromEntries(holdingTickers.filter(ticker=>market[ticker]).map(ticker=>[ticker,market[ticker].close]));
@@ -251,9 +275,13 @@ function installNotificationContext(StrategyClass){
       confirmation_started:confirmationStarted,
       market:marketSummary,
       current_weights:Object.fromEntries(Object.keys(targetWeights).map(ticker=>[ticker,Number(currentWeights[ticker]||0)])),
+      previous_target_weights:previousTargetWeights,
       target_weights:targetWeights,
       weight_changes:Object.fromEntries(Object.entries(targetWeights).map(([ticker,weight])=>[ticker,Number(weight)-Number(currentWeights[ticker]||0)])),
       target_deviation:targetDeviation,
+      target_changed:Object.keys(previousTargetWeights).length>0&&![...new Set([...Object.keys(previousTargetWeights),...Object.keys(targetWeights)])].every(ticker=>Math.abs(Number(previousTargetWeights[ticker]||0)-Number(targetWeights[ticker]||0))<=1e-12),
+      rebalance_required:Boolean(signal.rebalance),
+      execution_days:Number(signal.days||1),
       reason_text:reasons.join(' · '),
       reason_details:reasons,
       notification_policy:policy,
@@ -261,10 +289,14 @@ function installNotificationContext(StrategyClass){
       prealerts,
       mapped_products:false,
     };
+    this.notificationTargetWeights={...targetWeights};
     return{...signal,notificationContext};
   }
   step.__notificationContextInstalled=true;
   StrategyClass.prototype.step=step;
+  const baseSnapshot=StrategyClass.prototype.snapshot,baseRestore=StrategyClass.prototype.restore;
+  if(baseSnapshot)StrategyClass.prototype.snapshot=function(){return{...baseSnapshot.call(this),notificationTargetWeights:{...(this.notificationTargetWeights||{})}};};
+  if(baseRestore)StrategyClass.prototype.restore=function(snapshot){baseRestore.call(this,snapshot);this.notificationTargetWeights={...(snapshot?.notificationTargetWeights||{})};};
   return StrategyClass;
 }
 
@@ -326,16 +358,23 @@ export function runStrategyIncremental(definitions,definition,data,snapshot){
 function allocationRelevantStateChange(change,policy){
   const configured=policy?.states?.[change.name];
   if(configured&&!Object.prototype.hasOwnProperty.call(configured,'alerts'))return true;
-  if(configured)return(configured.alerts||[]).some(item=>String(item.to)===String(change.current)&&(!Object.prototype.hasOwnProperty.call(item,'from')||String(item.from)===String(change.previous)));
+  if(configured)return(configured.alerts||[]).some(item=>notificationAlertMatches(item,'changed',change.current)&&(!Object.prototype.hasOwnProperty.call(item,'from')||String(item.from)===String(change.previous)));
   if(change.name==='defense_mode')return true;
   if(change.name!=='trend_mode'&&change.name!=='market_mode')return false;
   return [change.previous,change.current].some(value=>value==='BEAR'||value==='RECOVERY');
 }
 
 function criticalConfirmation(item,stateValues,policy){
-  if(policy?.confirmation_alerts)return policy.confirmation_alerts.some(rule=>rule.state===item.name&&(rule.values||[]).some(value=>value==='*'||String(value)===String(item.desired)));
+  if(policy?.states)return(policy.states[item.name]?.alerts||[]).some(alert=>notificationAlertMatches(alert,'confirmation_started',item.desired));
   if(['BEAR','DEFENSE','RECOVERY','NORMAL'].includes(String(item.desired)))return true;
   return String(item.desired)==='BULL'&&String(stateValues.trend_mode||stateValues.market_mode)==='RECOVERY';
+}
+
+function confirmationExplanation(item,policy){
+  const configured=policy?.states?.[item.name],alerts=configured?.alerts||[];
+  const alert=alerts.find(rule=>notificationAlertMatches(rule,'confirmation_started',item.desired));
+  const confirmation=`${configured?.label||item.name}: ${item.desired} 확인 시작 (${item.days}/${item.required_days}일)`;
+  return alert?.message?`${confirmation} · ${alert.message}`:confirmation;
 }
 
 export function selectNotificationAlerts(history,notificationState={}){
@@ -350,7 +389,7 @@ export function selectNotificationAlerts(history,notificationState={}){
     const confirmationStarts=(context.confirmation_started||[]).filter(item=>criticalConfirmation(item,context.state_values||{},policy));
     const details=[];
     for(const change of relevantChanges)details.push(transitionExplanation(change,policy));
-    for(const item of confirmationStarts)details.push(`${item.name} ${item.desired} 확인 시작 (${item.days}/${item.required_days}일)`);
+    for(const item of confirmationStarts)details.push(confirmationExplanation(item,policy));
     details.push(...ruleDetails);
     const actionable=Boolean(row.target);
     if(actionable||details.length){
@@ -364,9 +403,11 @@ export function selectNotificationAlerts(history,notificationState={}){
         reason_text:reasonDetails.join(' · ')||context.reason_text||'',
         execution_days:actionable?row.executionDays:null,
         current_weights:{...(context.current_weights||{})},
+        previous_target_weights:{...(context.previous_target_weights||{})},
         target_weights:{...(actionable?row.target:context.target_weights||{})},
         weight_changes:{...(context.weight_changes||{})},
         target_deviation:deviation,
+        target_changed:Boolean(context.target_changed),
         variables:{...(context.variables||{})},
         confirmations:context.confirmations||[],
         market:context.market||{},

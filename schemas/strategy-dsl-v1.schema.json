@@ -122,8 +122,14 @@
                   "additionalProperties": false,
                   "required": ["to"],
                   "properties": {
+                    "on": {"enum": ["changed", "confirmation_started"]},
                     "from": {"type": ["string", "number", "boolean"]},
-                    "to": {"type": ["string", "number", "boolean"]},
+                    "to": {
+                      "oneOf": [
+                        {"type": ["string", "number", "boolean"]},
+                        {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": ["string", "number", "boolean"]}}
+                      ]
+                    },
                     "message": {"type": "string", "minLength": 1}
                   }
                 }
@@ -156,18 +162,6 @@
               "label": {"type": "string", "minLength": 1},
               "format": {"enum": ["number", "percent", "ratio_percent", "price"]},
               "decimals": {"type": "integer", "minimum": 0, "maximum": 6}
-            }
-          }
-        },
-        "confirmation_alerts": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": ["state", "values"],
-            "properties": {
-              "state": {"type": "string", "minLength": 1},
-              "values": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": ["string", "number", "boolean"]}}
             }
           }
         },

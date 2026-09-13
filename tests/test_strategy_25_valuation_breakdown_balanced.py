@@ -37,6 +37,12 @@ def observations(valuation_score, *, regime="bull"):
             "ROC5": -5.0, "ROC20": -8.0, "ROC60": 2.0,
             "EMA20_SLOPE5": -2.0, "EMA200_SLOPE20": 1.0,
         }
+    elif regime == "structural":
+        qqq = {
+            "Close": 75.0, "EMA20": 85.0, "EMA55": 90.0, "EMA200": 100.0,
+            "ROC5": -5.0, "ROC20": -8.0, "ROC60": -20.0,
+            "EMA20_SLOPE5": -2.0, "EMA200_SLOPE20": -1.0,
+        }
     else:
         qqq = {
             "Close": 105.0, "EMA20": 103.0, "EMA55": 100.0, "EMA200": 98.0,
@@ -72,6 +78,29 @@ class Strategy25ValuationBreakdownBalancedTests(unittest.TestCase):
         self.assertEqual(strategy.defense_mode, "DEFENSE")
         self.assertEqual(signal["target"], {"QQQ": 0.3, "BIL": 0.7})
         self.assertTrue(signal["rebalance"])
+
+    def test_structural_bear_uses_false_true_state_without_inventing_target_change(self):
+        strategy = self.strategy()
+        portfolio = PortfolioStub()
+        start = pd.Timestamp("2025-01-02")
+
+        strategy.evaluate(start, observations(70), portfolio)
+        strategy.evaluate(
+            start + pd.offsets.BDay(1), observations(45, regime="risk6"), portfolio
+        )
+        portfolio.current_weights = {"QQQ": 0.3, "BIL": 0.7}
+        signal = strategy.evaluate(
+            start + pd.offsets.BDay(2), observations(45, regime="structural"), portfolio
+        )
+
+        self.assertEqual(strategy.structural_bear_mode, "TRUE")
+        self.assertEqual(signal["target"], {"QQQ": 0.3, "BIL": 0.7})
+        context = strategy.notification_context
+        self.assertIn({
+            "name": "structural_bear_mode", "previous": "FALSE", "current": "TRUE",
+        }, context["state_changes"])
+        self.assertFalse(context["target_changed"])
+        self.assertFalse(context["rebalance_required"])
 
     def test_non_extreme_warning_retains_six_day_confirmation(self):
         strategy = self.strategy()
