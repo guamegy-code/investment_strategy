@@ -621,7 +621,7 @@ class OfflineExportTests(unittest.TestCase):
             self.assertEqual(manifest["strategies"], [{
                 "id": "qqq-valuation-breakdown-balanced",
                 "path": source.name,
-                "version": 1,
+                "version": 2,
                 "enabled": True,
             }])
             self.assertTrue(definition["strategy"]["enabled"])
@@ -645,7 +645,7 @@ class OfflineExportTests(unittest.TestCase):
             self.assertEqual(manifest["strategies"], [{
                 "id": "band-7030-tdf-valuation-defense",
                 "path": source.name,
-                "version": 1,
+                "version": 2,
                 "enabled": True,
             }])
             self.assertTrue(definition["strategy"]["enabled"])

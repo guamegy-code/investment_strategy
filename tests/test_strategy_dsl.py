@@ -266,6 +266,42 @@ class DeclarativeStrategyTests(unittest.TestCase):
         self.assertTrue(context["prealerts"][0]["matched"])
         self.assertFalse(context["prealerts"][0]["reset"])
 
+    def test_weight_deviation_triggers_a_directional_underweight_rebalance(self):
+        strategy = DeclarativeStrategy(definition(
+            rebalance=[{
+                "check": "daily",
+                "when": (
+                    "target_deviation() >= 7.5% or "
+                    "weight_deviation('QQQ') <= -4%"
+                ),
+            }],
+        ))
+        portfolio = PortfolioStub({"QQQ": 0.65, "BND": 0.35})
+
+        first = strategy.evaluate(pd.Timestamp("2025-01-02"), market(), portfolio)
+        second = strategy.evaluate(pd.Timestamp("2025-01-03"), market(), portfolio)
+
+        self.assertFalse(first["rebalance"])
+        self.assertTrue(second["rebalance"])
+        self.assertAlmostEqual(
+            strategy._context(market(), portfolio, second["target"])[
+                "weight_deviation"
+            ]("QQQ"),
+            -0.05,
+        )
+
+    def test_weight_deviation_rejects_an_unknown_target_asset(self):
+        strategy = DeclarativeStrategy(definition(
+            rebalance=[{"when": "weight_deviation('MISSING') <= -4%"}],
+        ))
+        portfolio = PortfolioStub({"QQQ": 0.65, "BND": 0.35})
+
+        strategy.evaluate(pd.Timestamp("2025-01-02"), market(), portfolio)
+        with self.assertRaisesRegex(
+            StrategyExpressionError, "target asset is unknown: MISSING"
+        ):
+            strategy.evaluate(pd.Timestamp("2025-01-03"), market(), portfolio)
+
     def test_static_retirement_yaml_matches_python_market_state_path(self):
         declarative = DeclarativeStrategy.from_yaml(
             PROJECT_ROOT / "strategies" / "09_static_7030.yaml"

@@ -332,9 +332,12 @@ test("strategy 25 Korean-commented YAML preserves the balanced state rules", () 
 
   assert.equal(definition.strategy.id, "qqq-valuation-breakdown-balanced");
   assert.equal(definition.strategy.enabled, true);
+  assert.equal(definition.strategy.version, 2);
   assert.equal(definition.state.defense_mode.rules[3].confirm, 6);
   assert.equal(definition.state.defense_mode.rules[4].confirm, 2);
   assert.deepEqual(definition.target[1].weights, {QQQ: "30%", BIL: "70%"});
+  assert.match(definition.rebalance[0].when, /weight_deviation\('QQQ'\) <= -4%/);
+  assert.equal(definition.notifications.prealerts[0].id, "qqq-underweight");
   assert.deepEqual(strategyTickers([definition], definition), ["QQQ", "BIL", "SPY"]);
 });
 
@@ -378,6 +381,7 @@ test("strategy 26 Korean-commented YAML preserves retirement defense priority", 
 
   assert.equal(definition.strategy.id, "band-7030-tdf-valuation-defense");
   assert.equal(definition.strategy.enabled, true);
+  assert.equal(definition.strategy.version, 2);
   assert.equal(definition.state.defense_mode.rules[3].confirm, 6);
   assert.equal(definition.state.defense_mode.rules[4].confirm, 2);
   assert.deepEqual(definition.target[0].weights, {
@@ -386,6 +390,8 @@ test("strategy 26 Korean-commented YAML preserves retirement defense priority", 
   assert.deepEqual(definition.target[2].weights, {
     QQQ: "30%", TDF2050_PROXY: "0%", BIL: "70%",
   });
+  assert.match(definition.rebalance[0].when, /weight_deviation\('QQQ'\) <= -4%/);
+  assert.equal(definition.notifications.prealerts[0].id, "qqq-underweight");
   assert.deepEqual(
     strategyTickers([definition], definition),
     ["QQQ", "TDF2050_PROXY", "BIL", "SPY"],
@@ -651,6 +657,30 @@ test("rebalance deviation is checked against the final rotated target", () => {
   assert.equal(target.TDF, .2);
   assert.ok(Math.abs(target.BIL - .56) < 1e-12);
   assert.equal(target.GLD, .24);
+});
+
+test("weight_deviation triggers a directional QQQ underweight rebalance", () => {
+  const definition = {
+    strategy: {id: "directional-band", name: "Directional band", version: 1},
+    assets: {required: ["QQQ", "BIL"], risk: ["QQQ"]},
+    target: [{weights: {QQQ: "30%", BIL: "70%"}}],
+    rebalance: [{
+      check: "daily",
+      when: "target_deviation() >= 7.5% or weight_deviation('QQQ') <= -4%",
+    }],
+    execution: {days: 1},
+  };
+  const dates = ["2025-01-02", "2025-01-03", "2025-01-06"];
+  const rows = closes => dates.map((Date, index) => ({
+    Date, Open: index ? closes[index - 1] : closes[index],
+    High: closes[index], Low: closes[index], Close: closes[index], Volume: 1,
+  }));
+  const data = {QQQ: rows([100, 80, 80]), BIL: rows([100, 100, 100])};
+
+  const history = runStrategy([definition], definition, data);
+
+  assert.equal(history.filter(row => row.target).length, 2);
+  assert.deepEqual(history.at(-1).target, {QQQ: .3, BIL: .7});
 });
 
 test("LOCAL signals calculate deviation with KRW valuation weights", () => {
