@@ -2244,3 +2244,35 @@ renderIndicators=async function(){
   if(hiddenIndexes.length)await Plotly.restyle(plot,{visible:'legendonly'},hiddenIndexes);
   return result;
 };
+
+// The notification toggle is a promise about the first rendered chart, not a
+// request to patch markers in later.  A normal cached strategy history omits
+// notificationContext, so resolve its lightweight, browser-cached enrichment
+// before the indicator graph is allowed to render.
+const initialIndicatorNotificationContextLoads=new Map();
+async function ensureInitialIndicatorNotificationContext(){
+  const selected=String($('indicator-strategy')?.value||'');
+  const definition=definitions.find(item=>item?.strategy?.id===selected);
+  const source=definition?.source
+    ? definitions.find(item=>item?.strategy?.id===definition.source)||definition
+    : definition;
+  const notificationsEnabled=[...($('indicator-overlays')?.querySelectorAll('input:checked')||[])]
+    .some(input=>input.value==='notifications');
+  if(!selected||!definition||!source?.notifications||!notificationsEnabled)return;
+  await ensureIndicatorStrategyHistory(selected);
+  const history=dashboardResults.get(selected)?.[1]||[];
+  if(history.some(row=>row.notificationContext))return;
+  if(!initialIndicatorNotificationContextLoads.has(selected)){
+    const load=run(definition,{requireNotificationContext:true}).then(enriched=>{
+      if(enriched?.length)dashboardResults.set(selected,[definition,enriched]);
+      return enriched;
+    }).finally(()=>initialIndicatorNotificationContextLoads.delete(selected));
+    initialIndicatorNotificationContextLoads.set(selected,load);
+  }
+  await initialIndicatorNotificationContextLoads.get(selected);
+}
+const notificationConsistentInitialIndicatorRenderer=renderIndicators;
+renderIndicators=async function(){
+  await ensureInitialIndicatorNotificationContext();
+  return notificationConsistentInitialIndicatorRenderer();
+};

@@ -196,6 +196,13 @@ test('notification checkbox remains authoritative over its legend and markers',(
   assert.match(source,/if\(name===['"]알림['"]\)\{[\s\S]*?notificationInput\.checked=currentlyHidden;[\s\S]*?saveUiState\(\);[\s\S]*?renderIndicators\(\)/);
 });
 
+test('initial indicator render waits for notification context when alerts are selected',()=>{
+  assert.match(source,/async function ensureInitialIndicatorNotificationContext\(\)/);
+  assert.match(source,/await ensureIndicatorStrategyHistory\(selected\);/);
+  assert.match(source,/run\(definition,\{requireNotificationContext:true\}\)/);
+  assert.match(source,/const notificationConsistentInitialIndicatorRenderer=renderIndicators;[\s\S]*?await ensureInitialIndicatorNotificationContext\(\);[\s\S]*?return notificationConsistentInitialIndicatorRenderer\(\);/);
+});
+
 test('notification markers bypass legacy result caches and never leave an empty legend',()=>{
   assert.match(source,/const NOTIFICATION_CONTEXT_VERSION = 1/);
   assert.match(source,/requireNotificationContext=false/);
