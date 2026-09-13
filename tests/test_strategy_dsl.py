@@ -177,6 +177,42 @@ def rotation_market(*, shy_eligible=True, kospi_eligible=False):
 
 
 class DeclarativeStrategyTests(unittest.TestCase):
+    def test_evaluation_records_notification_context_for_research_charts(self):
+        strategy = DeclarativeStrategy(definition(
+            state={
+                "mode": {
+                    "initial": "NORMAL",
+                    "rules": [
+                        {"when": "QQQ.Close < QQQ.EMA200", "set": "WARNING"},
+                        {"otherwise": True, "set": "NORMAL"},
+                    ],
+                },
+            },
+            notifications={
+                "states": {"mode": {"label": "시장 상태"}},
+                "prealerts": [{
+                    "id": "drift",
+                    "when": "target_deviation() >= 5%",
+                    "reset_when": "target_deviation() < 4%",
+                    "message": "목표 비중 괴리 접근",
+                }],
+            },
+        ))
+        observations = market(close=90.0)
+        observations["QQQ"]["EMA200"] = 95.0
+
+        strategy.evaluate(
+            pd.Timestamp("2025-01-02"), observations,
+            PortfolioStub({"QQQ": 0.6, "BND": 0.4}),
+        )
+
+        context = strategy.notification_context
+        self.assertEqual(context["state_changes"], [{
+            "name": "mode", "previous": "NORMAL", "current": "WARNING",
+        }])
+        self.assertTrue(context["prealerts"][0]["matched"])
+        self.assertFalse(context["prealerts"][0]["reset"])
+
     def test_static_retirement_yaml_matches_python_market_state_path(self):
         declarative = DeclarativeStrategy.from_yaml(
             PROJECT_ROOT / "strategies" / "09_static_7030.yaml"
@@ -696,6 +732,22 @@ class DeclarativeStrategyTests(unittest.TestCase):
             path.write_text(source, encoding="utf-8")
             self.assertEqual(load_strategy_directory(directory), [])
             self.assertEqual(len(load_strategy_directory(directory, enabled_only=False)), 1)
+
+    def test_directory_loader_honors_manifest_hidden_strategy_ids(self):
+        source = (
+            PROJECT_ROOT / "strategies" / "25_qqq_valuation_breakdown_balanced.yaml"
+        ).read_text(encoding="utf-8")
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "strategy.yaml").write_text(source, encoding="utf-8")
+            (root / "manifest.json").write_text(
+                '{\n  "version": 1,\n  "hidden_strategy_ids": '
+                '["qqq-valuation-breakdown-balanced"]\n}\n',
+                encoding="utf-8",
+            )
+
+            self.assertEqual(load_strategy_directory(root), [])
+            self.assertEqual(len(load_strategy_directory(root, enabled_only=False)), 1)
 
     def test_definition_requires_explicit_assets(self):
         invalid = definition()

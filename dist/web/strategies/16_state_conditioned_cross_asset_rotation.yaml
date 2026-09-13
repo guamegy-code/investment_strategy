@@ -3,7 +3,7 @@ strategy:
   name: State-conditioned cross-asset rotation
   version: 7
   dsl_version: 1
-  enabled: true
+  enabled: false
 
 assets:
   required:

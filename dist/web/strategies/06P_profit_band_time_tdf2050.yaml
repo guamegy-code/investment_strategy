@@ -3,7 +3,7 @@ strategy:
   name: Profit Band TIME + KODEX TDF2050
   version: 2
   dsl_version: 1
-  enabled: true
+  enabled: false
 
 source: profit-band-tdf2050
 

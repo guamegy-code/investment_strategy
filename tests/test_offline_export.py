@@ -63,7 +63,8 @@ class OfflineExportTests(unittest.TestCase):
         self.assertIn(hosted_guard, load_data)
         self.assertIn(archive_fetch, load_data)
         self.assertLess(load_data.index(hosted_guard), load_data.index(archive_fetch))
-        self.assertIn("fetch(endpoint,{cache:'no-store'})", runtime)
+        self.assertIn("fetch(endpoint,{cache:'default'})", runtime)
+        self.assertIn("const proxyTickerFreshness=new Map(),proxyRequests=new Map()", runtime)
 
     def test_dashboard_restores_saved_selection_before_the_list_is_visible(self):
         runtime = (WEB_SOURCE_DIR / "app.js").read_text(encoding="utf-8")
@@ -351,6 +352,40 @@ class OfflineExportTests(unittest.TestCase):
             self.assertIn("if(!ticker.endsWith('=X'))visible.add(ticker)", document)
             self.assertIn("data[ticker]||[]", document)
             self.assertIn('id="indicator-remove-fx"', document)
+            self.assertIn('value="notifications"', document)
+            self.assertIn("function browserNotificationEvents(history)", document)
+            self.assertIn("notifications:'\\uc54c\\ub9bc'", document)
+            self.assertIn("marker:{symbol:'triangle-up',size:12,color:'#9C27B0'", document)
+            self.assertIn("notificationMarker:true", document)
+            self.assertIn("const notes=date?indicatorNotificationTooltipByDate.get(date):null", document)
+            self.assertNotIn("const markerNotes=", document)
+            self.assertIn("plotly_restyle", document)
+            self.assertIn("hiddenTraceNames", document)
+            self.assertIn("querySelectorAll('.legend .traces')", document)
+            self.assertIn("indicatorHiddenTraceNames", document)
+            self.assertIn("plotly_legendclick", document)
+            self.assertIn("bindIndicatorLegendPersistence", document)
+            self.assertIn("captureHiddenLegendItems", document)
+            self.assertIn("hiddenIndexes", document)
+            self.assertIn("research-notification-tooltip-note", document)
+            self.assertIn("const fullMessage=value=>", document)
+            self.assertNotIn("slice(0,34)", document)
+            self.assertIn("white-space: pre-wrap", document)
+            self.assertIn("research-notification-tooltip-section", document)
+            self.assertIn("contain: inline-size", document)
+            self.assertIn("grid.getBoundingClientRect().width", document)
+            self.assertIn(".replace(/\\s*\\(/g,'\\n(')", document)
+            self.assertIn("card.dataset.for=plotId", document)
+            self.assertIn("hoverinfo:'skip'", document)
+            self.assertIn("excludeFromYAutoscale:true", document)
+            self.assertIn("strategyAwareMovingAverageRenderer", document)
+            self.assertIn(".research-indicator-fx-toggle input,", document)
+            self.assertIn("width: 36px !important", document)
+            self.assertIn("research-indicator-strategy-fx-row", document)
+            self.assertIn("indicatorEventLegendRenderer", document)
+            self.assertIn("hosted?.strategy?.enabled!==false", document)
+            self.assertIn("hidden_strategy_ids", document)
+            self.assertIn("definition.strategy.enabled=entry.enabled", document)
             self.assertIn("VALUATION_SCORE:'합성 밸류에이션 점수 (비공식)'", document)
             self.assertIn("strategyWithSingleQqqIndicator", document)
             self.assertIn("function exchangeRateRemovedIndicatorRows(data,ticker)", document)
@@ -403,7 +438,10 @@ class OfflineExportTests(unittest.TestCase):
             self.assertEqual(len(list((root / "site" / "assets").glob("app.*.js"))), 1)
             self.assertEqual(len(list((root / "site" / "assets").glob("shared-ui.*.js"))), 1)
             self.assertTrue((root / "site" / "strategies" / "sample.yaml").is_file())
-            self.assertEqual(manifest["strategies"], [{"id": "sample", "path": "sample.yaml", "version": 1}])
+            self.assertEqual(manifest["strategies"], [{
+                "id": "sample", "path": "sample.yaml", "version": 1,
+                "enabled": True,
+            }])
             self.assertIn('"strategy_manifest_url": "./strategies/manifest.json"', document)
             self.assertIn('"static_site": true', document)
             self.assertIn('<script defer src="./assets/plotly.', document)
@@ -411,6 +449,9 @@ class OfflineExportTests(unittest.TestCase):
             self.assertIn('<script defer src="./assets/shared-ui.', document)
             self.assertIn('<link rel="stylesheet" href="./assets/app.', document)
             self.assertIn("Cache-Control: public, max-age=31536000, immutable", (root / "site" / "_headers").read_text(encoding="utf-8"))
+            headers = (root / "site" / "_headers").read_text(encoding="utf-8")
+            self.assertIn("/strategies/manifest.json\n  Cache-Control: no-cache", headers)
+            self.assertIn("/strategies/enabled.*.json\n  Cache-Control: public, max-age=31536000, immutable", headers)
             self.assertNotIn('"data": "H4sI', document)
             self.assertFalse(legacy_proxy.exists())
             self.assertFalse(stale_sidecar.exists())
@@ -442,8 +483,34 @@ class OfflineExportTests(unittest.TestCase):
                 "id": "buy-3dip-bil-composite-valuation",
                 "path": source.name,
                 "version": 2,
+                "enabled": False,
             }])
-            self.assertTrue(definition["strategy"]["enabled"])
+            self.assertFalse(definition["strategy"]["enabled"])
+
+    def test_static_site_preserves_readable_strategy_visibility_manifest(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            strategy_dir = root / "strategies"
+            strategy_dir.mkdir()
+            (strategy_dir / "sample.yaml").write_text(
+                "strategy:\n  id: sample\n  name: Sample\n  version: 1\n"
+                "assets:\n  required: [QQQ]\n"
+                "target:\n  - weights:\n      QQQ: 100%\n",
+                encoding="utf-8",
+            )
+            (strategy_dir / "manifest.json").write_text(
+                '{\n  "version": 1,\n  "hidden_strategy_ids": ["sample"]\n}\n',
+                encoding="utf-8",
+            )
+
+            export_static_site(root / "site", strategy_dir=strategy_dir)
+            manifest_path = root / "site" / "strategies" / "manifest.json"
+            manifest_text = manifest_path.read_text(encoding="utf-8")
+            manifest = json.loads(manifest_text)
+
+            self.assertEqual(manifest["hidden_strategy_ids"], ["sample"])
+            self.assertIn('\n  "hidden_strategy_ids": [\n', manifest_text)
+            self.assertIn('\n  "strategies": [\n', manifest_text)
 
     def test_strategy_23_is_enabled_in_the_performance_analysis_manifest(self):
         with TemporaryDirectory() as directory:
@@ -465,8 +532,9 @@ class OfflineExportTests(unittest.TestCase):
                 "id": "qqq-structural-defense-balanced",
                 "path": source.name,
                 "version": 1,
+                "enabled": False,
             }])
-            self.assertTrue(definition["strategy"]["enabled"])
+            self.assertFalse(definition["strategy"]["enabled"])
 
     def test_strategy_24_is_enabled_in_the_performance_analysis_manifest(self):
         with TemporaryDirectory() as directory:
@@ -488,8 +556,9 @@ class OfflineExportTests(unittest.TestCase):
                 "id": "qqq-valuation-breakdown-defense",
                 "path": source.name,
                 "version": 1,
+                "enabled": False,
             }])
-            self.assertTrue(definition["strategy"]["enabled"])
+            self.assertFalse(definition["strategy"]["enabled"])
 
     def test_strategy_25_is_enabled_in_the_performance_analysis_manifest(self):
         with TemporaryDirectory() as directory:
@@ -511,6 +580,7 @@ class OfflineExportTests(unittest.TestCase):
                 "id": "qqq-valuation-breakdown-balanced",
                 "path": source.name,
                 "version": 1,
+                "enabled": True,
             }])
             self.assertTrue(definition["strategy"]["enabled"])
 
@@ -534,6 +604,7 @@ class OfflineExportTests(unittest.TestCase):
                 "id": "band-7030-tdf-valuation-defense",
                 "path": source.name,
                 "version": 1,
+                "enabled": True,
             }])
             self.assertTrue(definition["strategy"]["enabled"])
 

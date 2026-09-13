@@ -55,7 +55,9 @@ TABLER_ICONS_STYLESHEET = "https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.
 PRODUCT_DISPLAY_NAMES = {
     "379810.KS": "KODEX 미국나스닥100",
     "426030.KS": "TIME 미국나스닥100액티브",
-    "0015B0.KS": "KoAct 미국나스닥성장액티브",
+    "0015B0.KS": "KoAct 미국나스닥성장기업액티브",
+    "434060.KS": "KODEX TDF2050액티브 적격",
+    "488770.KS": "KODEX 머니마켓액티브",
     "069500.KS": "KODEX 200 (069500.KS)",
     "114100.KS": "KODEX 국고채 3년 (114100.KS)",
     "148070.KS": "KOSEF 국고채 10년 (148070.KS)",
@@ -154,6 +156,8 @@ def _visible_indicator_y_ranges(
     start_at, end_at = (pd.Timestamp(bounds[0]), pd.Timestamp(bounds[1]))
     values_by_axis: dict[str, list[float]] = {}
     for trace in figure.get("data", []):
+        if trace.get("visible") in (False, "legendonly"):
+            continue
         if "lines" not in str(trace.get("mode", "")):
             continue
         y_values = trace.get("y", [])
@@ -678,6 +682,73 @@ def _indexed_portfolio(history: pd.DataFrame) -> pd.Series:
     return portfolio / portfolio.iloc[0]
 
 
+def _indicator_notification_events(history: pd.DataFrame) -> dict[str, list[dict[str, Any]]]:
+    """Extract alert-worthy state transitions and one-shot prealerts."""
+    events: dict[str, list[dict[str, Any]]] = {
+        "state_changes": [], "prealerts": [],
+    }
+    has_context = "NotificationContext" in history and history[
+        "NotificationContext"
+    ].map(lambda value: isinstance(value, dict)).any()
+    if not has_context and "StrategyState" in history:
+        states = history["StrategyState"].dropna()
+        for position in range(1, len(states)):
+            previous, current = states.iloc[position - 1], states.iloc[position]
+            if previous != current:
+                events["state_changes"].append({
+                    "date": pd.Timestamp(states.index[position]),
+                    "text": f"상태: {previous} → {current}",
+                })
+        return events
+    if not has_context:
+        return events
+    armed_rules: set[str] = set()
+    for date, context in history["NotificationContext"].items():
+        if not isinstance(context, dict):
+            continue
+        policy = context.get("notification_policy") or {}
+        configured_states = policy.get("states") or {}
+        for change in context.get("state_changes") or []:
+            name = str(change.get("name", ""))
+            previous = change.get("previous")
+            current = change.get("current")
+            configured = configured_states.get(name)
+            alert = None
+            if isinstance(configured, dict) and "alerts" in configured:
+                alert = next((item for item in configured.get("alerts", []) if (
+                    str(item.get("to")) == str(current)
+                    and ("from" not in item or str(item.get("from")) == str(previous))
+                )), None)
+                if alert is None:
+                    continue
+            elif configured is None:
+                if name == "defense_mode":
+                    pass
+                elif name not in {"trend_mode", "market_mode"} or not any(
+                    str(value) in {"BEAR", "RECOVERY"}
+                    for value in (previous, current)
+                ):
+                    continue
+            label = configured.get("label", name) if isinstance(configured, dict) else name
+            transition = f"{label}: {previous} → {current}"
+            message = alert.get("message") if isinstance(alert, dict) else None
+            events["state_changes"].append({
+                "date": pd.Timestamp(date),
+                "text": f"{transition}<br>{message}" if message else transition,
+            })
+        for rule in context.get("prealerts") or []:
+            rule_id = str(rule.get("id", ""))
+            if rule.get("reset"):
+                armed_rules.discard(rule_id)
+            if rule.get("matched") and rule_id not in armed_rules:
+                events["prealerts"].append({
+                    "date": pd.Timestamp(date),
+                    "text": str(rule.get("message") or rule_id),
+                })
+                armed_rules.add(rule_id)
+    return events
+
+
 def _fx_rate_from_result(result: dict[str, Any]) -> pd.Series:
     """Return the USD/KRW close series embedded in a completed result."""
     strategy = result.get("strategy")
@@ -1049,6 +1120,13 @@ class ResearchViewModel:
         source_history = (
             _fx_neutral_history(result) if remove_fx else result["history"]
         )
+        notifications = _indicator_notification_events(source_history)
+        for kind, items in notifications.items():
+            notifications[kind] = [
+                item for item in items
+                if (not start or item["date"] >= pd.Timestamp(start))
+                and (not end or item["date"] <= pd.Timestamp(end))
+            ]
         history = _filtered_history(source_history, start, end)
         indexed = _indexed_portfolio(history)
         values = indexed * 100
@@ -1089,6 +1167,7 @@ class ResearchViewModel:
             "states": states,
             "events": events,
             "details": details,
+            "notifications": notifications,
         }
         if len(self._indicator_overlay_cache) >= 4:
             oldest_key = next(iter(self._indicator_overlay_cache))
@@ -1118,13 +1197,27 @@ class ResearchViewModel:
             if not states.empty else None
         )
         tooltip_data = {}
+        notifications_by_date: dict[str, list[dict[str, str]]] = {}
+        for kind, label in (
+            ("state_changes", "상태 변경"),
+            ("prealerts", "사전 경고"),
+        ):
+            for event in data["notifications"].get(kind, []):
+                date_key = pd.Timestamp(event["date"]).strftime("%Y-%m-%d")
+                notifications_by_date.setdefault(date_key, []).append({
+                    "label": label,
+                    "text": str(event["text"]),
+                })
         for position, (date, detail) in enumerate(data["details"].items()):
             item = {"portfolio": detail}
             if states_at_dates is not None:
                 state = states_at_dates.iloc[position]
                 if pd.notna(state):
                     item["state"] = state_labels.get(str(state), str(state))
-            tooltip_data[pd.Timestamp(date).strftime("%Y-%m-%d")] = item
+            date_key = pd.Timestamp(date).strftime("%Y-%m-%d")
+            if date_key in notifications_by_date:
+                item["notifications"] = notifications_by_date[date_key]
+            tooltip_data[date_key] = item
         return tooltip_data
 
     @property
@@ -1360,6 +1453,10 @@ class ResearchViewModel:
         strategy_events = (
             overlay_data["events"] if overlay_data is not None else []
         )
+        strategy_notifications = (
+            overlay_data["notifications"] if overlay_data is not None
+            else {"state_changes": [], "prealerts": []}
+        )
         style_index = 0
         fx_rates = pd.Series(dtype=float)
         if remove_fx:
@@ -1516,16 +1613,59 @@ class ResearchViewModel:
             result = overlay_result
             if result is not None:
                 dates = [date for date, _ in strategy_events]
-                if dates and not strategy_values.empty:
-                    marker_values = strategy_values.reindex(dates, method="ffill")
-                    figure.add_trace(go.Scatter(
-                        x=marker_values.index, y=marker_values,
-                        mode="markers", name=f"{overlay_strategy} · 리밸런싱",
-                        showlegend=False,
-                        meta={"excludeTooltip": True, "panel": "price"},
-                        marker={"symbol": "diamond", "size": 7, "color": TV_NEGATIVE},
-                        hoverinfo="skip",
-                    ), row=panels.index("price") + 1, col=1)
+                marker_values = (
+                    strategy_values.reindex(dates, method="ffill")
+                    if dates and not strategy_values.empty
+                    else pd.Series([None], index=[None], dtype=object)
+                )
+                figure.add_trace(go.Scatter(
+                    x=marker_values.index, y=marker_values,
+                    mode="markers", name="리밸런싱",
+                    showlegend=True,
+                    meta={"excludeTooltip": True, "panel": "price"},
+                    marker={"symbol": "diamond", "size": 9, "color": TV_NEGATIVE},
+                    hoverinfo="skip",
+                ), row=panels.index("price") + 1, col=1)
+
+        if "notifications" in overlay and "price" in panels and overlay_strategy:
+            notification_items = sorted(
+                [
+                    {**item, "kind": "state_changes"}
+                    for item in strategy_notifications["state_changes"]
+                ] + [
+                    {**item, "kind": "prealerts"}
+                    for item in strategy_notifications["prealerts"]
+                ],
+                key=lambda item: item["date"],
+            )
+            dates = [item["date"] for item in notification_items]
+            marker_values = (
+                strategy_values.reindex(dates, method="ffill")
+                if dates and not strategy_values.empty
+                else pd.Series([None], index=[None], dtype=object)
+            )
+            figure.add_trace(go.Scatter(
+                x=marker_values.index,
+                y=marker_values,
+                mode="markers",
+                name="알림",
+                showlegend=True,
+                text=[item["text"] for item in notification_items] if notification_items else [""],
+                marker={
+                    "symbol": "triangle-up",
+                    "size": 12,
+                    "color": "#9C27B0",
+                    "line": {"color": "#ffffff", "width": 1},
+                },
+                meta={
+                    "excludeTooltip": True,
+                    "notificationMarker": True,
+                    "panel": "price",
+                },
+                # The custom crosshair tooltip includes notification notes;
+                # suppress Plotly's separate marker tooltip.
+                hoverinfo="none",
+            ), row=panels.index("price") + 1, col=1)
 
         figure = _apply_chart_style(
             figure,
@@ -1540,19 +1680,25 @@ class ResearchViewModel:
                 fixedrange=True,
                 row=row, col=1,
             )
-        return _apply_detail_navigation(
+        figure = _apply_detail_navigation(
             figure,
             show_range_controls=True,
             slider_thickness=0.09,
             separate_selector_row=True,
             legend_columns=5,
             legend_plot_gap=42,
-            selector_legend_gap=24,
+            selector_legend_gap=40,
             # Match the 520px performance-detail chart's 0.09 slider and
             # its year-label offset in physical pixels, regardless of panels.
             slider_height_px=0.09 * (520 - 96 - 78),
             slider_label_offset_px=0.235 * (520 - 96 - 78),
         )
+        # Plotly matches traces by uid while uirevision preserves legend state.
+        # Event overlay changes must not make a user-hidden market series reappear.
+        for index, trace in enumerate(figure.data):
+            meta = trace.meta if isinstance(trace.meta, dict) else {}
+            trace.uid = f"indicator:{trace.name}:{meta.get('panel', '')}:{index}"
+        return figure
 
     def allocation_figure(self, selected_name: str | None, start=None, end=None) -> go.Figure:
         result = next((item for item in self.results if strategy_name(item) == selected_name), None)
@@ -2274,21 +2420,19 @@ def create_research_app(
                             ], className="research-indicator-control"),
                             html.Div([
                                 html.Label("전략 표시", className="form-label"),
-                                dcc.Dropdown(
-                                    id="research-indicator-strategy",
-                                    options=[
-                                        {"label": "표시 안 함", "value": ""},
-                                        *[{"label": name, "value": name} for name in names],
-                                    ],
-                                    value=names[0] if names else "",
-                                    clearable=False,
-                                    persistence=True,
-                                    persistence_type="local",
-                                    className="research-indicator-strategy",
-                                ),
-                            ], className="research-indicator-control"),
-                            html.Div([
-                            html.Div([
+                                html.Div([
+                                    dcc.Dropdown(
+                                        id="research-indicator-strategy",
+                                        options=[
+                                            {"label": "표시 안 함", "value": ""},
+                                            *[{"label": name, "value": name} for name in names],
+                                        ],
+                                        value=names[0] if names else "",
+                                        clearable=False,
+                                        persistence=True,
+                                        persistence_type="local",
+                                        className="research-indicator-strategy",
+                                    ),
                                 dcc.Checklist(
                                     id="research-indicator-remove-fx",
                                     options=[{"label": "달러 기준으로 보기", "value": "usd"}],
@@ -2297,7 +2441,8 @@ def create_research_app(
                                     # HTML의 form-switch와 같은 스위치 모양을 사용한다.
                                     className="research-indicator-fx-toggle",
                                 ),
-                            ], className="research-indicator-control research-indicator-fx-control"),
+                                ], className="research-indicator-strategy-fx-row"),
+                            ], className="research-indicator-control research-indicator-strategy-fx-control"),
                             html.Div([
                                 html.Label("전략 이벤트", className="form-label"),
                                 dcc.Checklist(
@@ -2305,6 +2450,7 @@ def create_research_app(
                                     options=[
                                         {"label": "상태 구간", "value": "states"},
                                         {"label": "리밸런싱", "value": "rebalances"},
+                                        {"label": "알림 표시", "value": "notifications"},
                                     ],
                                     value=["states", "rebalances"],
                                     inline=True,
@@ -2318,7 +2464,6 @@ def create_research_app(
                                     id="research-indicator-overlay-hint",
                                     className="research-indicator-overlay-hint",
                                 ),
-                            ], className="research-indicator-control"),
                             ], className="research-indicator-control research-indicator-inline-options"),
                         ], className="card-body research-indicator-toolbar"),
                     ], className="card research-card research-indicator-controls"),
@@ -2856,6 +3001,59 @@ def create_research_app(
     ):
         register_bounded_navigation(bounded_graph_id)
 
+    @app.callback(
+        Output("research-indicator-graph", "figure", allow_duplicate=True),
+        Input("research-indicator-graph", "restyleData"),
+        State("research-indicator-graph", "figure"),
+        prevent_initial_call=True,
+    )
+    def rescale_indicator_after_legend_toggle(restyle_data, figure):
+        if not restyle_data or not figure or len(restyle_data) != 2:
+            raise PreventUpdate
+        changes, trace_indexes = restyle_data
+        if "visible" not in changes:
+            raise PreventUpdate
+        visible_values = changes["visible"]
+        if not isinstance(visible_values, list):
+            visible_values = [visible_values]
+        visible_figure = {
+            "data": [dict(trace) for trace in figure.get("data", [])],
+            "layout": figure.get("layout", {}),
+        }
+        for position, trace_index in enumerate(trace_indexes):
+            if 0 <= trace_index < len(visible_figure["data"]):
+                value_index = min(position, len(visible_values) - 1)
+                visible_figure["data"][trace_index]["visible"] = visible_values[value_index]
+
+        visible_range = None
+        axis_names = sorted(
+            [name for name in figure.get("layout", {}) if name.startswith("xaxis")],
+            key=lambda name: int(name[5:] or "1"),
+            reverse=True,
+        )
+        for axis_name in axis_names:
+            axis_range = figure["layout"].get(axis_name, {}).get("range")
+            if axis_range and len(axis_range) == 2:
+                visible_range = axis_range
+                break
+        if visible_range is None:
+            dates = [
+                value
+                for trace in visible_figure["data"]
+                for value in trace.get("x", [])
+                if value is not None
+            ]
+            if dates:
+                visible_range = [min(dates), max(dates)]
+        ranges = _visible_indicator_y_ranges(visible_figure, visible_range)
+        if not ranges:
+            raise PreventUpdate
+        patched = Patch()
+        for axis_name, y_range in ranges.items():
+            patched["layout"][axis_name]["autorange"] = False
+            patched["layout"][axis_name]["range"] = y_range
+        return patched
+
     comparison_tooltip_script = """
         function(hoverData, clickData, graphId, figure, indicatorTooltipData) {
             const noUpdate = window.dash_clientside.no_update;
@@ -2868,20 +3066,34 @@ def create_research_app(
             const isIndicatorGraph = graphId === "research-indicator-graph";
             const traces = figure && figure.data ? figure.data : [];
             const traceFor = point => traces[point.curveNumber] || {};
-            const points = hoverData.points.filter(
+            const rawPoints = hoverData.points;
+            const notificationPoint = isIndicatorGraph
+                ? rawPoints.find(item => Boolean(
+                    (traceFor(item).meta || {}).notificationMarker
+                )) : null;
+            const points = rawPoints.filter(
                 item => isIndicatorGraph
                     ? Boolean(traceFor(item).meta && !traceFor(item).meta.excludeTooltip)
                     : Boolean(item.customdata && item.customdata.name)
             );
-            if (!points.length) {
+            if (!points.length && !notificationPoint) {
                 return [false, noUpdate, noUpdate, noUpdate];
             }
+            const anchorPoints = points.length ? points : [notificationPoint];
             const component = (type, className, children) => ({
                 namespace: "dash_html_components",
                 type: type,
                 props: {className: className, children: children}
             });
             const span = (className, value) => component("Span", className, value || "");
+            const fullNotification = value => String(value || "")
+                .replace(/<br\\s*\\/?\\s*>/gi, "\n")
+                .replace(/<[^>]*>/g, " ")
+                .replace(/\\s*\\(/g, "\n(")
+                .split(/\n+/)
+                .map(line => line.replace(/\\s+/g, " ").trim())
+                .filter(Boolean)
+                .join("\n");
             const formatNumber = value => {
                 const numeric = Number(value);
                 return Number.isFinite(numeric) ? numeric.toLocaleString("en-US", {
@@ -2911,7 +3123,8 @@ def create_research_app(
             const candleTrace = isIndicatorGraph
                 ? traces.find(trace => trace.type === "candlestick") : null;
             const hoverPoint = isIndicatorGraph
-                ? (points.find(point => traceFor(point).type !== "candlestick") || points[0])
+                ? (points.find(point => traceFor(point).type !== "candlestick") ||
+                   points[0] || notificationPoint)
                 : points[0];
             const dateKey = isIndicatorGraph
                 ? String(hoverPoint.x).slice(0, 10) : null;
@@ -2921,7 +3134,7 @@ def create_research_app(
                 component("Div", "research-custom-tooltip-date", dateText)
             ];
             const hoveredPanel = isIndicatorGraph
-                ? (traceFor(points[0]).meta || {}).panel : null;
+                ? (traceFor(points[0] || notificationPoint).meta || {}).panel : null;
             const strategyContext = isIndicatorGraph && indicatorTooltipData
                 ? indicatorTooltipData[dateKey] : null;
             const portfolio = hoveredPanel === "price" && strategyContext
@@ -2983,6 +3196,8 @@ def create_research_app(
                 }
             }
             rows.push(...indicatorRows);
+            const notifications = isIndicatorGraph && strategyContext
+                ? (strategyContext.notifications || []) : [];
             if (rows.length) {
                 content.push(component(
                     "Div",
@@ -2991,10 +3206,27 @@ def create_research_app(
                     rows
                 ));
             }
+            if (notifications.length) {
+                content.push(component(
+                    "Div", "research-notification-tooltip-section", [
+                        component(
+                            "Div",
+                            "research-custom-tooltip-separator research-notification-tooltip-separator",
+                            ""
+                        ),
+                        ...notifications.map(note => component(
+                            "Div", "research-notification-tooltip-note", [
+                                component("Strong", "", note.label),
+                                span("", fullNotification(note.text))
+                            ]
+                        ))
+                    ]
+                ));
+            }
             const children = component(
                 "Div", "research-custom-tooltip-card research-comparison-tooltip-card", content
             );
-            const pointBoxes = points
+            const pointBoxes = anchorPoints
                 .map(point => point.bbox)
                 .filter(box => box && Number.isFinite(box.x0) &&
                     Number.isFinite(box.x1) && Number.isFinite(box.y0) &&
@@ -3004,7 +3236,7 @@ def create_research_app(
                 x1: Math.max(...pointBoxes.map(box => box.x1)),
                 y0: Math.min(...pointBoxes.map(box => box.y0)),
                 y1: Math.max(...pointBoxes.map(box => box.y1))
-            } : points[0].bbox;
+            } : anchorPoints[0].bbox;
             const graph = document.getElementById(graphId);
             const graphBounds = graph ? graph.getBoundingClientRect() : null;
             const plot = graph ? graph.querySelector(".nsewdrag") : null;

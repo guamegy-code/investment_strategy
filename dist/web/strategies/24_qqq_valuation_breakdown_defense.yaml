@@ -3,7 +3,7 @@ strategy:
   name: QQQ Valuation Breakdown Defense (24) [BIL]
   version: 1
   dsl_version: 1
-  enabled: true
+  enabled: false
 
 # 24번은 22번의 합성 밸류에이션 점수를 주 방어 신호로 사용하고,
 # 23번의 추세 상태를 안전 상한으로 결합한 개인연금용 QQQ/BIL 전략이다.

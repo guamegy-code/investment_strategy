@@ -195,6 +195,24 @@ test('background strategy worker names reassigned function expressions',()=>{
   assert.match(source,/return `const \$\{item\.name\}=\$\{source\};`/);
 });
 
+test('background worker includes validator closures and valuation calculations',()=>{
+  assert.match(source,/`const simpleRotationValidator=\$\{simpleRotationValidator\.toString\(\)\};`/);
+  assert.match(source,/valuationWeightPortfolio,resolve,Portfolio,Declarative/);
+  assert.match(source,/runWithMixedValuation,runWithData/);
+  assert.doesNotMatch(source,/if\(validateStrategy\(def,all\)\.calculation\.valuation\)return Promise\.resolve/);
+});
+
+test('dashboard selection changes reuse completed strategies',()=>{
+  assert.match(source,/const current=dashboardResults\.get\(def\.strategy\.id\);\s*if\(current\)return current;/);
+  assert.match(source,/\},80\);/);
+});
+
+test('price refreshes are deduplicated and browser-cacheable',()=>{
+  assert.match(source,/const proxyTickerFreshness=new Map\(\),proxyRequests=new Map\(\)/);
+  assert.match(source,/fetch\(endpoint,\{cache:'default'\}\)/);
+  assert.doesNotMatch(source,/fetch\(endpoint,\{cache:'no-store'\}\)/);
+});
+
 
 test('rotation candidates carry their last price across a different market holiday',()=>{
   const recordsFor=extractedRecordsFor(),data={

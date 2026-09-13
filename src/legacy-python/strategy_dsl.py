@@ -11,6 +11,7 @@ import ast
 from collections.abc import Callable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass
+import json
 from math import isfinite
 from pathlib import Path
 import re
@@ -820,6 +821,7 @@ class DeclarativeStrategy:
         self.variables: dict[str, Any] = {}
         self.target: dict[str, float] | None = None
         self.rotation_decision: dict[str, Any] | None = None
+        self.notification_context: dict[str, Any] | None = None
         self._rotation_last_period: Any = None
         self._rotation_active = False
         self._rotation_mix: dict[str, float] = {}
@@ -1400,6 +1402,70 @@ class DeclarativeStrategy:
             raise StrategyDefinitionError("execution days must be at least 1")
         return days
 
+    def _notification_policy(self) -> dict[str, Any]:
+        configured = self.definition.get("notifications")
+        if configured:
+            return deepcopy(dict(configured))
+        threshold = None
+        for rule in self.definition.get("rebalance", []):
+            match = re.search(
+                r"target_deviation\(\)\s*>=\s*(\d+(?:\.\d+)?)%",
+                str(rule.get("when", "")),
+            )
+            if match:
+                threshold = float(match.group(1)) / 100.0
+                break
+        policy: dict[str, Any] = {
+            "states": {
+                name: {"label": name}
+                for name, config in self.definition.get("state", {}).items()
+                if config.get("rules")
+            },
+            "prealerts": [],
+        }
+        if threshold is not None:
+            warning = threshold * 2 / 3
+            reset = threshold * 8 / 15
+            policy["prealerts"] = [{
+                "id": "target-deviation",
+                "when": f"target_deviation() >= {warning}",
+                "reset_when": f"target_deviation() < {reset}",
+                "message": (
+                    f"목표 비중 괴리가 {warning * 100:.1f}%p에 도달 "
+                    f"(리밸런싱 조건 {threshold * 100:g}%p)"
+                ),
+            }]
+        return policy
+
+    def _build_notification_context(
+        self, date: Any, market: Mapping[str, Any], portfolio: Any,
+        target: Mapping[str, float],
+    ) -> dict[str, Any]:
+        policy = self._notification_policy()
+        evaluator = self._evaluator(market, portfolio, target)
+        return {
+            "date": str(date),
+            "state_values": deepcopy(self._state_values),
+            "state_changes": [
+                {
+                    "name": name,
+                    "previous": self._previous_state_values.get(name),
+                    "current": self._state_values.get(name),
+                }
+                for name in self._changed_state
+            ],
+            "notification_policy": policy,
+            "prealerts": [
+                {
+                    "id": str(rule["id"]),
+                    "message": str(rule["message"]),
+                    "matched": bool(evaluator.evaluate(rule["when"])),
+                    "reset": bool(evaluator.evaluate(rule["reset_when"])),
+                }
+                for rule in policy.get("prealerts", [])
+            ],
+        }
+
     def evaluate(self, date: Any, market: Mapping[str, Any], portfolio: Any) -> dict[str, Any]:
         self._calculate_variables(market, portfolio)
         self._update_state(date, market, portfolio)
@@ -1431,6 +1497,9 @@ class DeclarativeStrategy:
             # to API callers and daily history consumers.
             reason = rotation_reason
         self.target = target
+        self.notification_context = self._build_notification_context(
+            date, market, portfolio, target
+        )
         self._evaluated_once = True
         return {
             "rebalance": rebalance,
@@ -1650,6 +1719,26 @@ def load_strategy_directory(
     root = Path(directory)
     if not root.exists():
         return []
+    hidden_strategy_ids: set[str] = set()
+    visibility_path = root / "manifest.json"
+    if visibility_path.is_file():
+        try:
+            visibility = json.loads(visibility_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError) as exc:
+            raise StrategyDefinitionError(
+                f"invalid strategy manifest: {visibility_path}"
+            ) from exc
+        if not isinstance(visibility, Mapping):
+            raise StrategyDefinitionError("strategy manifest must be a JSON object")
+        hidden = visibility.get("hidden_strategy_ids", [])
+        if not isinstance(hidden, list) or any(
+            not isinstance(strategy_id, str) or not strategy_id
+            for strategy_id in hidden
+        ):
+            raise StrategyDefinitionError(
+                "hidden_strategy_ids must be a list of non-empty strings"
+            )
+        hidden_strategy_ids = set(hidden)
     definitions = [
         load_strategy_definition(path)
         for path in sorted((*root.glob("*.yaml"), *root.glob("*.yml")))
@@ -1672,7 +1761,10 @@ def load_strategy_directory(
     loaded: list[Any] = []
     for definition in definitions:
         enabled = definition["strategy"].get("enabled", True)
-        if enabled_only and not enabled:
+        strategy_name = str(definition["strategy"]["id"])
+        if enabled_only and (
+            not enabled or strategy_name in hidden_strategy_ids
+        ):
             continue
         if "source" not in definition:
             strategy_id = f"dsl:{definition['strategy']['id']}"

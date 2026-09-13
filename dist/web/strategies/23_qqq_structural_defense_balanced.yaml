@@ -3,7 +3,7 @@ strategy:
   name: QQQ Structural Defense Balanced (23B) [BIL]
   version: 1
   dsl_version: 1
-  enabled: true
+  enabled: false
 
 # 15번 전략의 시장 상태 판정은 유지하고, 개인연금의 안전자산 비율 제한이
 # 없다는 점을 활용해 QQQ와 BIL만으로 위험 노출을 조절한다.

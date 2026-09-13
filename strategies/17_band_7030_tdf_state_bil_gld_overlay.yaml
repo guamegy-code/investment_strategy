@@ -3,7 +3,7 @@ strategy:
   name: 70/30 TDF State BIL + GLD Relative Strength
   version: 1
   dsl_version: 1
-  enabled: true
+  enabled: false
 
 # Strategy 17 is an independent strategy definition. It copies strategy 15's
 # market-state rules and adds a small, confirmed GLD overlay funded only from QQQ.

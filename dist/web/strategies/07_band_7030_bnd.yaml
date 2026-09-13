@@ -3,7 +3,6 @@ strategy:
   name: 70/30 Band
   version: 1
   dsl_version: 1
-  # 이 독립 전략을 일반 실행 목록에 포함하려면 true로 설정한다.
   enabled: true
 
 assets:

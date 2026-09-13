@@ -570,9 +570,18 @@ export default {
     if (request.method !== "GET" || url.pathname !== "/prices") {
       return response({error: "Use GET /prices?tickers=QQQ,BND&start=2010-01-01"}, 404);
     }
+    const cacheUrl = new URL(url);
+    cacheUrl.searchParams.delete("runtime");
+    const cacheTickers = cacheUrl.searchParams.get("tickers");
+    if (cacheTickers) cacheUrl.searchParams.set("tickers", cacheTickers.split(",").sort().join(","));
+    const cacheRequest = new Request(cacheUrl, request);
     const edgeCache = globalThis.caches?.default;
-    const cached = edgeCache ? await edgeCache.match(request) : null;
-    if (cached) return cached;
+    const cached = edgeCache ? await edgeCache.match(cacheRequest) : null;
+    if (cached) {
+      const headers = new Headers(cached.headers);
+      headers.set("Server-Timing", 'edge-cache;desc="HIT"');
+      return new Response(cached.body, {status: cached.status, headers});
+    }
     try {
       const tickers = parseTickers(url.searchParams.get("tickers"));
       const end = unixSeconds(url.searchParams.get("end"), Date.now());
@@ -593,7 +602,8 @@ export default {
         stale_tickers: staleTickers,
         data: Object.fromEntries(entries),
       });
-      if (edgeCache && ctx) ctx.waitUntil(edgeCache.put(request, payload.clone()));
+      payload.headers.set("Server-Timing", 'edge-cache;desc="MISS"');
+      if (edgeCache && ctx) ctx.waitUntil(edgeCache.put(cacheRequest, payload.clone()));
       return payload;
     } catch (error) {
       return response({error: error instanceof Error ? error.message : "data request failed"}, 400);

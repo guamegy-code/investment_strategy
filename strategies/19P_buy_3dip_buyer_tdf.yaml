@@ -3,7 +3,7 @@ strategy:
   name: Buy 3 Dip 70-30 (a-b-c-d) [TDF]
   version: 1
   dsl_version: 1
-  enabled: true
+  enabled: false
 
 source: buy-3dip-bil
 
