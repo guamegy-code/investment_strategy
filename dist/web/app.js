@@ -443,9 +443,9 @@ function migrateStrategyDefinition(definition){
   return {...definition,strategy,...(definition.source?{source:migrateStrategyId(definition.source)}:{})};
 }
 function loadUiState(){try{const state=JSON.parse(localStorage.getItem(uiStateKey)||'{}')||{};for(const key of ['strategyIds','knownStrategyIds','indicatorSelection'])if(Array.isArray(state[key]))state[key]=state[key].map(migrateStrategyId);for(const key of ['detailStrategy','indicatorStrategy'])if(state[key])state[key]=migrateStrategyId(state[key]);return state;}catch{return {};}}
-function saveUiState(activeView){try{activeView=typeof activeView==='string'?activeView:null;const previous=loadUiState(),strategyInputs=[...$('strategy-list').querySelectorAll('input[type="checkbox"]')],state={...previous,strategyIds:strategyInputs.length?strategyInputs.filter(input=>input.checked).map(input=>input.value):previous.strategyIds,knownStrategyIds:definitions.filter(def=>def.strategy.enabled!==false).map(def=>def.strategy.id),analysisStart:$('start-date').value||previous.analysisStart,analysisEnd:$('end-date').value||previous.analysisEnd,detailStrategy:$('detail-strategy').value||previous.detailStrategy,detailRemoveFx:Boolean($('detail-remove-fx')?.checked),indicatorSelection:[...indicatorSelection],indicatorType:indicatorControlsInitialized?$('indicator-type').value:previous.indicatorType,indicatorStrategy:indicatorControlsInitialized?$('indicator-strategy').value:previous.indicatorStrategy,indicatorStart:$('indicator-start-date')?.value||previous.indicatorStart,indicatorEnd:$('indicator-end-date')?.value||previous.indicatorEnd,indicatorOverlays:[...($('indicator-overlays')?.querySelectorAll('input:checked')||[])].map(input=>input.value),indicatorCandles:[...($('indicator-candles')?.querySelectorAll('input:checked')||[])].map(input=>input.value).filter(Boolean),indicatorRemoveFx:Boolean($('indicator-remove-fx')?.checked),indicatorHiddenTraceNames:[...indicatorHiddenTraceNames],activeView:activeView||($('indicators-view').classList.contains('offline-hidden')?'analysis':'indicators')};localStorage.setItem(uiStateKey,JSON.stringify(state));}catch{}}
+function saveUiState(activeView){try{activeView=typeof activeView==='string'?activeView:null;const previous=loadUiState(),strategyInputs=[...$('strategy-list').querySelectorAll('input[type="checkbox"]')],state={...previous,strategyIds:strategyInputs.length?strategyInputs.filter(input=>input.checked).map(input=>input.value):previous.strategyIds,knownStrategyIds:definitions.filter(def=>def.strategy.enabled!==false).map(def=>def.strategy.id),analysisStart:$('start-date').value||previous.analysisStart,analysisEnd:$('end-date').value||previous.analysisEnd,detailStrategy:$('detail-strategy').value||previous.detailStrategy,detailRemoveFx:Boolean($('detail-remove-fx')?.checked),indicatorSelection:[...indicatorSelection],indicatorType:indicatorControlsInitialized?$('indicator-type').value:previous.indicatorType,indicatorStrategy:indicatorControlsInitialized?$('indicator-strategy').value:previous.indicatorStrategy,indicatorStart:$('indicator-start-date')?.value||previous.indicatorStart,indicatorEnd:$('indicator-end-date')?.value||previous.indicatorEnd,indicatorOverlays:[...($('indicator-overlays')?.querySelectorAll('input:checked')||[])].map(input=>input.value),indicatorCandles:[...($('indicator-candles')?.querySelectorAll('input:checked')||[])].map(input=>input.value).filter(Boolean),indicatorRemoveFx:Boolean($('indicator-remove-fx')?.checked),indicatorHiddenTraceNames:[...indicatorHiddenTraceNames].filter(name=>name!=='알림'),activeView:activeView||($('indicators-view').classList.contains('offline-hidden')?'analysis':'indicators')};localStorage.setItem(uiStateKey,JSON.stringify(state));}catch{}}
 const savedUiState=loadUiState();
-let indicatorHiddenTraceNames=new Set(Array.isArray(savedUiState.indicatorHiddenTraceNames)?savedUiState.indicatorHiddenTraceNames:[]);
+let indicatorHiddenTraceNames=new Set((Array.isArray(savedUiState.indicatorHiddenTraceNames)?savedUiState.indicatorHiddenTraceNames:[]).filter(name=>name!=='알림'));
 function applyImmediateUiState(state){
   const indicators=state.activeView==='indicators';
   $('analysis-view').classList.toggle('offline-hidden',indicators);
@@ -1354,7 +1354,7 @@ Plotly.react=function(target,traces,layout,...args){
   }
   return tradingDayAxisReact(target,traces,layout,...args);
 };
-function saveIndicatorLegendState(){try{localStorage.setItem(uiStateKey,JSON.stringify({...loadUiState(),indicatorHiddenTraceNames:[...indicatorHiddenTraceNames]}));}catch{}}
+function saveIndicatorLegendState(){try{localStorage.setItem(uiStateKey,JSON.stringify({...loadUiState(),indicatorHiddenTraceNames:[...indicatorHiddenTraceNames].filter(name=>name!=='알림')}));}catch{}}
 function chartDateMillis(value){const parsed=Date.parse(String(value));return Number.isFinite(parsed)?parsed:NaN;}
 function chartXAxisCoversFullRange(plot){
   const axis=plot?._fullLayout?.xaxis||plot?.layout?.xaxis,range=axis?.range;
@@ -1424,7 +1424,7 @@ bindVisibleYAutoscale=function(plotId){
   if(plotId==='indicator-plot')plot.on('plotly_legendclick',event=>{
     const trace=event?.data?.[event.curveNumber]||event?.fullData;
     const name=trace?.name;
-    if(!name)return;
+    if(!name||name==='알림')return;
     const currentlyHidden=trace.visible===false||trace.visible==='legendonly';
     if(currentlyHidden)indicatorHiddenTraceNames.delete(name);
     else indicatorHiddenTraceNames.add(name);
@@ -2046,17 +2046,18 @@ Plotly.react=function(target,traces,layout,...args){
   if(id==='indicator-plot'&&stableIndicatorEvents){
     const plot=typeof target==='string'?$(target):target;
     const hiddenTraceNames=new Set([
-      ...indicatorHiddenTraceNames,
+      ...[...indicatorHiddenTraceNames].filter(name=>name!=='알림'),
       ...(plot?.data||[])
         .filter((trace,index)=>{
           const visible=plot?._fullData?.[index]?.visible??trace.visible;
           return visible===false||visible==='legendonly';
         })
-        .map(trace=>trace.name),
+        .map(trace=>trace.name)
+        .filter(name=>name!=='알림'),
       ...[...(plot?.querySelectorAll('.legend .traces')||[])]
         .filter(group=>Number.parseFloat(getComputedStyle(group).opacity)<.75)
         .map(group=>group.querySelector('.legendtext')?.textContent?.trim())
-        .filter(Boolean),
+        .filter(name=>name&&name!=='알림'),
     ]);
     const overlays=[...($('indicator-overlays')?.querySelectorAll('input:checked')||[])]
       .map(input=>input.value);
@@ -2190,7 +2191,7 @@ function bindIndicatorLegendPersistence(){
     for(const group of plot.querySelectorAll('.legend .traces')){
       if(Number.parseFloat(getComputedStyle(group).opacity)>=.75)continue;
       const name=group.querySelector('.legendtext')?.textContent?.trim();
-      if(name)indicatorHiddenTraceNames.add(name);
+      if(name&&name!=='알림')indicatorHiddenTraceNames.add(name);
     }
     saveIndicatorLegendState();
   };
@@ -2204,6 +2205,16 @@ function bindIndicatorLegendPersistence(){
     const name=trace?.name;
     if(!name)return;
     const currentlyHidden=trace.visible===false||trace.visible==='legendonly';
+    if(name==='알림'){
+      const notificationInput=overlays?.querySelector('input[value="notifications"]');
+      if(notificationInput){
+        notificationInput.checked=currentlyHidden;
+        indicatorHiddenTraceNames.delete(name);
+        saveUiState();
+        requestAnimationFrame(()=>void renderIndicators());
+      }
+      return false;
+    }
     if(currentlyHidden)indicatorHiddenTraceNames.delete(name);
     else indicatorHiddenTraceNames.add(name);
     saveIndicatorLegendState();

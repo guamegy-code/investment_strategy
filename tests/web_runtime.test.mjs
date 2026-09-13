@@ -189,6 +189,13 @@ test('refresh persists graph legend and last-moment control changes',()=>{
   assert.match(source,/saveIndicatorLegendState\(\)/);
 });
 
+test('notification checkbox remains authoritative over its legend and markers',()=>{
+  assert.match(source,/indicatorHiddenTraceNames:\[\.\.\.indicatorHiddenTraceNames\]\.filter\(name=>name!==['"]알림['"]\)/);
+  assert.match(source,/savedUiState\.indicatorHiddenTraceNames[\s\S]*?\.filter\(name=>name!==['"]알림['"]\)/);
+  assert.match(source,/\.filter\(name=>name&&name!==['"]알림['"]\)/);
+  assert.match(source,/if\(name===['"]알림['"]\)\{[\s\S]*?notificationInput\.checked=currentlyHidden;[\s\S]*?saveUiState\(\);[\s\S]*?renderIndicators\(\)/);
+});
+
 test('notification markers bypass legacy result caches and never leave an empty legend',()=>{
   assert.match(source,/const NOTIFICATION_CONTEXT_VERSION = 1/);
   assert.match(source,/requireNotificationContext=false/);
