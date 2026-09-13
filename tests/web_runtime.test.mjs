@@ -165,6 +165,21 @@ test('restored indicator strategy reloads its overlay history when needed',()=>{
   assert.match(source,/await ensureIndicatorStrategyHistory\(String\(\$\('indicator-strategy'\)\?\.value\|\|''\)\)/);
 });
 
+test('saved UI controls are restored before asynchronous dashboard loading',()=>{
+  assert.match(source,/function applyImmediateUiState\(state\)/);
+  assert.match(source,/applyImmediateUiState\(savedUiState\)/);
+  assert.match(source,/document\.documentElement\.classList\.add\('research-ui-state-ready'\)/);
+  assert.match(source,/indicatorOverlays:\[\.\.\.\(\$\('indicator-overlays'\)\?\.querySelectorAll\('input:checked'\)\|\|\[\]\)\]/);
+  assert.match(source,/detailRemoveFx:Boolean\(\$\('detail-remove-fx'\)\?\.checked\)/);
+});
+
+test('refresh persists graph legend and last-moment control changes',()=>{
+  assert.match(source,/indicatorHiddenTraceNames:\[\.\.\.indicatorHiddenTraceNames\]/);
+  assert.match(source,/activeView:activeView\|\|\(\$\('indicators-view'\)\.classList\.contains\('offline-hidden'\)\?'analysis':'indicators'\)/);
+  assert.match(source,/window\.addEventListener\('pagehide',\(\)=>saveUiState\(\)\)/);
+  assert.match(source,/saveIndicatorLegendState\(\)/);
+});
+
 test('all charts compress non-trading dates with one shared rangebreak list',()=>{
   assert.match(source,/function tradingDayRangebreaks\(traces\)/);
   assert.match(source,/bounds:\['sat','mon'\]/);
