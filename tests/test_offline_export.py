@@ -512,6 +512,48 @@ class OfflineExportTests(unittest.TestCase):
             self.assertIn('\n  "hidden_strategy_ids": [\n', manifest_text)
             self.assertIn('\n  "strategies": [\n', manifest_text)
 
+    def test_static_enabled_bundle_preserves_notification_on_keys(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            strategy_dir = root / "strategies"
+            strategy_dir.mkdir()
+            (strategy_dir / "sample.yaml").write_text(
+                "strategy:\n  id: sample\n  name: Sample\n  version: 1\n"
+                "assets:\n  required: [QQQ]\n"
+                "state:\n  mode:\n    initial: NORMAL\n    rules:\n"
+                "      - when: QQQ.close < 100\n        set: DEFENSE\n"
+                "        confirm: 2\n"
+                "target:\n  - weights:\n      QQQ: 100%\n"
+                "notifications:\n  states:\n    mode:\n      label: Mode\n"
+                "      alerts:\n        - on: confirmation_started\n"
+                "          to: [DEFENSE]\n        - on: changed\n"
+                "          to: DEFENSE\n",
+                encoding="utf-8",
+            )
+            site = root / "site"
+            stale_bundle = site / "strategies" / "enabled.stale.json"
+            stale_bundle.parent.mkdir(parents=True)
+            stale_bundle.write_text("[]", encoding="utf-8")
+
+            export_static_site(site, strategy_dir=strategy_dir)
+            manifest = json.loads(
+                (site / "strategies" / "manifest.json").read_text(encoding="utf-8")
+            )
+            bundles = list((site / "strategies").glob("enabled.*.json"))
+            definitions = json.loads(
+                (site / "strategies" / manifest["enabled_bundle"]).read_text(
+                    encoding="utf-8"
+                )
+            )
+            alerts = definitions[0]["notifications"]["states"]["mode"]["alerts"]
+
+            self.assertEqual(len(bundles), 1)
+            self.assertEqual(
+                [alert["on"] for alert in alerts],
+                ["confirmation_started", "changed"],
+            )
+            self.assertTrue(all("true" not in alert for alert in alerts))
+
     def test_strategy_23_is_enabled_in_the_performance_analysis_manifest(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)

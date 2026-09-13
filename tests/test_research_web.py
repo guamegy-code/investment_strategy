@@ -843,6 +843,12 @@ class ResearchWebTests(unittest.TestCase):
                 "state_changes": [{
                     "name": "mode", "previous": "NORMAL", "current": "WARNING",
                 }],
+                "current_weights": {"QQQ": 0.26, "BIL": 0.74},
+                "previous_target_weights": {"QQQ": 0.30, "BIL": 0.70},
+                "target_weights": {"QQQ": 0.0, "BIL": 1.0},
+                "target_changed": True,
+                "rebalance_required": True,
+                "execution_days": 1,
                 "prealerts": [{
                     "id": "drift", "message": "목표 비중 괴리 접근",
                     "matched": True, "reset": False,
@@ -868,12 +874,17 @@ class ResearchWebTests(unittest.TestCase):
         notification_trace = next(trace for trace in figure.data if trace.name == "알림")
         self.assertEqual(len(notification_trace.x), 2)
         self.assertIn("NORMAL → WARNING", notification_trace.text[0])
+        self.assertIn("QQQ 30.0% / BIL 70.0%", notification_trace.text[0])
+        self.assertIn("→ QQQ 0.0% / BIL 100.0%", notification_trace.text[0])
+        self.assertIn("실행 예정: 다음 거래일 시가부터 1일", notification_trace.text[0])
         self.assertEqual(notification_trace.marker.color, "#9C27B0")
         self.assertEqual(notification_trace.marker.symbol, "triangle-up")
         self.assertEqual(notification_trace.hoverinfo, "none")
         self.assertTrue(notification_trace.meta["notificationMarker"])
         tooltip_data = ResearchViewModel((result,)).indicator_tooltip_data("AlphaStrategy")
-        self.assertEqual(tooltip_data["2024-01-02"]["notifications"][0]["label"], "상태 변경")
+        self.assertNotIn(
+            "label", tooltip_data["2024-01-02"]["notifications"][0]
+        )
 
     def test_indicator_notification_overlay_restores_cached_state_changes_and_legends(self):
         result = make_result(AlphaStrategy(), [100, 110, 121])

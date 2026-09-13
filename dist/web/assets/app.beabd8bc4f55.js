@@ -172,10 +172,12 @@ async function loadHostedPrecomputedResult(strategyId){
 function installBrowserNotificationContext(StrategyClass){
   const baseStep=StrategyClass.prototype.step;
   function step(date,market,portfolio){
-    const previous={...this.state},signal=baseStep.call(this,date,market,portfolio),policy=browserNotificationPolicy(this.def),ctx=this.context(market,portfolio,signal.target);
+    const previous={...this.state},previousTargetWeights={...(this.browserNotificationTargetWeights||{})},signal=baseStep.call(this,date,market,portfolio),policy=browserNotificationPolicy(this.def),ctx=this.context(market,portfolio,signal.target);
     const stateChanges=Object.keys(this.state).filter(name=>previous[name]!==this.state[name]).map(name=>({name,previous:previous[name],current:this.state[name]}));
     const prealerts=(policy.prealerts||[]).map(rule=>({id:String(rule.id),message:String(rule.message),matched:Boolean(evaluate(rule.when,ctx)),reset:Boolean(evaluate(rule.reset_when,ctx))})).filter(item=>item.matched||item.reset);
-    const context=stateChanges.length||prealerts.length?{date,state_values:{...this.state},state_changes:stateChanges,notification_policy:policy,prealerts}:null;
+    const targetWeights={...(signal.target||{})},targetChanged=Object.keys(previousTargetWeights).length>0&&![...new Set([...Object.keys(previousTargetWeights),...Object.keys(targetWeights)])].every(ticker=>Math.abs(Number(previousTargetWeights[ticker]||0)-Number(targetWeights[ticker]||0))<=1e-12);
+    const context=stateChanges.length||prealerts.length?{date,state_values:{...this.state},state_changes:stateChanges,notification_policy:policy,prealerts,current_weights:{...(ctx.portfolio?.weight||{})},previous_target_weights:previousTargetWeights,target_weights:targetWeights,target_changed:targetChanged,rebalance_required:Boolean(signal.rebalance),execution_days:Number(signal.days||1)}:null;
+    this.browserNotificationTargetWeights=targetWeights;
     latestBrowserNotificationContext=context;
     return context?{...signal,notificationContext:context}:signal;
   }
@@ -194,11 +196,19 @@ function browserNotificationEvents(history){
       const configured=states[change.name];
       let alert=null;
       if(configured&&Object.prototype.hasOwnProperty.call(configured,'alerts')){
-        alert=(configured.alerts||[]).find(item=>String(item.to)===String(change.current)&&(!Object.prototype.hasOwnProperty.call(item,'from')||String(item.from)===String(change.previous)));
+          alert=(configured.alerts||[]).find(item=>
+            String(item.on||'changed')==='changed'
+            &&(Array.isArray(item.to)?item.to:[item.to]).some(value=>String(value)===String(change.current))
+            &&(!Object.prototype.hasOwnProperty.call(item,'from')||String(item.from)===String(change.previous))
+          );
         if(!alert)continue;
       }else if(!configured&&change.name!=='defense_mode'&&!(['trend_mode','market_mode'].includes(change.name)&&[change.previous,change.current].some(value=>['BEAR','RECOVERY'].includes(String(value)))))continue;
       const transition=`${configured?.label||change.name}: ${change.previous} → ${change.current}`;
-      result.stateChanges.push({row,text:alert?.message?`${transition}<br>${alert.message}`:transition});
+      const formatWeights=weights=>Object.entries(weights||{}).map(([ticker,weight])=>`${ticker} ${(Number(weight)*100).toFixed(1)}%`).join(' / ');
+      const targetChange=context.target_changed&&context.rebalance_required&&Object.keys(context.previous_target_weights||{}).length
+        ? `<br>목표 비중<br>${formatWeights(context.previous_target_weights)}<br>→ ${formatWeights(context.target_weights)}<br>현재 비중<br>${formatWeights(context.current_weights)}<br>실행 예정: 다음 거래일 시가부터 ${context.execution_days||1}일`
+        : '';
+      result.stateChanges.push({row,text:`${alert?.message?`${transition}<br>${alert.message}`:transition}${targetChange}`});
     }
     for(const rule of context.prealerts||[]){
       if(rule.reset)armed.delete(rule.id);
@@ -664,8 +674,8 @@ renderIndicators=async function(){
 // Imported strategies use this single preparation path: download, calculate,
 // validate and cache. It intentionally sits after the dashboard compatibility
 // wrappers above, so existing chart behavior is left unchanged.
-const BROWSER_ENGINE_VERSION = '2026-09-12.1';
-const NOTIFICATION_CONTEXT_VERSION = 1;
+const BROWSER_ENGINE_VERSION = '2026-09-13.1';
+const NOTIFICATION_CONTEXT_VERSION = 3;
 const FX_TICKER_BY_SUFFIX = {'.KS': 'KRW=X', '.KQ': 'KRW=X'};
 const TDF2050_PROXY_COMPONENT_WEIGHTS = {SPY:.4081,VXUS:.3339,BND:.258};
 const KRW_ADJUSTED_SUFFIX = '_KRW';
@@ -828,7 +838,12 @@ runWithData=function(def,data,availableDefinitions=definitions,options={}){
   const validation=validateStrategy(def,availableDefinitions),calculation=validation.calculation;
   if(calculation.valuation?.signal_currency==='LOCAL')return runWithMixedValuation(def,data,availableDefinitions);
   const all=Object.fromEntries(availableDefinitions.map(item=>[item.strategy.id,item]));all[def.strategy.id]=def;
-  const holdings=strategyHoldingTickers(def,availableDefinitions),removeFx=calculation.valuation?.currency==='USD'?true:calculation.valuation?false:(options.removeFx??true),optional=rotationOptionalTickers(def,availableDefinitions);
+  const holdings=strategyHoldingTickers(def,availableDefinitions);
+  const mappedToKrwProducts=Boolean(def.source)&&holdings.length>0&&holdings.every(ticker=>/\.(KS|KQ)$/i.test(String(ticker)));
+  // Product strategies execute in the account's native currency.  Their
+  // source signals still use the source market, while target_deviation() sees
+  // the aggregated KRW market values of the mapped products.
+  const removeFx=mappedToKrwProducts?false:calculation.valuation?.currency==='USD'?true:calculation.valuation?false:(options.removeFx??true),optional=rotationOptionalTickers(def,availableDefinitions);
   const valued=applyValuationData(calculation,data),rows=recordsFor(validation.tickers,valued,optional).filter(row=>validation.tickers.every(ticker=>optional.has(ticker)||[...(validation.fields[ticker]||[])].every(field=>Number.isFinite(Number(row.market[ticker]?.[field])))));
   if(!rows.length)throw Error('지표 초기 계산 구간 이후에 공통 거래일이 남아 있지 않습니다.');
   const runtime=resolve(def,all,removeFx),portfolio=new Portfolio();
@@ -2027,12 +2042,12 @@ renderIndicators=async function(){
     prealerts:contextual.prealerts.filter(item=>visible(item.row)),
   };
   indicatorNotificationTooltipByDate=new Map();
-  for(const [kind,label] of [['stateChanges','\uc0c1\ud0dc \ubcc0\uacbd'],['prealerts','\uc0ac\uc804 \uacbd\uace0']]){
+  for(const kind of ['stateChanges','prealerts']){
     for(const item of stableIndicatorEvents[kind]){
       const date=String(item.row?.date||item.date||'').slice(0,10);
       if(!date)continue;
       const notes=indicatorNotificationTooltipByDate.get(date)||[];
-      notes.push({label,text:String(item.text||label)});
+      notes.push({text:String(item.text||'\uc54c\ub9bc')});
       indicatorNotificationTooltipByDate.set(date,notes);
     }
   }
@@ -2152,7 +2167,7 @@ bindChartTooltip=function(plotId,kind){
     section.style.width=`${Math.ceil(grid.getBoundingClientRect().width)}px`;
     section.innerHTML=[
       '<div class="research-custom-tooltip-separator research-notification-tooltip-separator"></div>',
-      ...notes.map(note=>`<div class="research-notification-tooltip-note"><strong>${escape(note.label)}</strong><span>${escape(fullMessage(note.text))}</span></div>`),
+      ...notes.map(note=>`<div class="research-notification-tooltip-note research-notification-tooltip-note-unlabeled"><span>${escape(fullMessage(note.text))}</span></div>`),
     ].join('');
     grid.insertAdjacentElement('afterend',section);
   };

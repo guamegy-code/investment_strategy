@@ -204,11 +204,24 @@ test('initial indicator render waits for notification context when alerts are se
 });
 
 test('notification markers bypass legacy result caches and never leave an empty legend',()=>{
-  assert.match(source,/const NOTIFICATION_CONTEXT_VERSION = 1/);
+  assert.match(source,/const NOTIFICATION_CONTEXT_VERSION = 3/);
   assert.match(source,/requireNotificationContext=false/);
   assert.match(source,/cached\?\.notificationContextVersion===NOTIFICATION_CONTEXT_VERSION/);
   assert.match(source,/run\(definition,\{requireNotificationContext:true\}\)/);
   assert.match(source,/if\(items\.length\)traces\.push\(\{/);
+});
+
+test('mapped Korean products use native KRW sleeve deviation and unlabeled popup notes',()=>{
+  assert.match(source,/const mappedToKrwProducts=Boolean\(def\.source\).*?\.every\(ticker=>\/\\\.\(KS\|KQ\)\$\/i/s);
+  assert.match(source,/const removeFx=mappedToKrwProducts\?false:/);
+  assert.match(source,/for\(const kind of \['stateChanges','prealerts'\]\)/);
+  assert.match(source,/research-notification-tooltip-note-unlabeled/);
+  assert.doesNotMatch(source,/notes\.push\(\{label,text:/);
+});
+
+test('state alerts distinguish committed changes from confirmation starts',()=>{
+  assert.match(source,/String\(item\.on\|\|'changed'\)==='changed'/);
+  assert.match(source,/Array\.isArray\(item\.to\)\?item\.to:\[item\.to\]/);
 });
 
 test('all charts compress non-trading dates with one shared rangebreak list',()=>{

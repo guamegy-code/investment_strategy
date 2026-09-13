@@ -106,6 +106,19 @@ class Strategy26RetirementValuationDefenseTests(unittest.TestCase):
         self.assertEqual(signal["target"], {
             "QQQ": 0.0, "TDF2050_PROXY": 0.0, "BIL": 1.0,
         })
+        context = strategy.notification_context
+        self.assertIn({
+            "name": "structural_bear_mode", "previous": "FALSE", "current": "TRUE",
+        }, context["state_changes"])
+        self.assertEqual(context["previous_target_weights"], {
+            "QQQ": 0.30, "TDF2050_PROXY": 0.0, "BIL": 0.70,
+        })
+        self.assertEqual(context["target_weights"], {
+            "QQQ": 0.0, "TDF2050_PROXY": 0.0, "BIL": 1.0,
+        })
+        self.assertTrue(context["target_changed"])
+        self.assertTrue(context["rebalance_required"])
+        self.assertFalse(context["prealerts"][0]["matched"])
 
     def test_non_extreme_warning_requires_six_days(self):
         strategy = self.strategy()

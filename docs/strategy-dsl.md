@@ -71,9 +71,10 @@ execution:
 | `notifications` | `weekly` | 주간 시장 브리핑 생성 여부, 기본값 `true` | 아니요 |
 | `notifications` | `states` | 메시지에 표시하고 상태 전환을 감시할 상태 설정 | 아니요 |
 | `notifications.states.<이름>` | `label` | 상태의 표시 이름 | 예 |
-| `notifications.states.<이름>` | `alerts` | 즉시 알릴 상태 전환 규칙. 생략하면 모든 전환을 알림 | 아니요 |
+| `notifications.states.<이름>` | `alerts` | 상태 변경 또는 확인 시작을 알릴 규칙. 생략하면 모든 상태 변경을 알림 | 아니요 |
+| `notifications.states.<이름>.alerts[]` | `on` | 알림 시점. `changed` 또는 `confirmation_started`, 기본값 `changed` | 아니요 |
 | `notifications.states.<이름>.alerts[]` | `from` | 전환 전 상태. 생략하면 모든 출발 상태에 적용 | 아니요 |
-| `notifications.states.<이름>.alerts[]` | `to` | 전환 후 상태 | 예 |
+| `notifications.states.<이름>.alerts[]` | `to` | 목표 상태 또는 목표 상태 목록 | 예 |
 | `notifications.states.<이름>.alerts[]` | `message` | 전환 정보 뒤에 붙일 상세 설명 | 아니요 |
 | `notifications` | `variables` | 메시지에 표시할 계산 변수 설정 | 아니요 |
 | `notifications.variables.<이름>` | `label` | 계산 변수의 표시 이름 | 예 |
@@ -85,9 +86,6 @@ execution:
 | `notifications.market[]` | `label` | 시장 지표의 표시 이름 | 예 |
 | `notifications.market[]` | `format` | `number`, `price`, `percent`, `ratio_percent` 중 표시 형식 | 아니요 |
 | `notifications.market[]` | `decimals` | 표시할 소수점 자릿수, 기본값 `1` | 아니요 |
-| `notifications` | `confirmation_alerts` | 연속 확인 시작을 즉시 알릴 상태값 목록 | 아니요 |
-| `notifications.confirmation_alerts[]` | `state` | 확인 진행을 감시할 상태 이름 | 예 |
-| `notifications.confirmation_alerts[]` | `values` | 확인 시작을 알릴 목표 상태값 목록 | 예 |
 | `notifications` | `prealerts` | 상태 전환과 독립적인 사전주의 규칙 목록 | 아니요 |
 | `notifications.prealerts[]` | `id` | 중복 억제 상태를 구분하는 고유 ID | 예 |
 | `notifications.prealerts[]` | `when` | 사전주의를 발생시킬 DSL 조건 | 예 |
@@ -420,15 +418,21 @@ notifications:
     risk_regime:
       label: 위험 국면
       alerts:
-        - {from: NORMAL, to: DEFENSIVE, message: 방어 조건이 확인되었습니다}
-        - {from: DEFENSIVE, to: RECOVERY, message: 회복 조건이 확인되었습니다}
+        - on: confirmation_started
+          to: [DEFENSIVE, RECOVERY]
+        - on: changed
+          from: NORMAL
+          to: DEFENSIVE
+          message: 방어 조건이 확인되었습니다
+        - on: changed
+          from: DEFENSIVE
+          to: RECOVERY
+          message: 회복 조건이 확인되었습니다
   variables:
     signal_count: {label: 충족 신호, max: 4}
   market:
     - {ticker: VTI, field: roc1, label: 1일, format: percent}
     - {ticker: VTI, field: drawdown120, label: 120일 고점 대비, format: ratio_percent}
-  confirmation_alerts:
-    - {state: risk_regime, values: [DEFENSIVE, RECOVERY]}
   prealerts:
     - id: allocation-drift
       when: target_deviation() >= 3%
@@ -456,13 +460,20 @@ states:
   risk_regime:
     label: 위험 국면
     alerts:
-      - {from: NORMAL, to: DEFENSIVE}
-      - {from: DEFENSIVE, to: RECOVERY, message: 회복 조건이 확인되었습니다}
+      - on: changed
+        from: NORMAL
+        to: DEFENSIVE
+      - on: changed
+        from: DEFENSIVE
+        to: RECOVERY
+        message: 회복 조건이 확인되었습니다
 ```
 - `variables`: 메시지에 표시할 계산 변수다. `max`를 쓰면 `충족 신호 3/4`처럼 표시한다.
 - `market`: 메시지에 표시할 종목 지표다. 계산할 수 없는 초기 구간의 값은 생략한다.
-- `confirmation_alerts`: 상태 변경에 연속 확인일이 설정된 경우, 지정한 상태값을 향한 확인이
-  시작될 때 진행 상황을 알린다.
+- `alerts[].on`: 생략하거나 `changed`이면 상태가 실제로 변경될 때 알린다.
+  `confirmation_started`이면 `confirm`이 설정된 목표 상태를 향한 연속 확인이 시작되는
+  첫날에 알린다. 이때 `to`에는 하나의 상태값 또는 `[BEAR, RECOVERY]` 같은 상태값 목록을
+  사용할 수 있다.
 - `prealerts`: 기존 DSL 표현식으로 독립적인 사전주의 조건을 만든다. `id`별로 한 번만
   보내고 `reset_when`이 참이 된 뒤에만 다시 보낸다. 임계값의 의미는 전략마다 다르므로
   알림 DSL에 공통 실행 임계값을 따로 두지 않는다.

@@ -417,11 +417,10 @@ function notificationFixture() {
     notifications: {
       weekly: true,
       states: {
-        defense_mode: {label: "방어 상태", alerts: [{from: "NORMAL", to: "WARNING", message: "밸류에이션 급락을 추가 확인 중"}, {to: "DEFENSE", message: "방어 진입"}]},
+        defense_mode: {label: "방어 상태", alerts: [{on: "confirmation_started", to: ["DEFENSE"]}, {from: "NORMAL", to: "WARNING", message: "밸류에이션 급락을 추가 확인 중"}, {to: "DEFENSE", message: "방어 진입"}]},
       },
       variables: {risk_off_score: {label: "약세 신호", max: 1}},
       market: [{ticker: "QQQ", field: "close", label: "가격", format: "price"}],
-      confirmation_alerts: [{state: "defense_mode", values: ["DEFENSE"]}],
       prealerts: [{id: "drift", when: "target_deviation() >= 5%", reset_when: "target_deviation() < 4%", message: "목표 비중 괴리 경고"}],
     },
     rebalance: [{check: "daily", when: "target_deviation() >= 7.5%"}],
@@ -435,6 +434,28 @@ function notificationFixture() {
   }));
   return {source, dates, data: {QQQ: rows(closes), BIL: rows([100, 100, 100, 100])}};
 }
+
+test("incremental snapshots inherit states added by a strategy upgrade", () => {
+  const {source, data} = notificationFixture();
+  const seedData = Object.fromEntries(Object.entries(data).map(([ticker, rows]) => [ticker, rows.slice(0, 1)]));
+  const snapshot = strategySnapshot([source], source, seedData);
+  const upgraded = structuredClone(source);
+  upgraded.state.structural_bear_mode = {
+    initial: "FALSE",
+    rules: [{
+      when: "state.structural_bear_mode == 'FALSE' and QQQ.close < 90",
+      set: "TRUE",
+    }],
+  };
+  upgraded.notifications.states.structural_bear_mode = {label: "구조적 약세"};
+
+  const result = runStrategyIncremental([upgraded], upgraded, data, snapshot);
+
+  assert.equal(result.history[0].notificationContext.state_values.structural_bear_mode, "TRUE");
+  assert.deepEqual(result.history[0].notificationContext.state_changes.find(
+    change => change.name === "structural_bear_mode",
+  ), {name: "structural_bear_mode", previous: "FALSE", current: "TRUE"});
+});
 
 test("notification context emits selected prealerts and a detailed rebalance", () => {
   const {source, data} = notificationFixture();
@@ -452,7 +473,10 @@ test("notification context emits selected prealerts and a detailed rebalance", (
   assert.deepEqual(selected.alerts[1].confirmations, [{
     name: "defense_mode", desired: "DEFENSE", days: 1, required_days: 2,
   }]);
+  assert.match(selected.alerts[1].reason_text, /방어 상태: DEFENSE 확인 시작 \(1\/2일\)/);
   assert.deepEqual(selected.alerts[2].target_weights, {QQQ: .3, BIL: .7});
+  assert.deepEqual(selected.alerts[2].previous_target_weights, {QQQ: 1, BIL: 0});
+  assert.equal(selected.alerts[2].target_changed, true);
   assert.equal(selected.alerts[2].market.qqq.close, 80);
 });
 
@@ -464,7 +488,6 @@ test("custom notification DSL supports arbitrary state names and presentation", 
     states: {defense_mode: {label: "내 방어"}},
     variables: {risk_off_score: {label: "내 약세", max: 1}},
     market: [{ticker: "QQQ", field: "roc1", label: "하루", format: "percent"}],
-    confirmation_alerts: [],
     prealerts: [{id: "drift", when: "target_deviation() >= 5%", reset_when: "target_deviation() < 4%", message: "사용자 정의 괴리 경고"}],
   };
   const seedData = Object.fromEntries(Object.entries(data).map(([ticker, rows]) => [ticker, rows.slice(0, 1)]));
@@ -501,7 +524,41 @@ test("mapped product strategy inherits source context and reports product weight
   assert.equal(action.source_strategy_id, source.strategy.id);
   assert.deepEqual(action.state_values, {defense_mode: "DEFENSE", trend_mode: "BULL"});
   assert.deepEqual(action.target_weights, {PRODUCT_Q: .3, PRODUCT_C: .7});
+  assert.deepEqual(action.previous_target_weights, {PRODUCT_Q: 1, PRODUCT_C: 0});
+  assert.equal(action.target_changed, true);
   assert.deepEqual(action.source_target_weights, {QQQ: .3, BIL: .7});
+});
+
+test("mapped product deviation uses aggregated KRW product sleeves", () => {
+  const {source, data} = notificationFixture();
+  const mapped = {
+    strategy: {id: "notification-products-split", name: "Split products", version: 1},
+    source: source.strategy.id,
+    products: {
+      QQQ: {"PRODUCT_Q1.KS": "50%", "PRODUCT_Q2.KS": "50%"},
+      BIL: {"PRODUCT_C.KS": "100%"},
+    },
+  };
+  data.QQQ.forEach(row => { row.Open = row.High = row.Low = row.Close = 100; });
+  data["PRODUCT_Q1.KS"] = data.QQQ.map((row, index) => ({
+    ...row, Open: 100, High: index ? 150 : 100,
+    Low: 100, Close: index ? 150 : 100,
+  }));
+  data["PRODUCT_Q2.KS"] = data.QQQ.map(row => ({...row}));
+  data["PRODUCT_C.KS"] = data.BIL.map(row => ({...row}));
+  data["KRW=X"] = data.BIL.map(row => ({...row, Open: 1300, High: 1300, Low: 1300, Close: 1300}));
+  const definitions = [source, mapped];
+  const seedData = Object.fromEntries(Object.entries(data).map(([ticker, rows]) => [ticker, rows.slice(0, 1)]));
+  const snapshot = strategySnapshot(definitions, mapped, seedData);
+  const result = runStrategyIncremental(definitions, mapped, data, snapshot);
+  const context = result.history[0].notificationContext;
+
+  assert.deepEqual(context.source_current_weights, {QQQ: 1, BIL: 0});
+  assert.equal(context.target_deviation, 0);
+  assert.equal(context.rebalance_required, false);
+  assert.ok(context.current_weights["PRODUCT_Q1.KS"] > .59);
+  assert.ok(context.current_weights["PRODUCT_Q2.KS"] < .41);
+  assert.equal(context.current_weights["PRODUCT_C.KS"], 0);
 });
 
 test("notification selection suppresses allocation-neutral churn and rearms deviation warnings", () => {

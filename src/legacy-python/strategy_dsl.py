@@ -20,6 +20,32 @@ from typing import Any
 import yaml
 
 
+class _StrategyYamlLoader(yaml.SafeLoader):
+    """Safe YAML loader with YAML 1.2-style boolean words.
+
+    PyYAML's default YAML 1.1 resolver treats the DSL key ``on`` as boolean
+    true.  The DSL documents use ``on: changed`` naturally, so only literal
+    true/false values should resolve as booleans.
+    """
+
+
+_StrategyYamlLoader.yaml_implicit_resolvers = deepcopy(
+    yaml.SafeLoader.yaml_implicit_resolvers
+)
+for _resolver_key, _resolver_entries in list(
+    _StrategyYamlLoader.yaml_implicit_resolvers.items()
+):
+    _StrategyYamlLoader.yaml_implicit_resolvers[_resolver_key] = [
+        entry for entry in _resolver_entries
+        if entry[0] != "tag:yaml.org,2002:bool"
+    ]
+_StrategyYamlLoader.add_implicit_resolver(
+    "tag:yaml.org,2002:bool",
+    re.compile(r"^(?:true|True|TRUE|false|False|FALSE)$"),
+    list("tTfF"),
+)
+
+
 class StrategyDefinitionError(ValueError):
     """Raised when a declarative strategy is invalid."""
 
@@ -348,7 +374,7 @@ def _reject_unknown(
     unknown = sorted(set(value) - allowed)
     if unknown:
         raise StrategyDefinitionError(
-            f"{field} contains unsupported keys: {', '.join(unknown)}"
+            f"{field} contains unsupported keys: {', '.join(map(str, unknown))}"
         )
 
 
@@ -672,7 +698,7 @@ def _validate_definition(raw: Any, source: str) -> dict[str, Any]:
         raise StrategyDefinitionError("notifications must be a mapping")
     _reject_unknown(
         notifications,
-        {"weekly", "states", "variables", "market", "confirmation_alerts", "prealerts"},
+        {"weekly", "states", "variables", "market", "prealerts"},
         "notifications",
     )
     if "weekly" in notifications and not isinstance(notifications["weekly"], bool):
@@ -694,9 +720,23 @@ def _validate_definition(raw: Any, source: str) -> dict[str, Any]:
                     raise StrategyDefinitionError(f"notifications.states.{name}.alerts must be a list")
                 for index, alert in enumerate(alerts):
                     alert = _require_mapping(alert, f"notifications.states.{name}.alerts[{index}]")
-                    _reject_unknown(alert, {"from", "to", "message"}, f"notifications.states.{name}.alerts[{index}]")
+                    _reject_unknown(alert, {"on", "from", "to", "message"}, f"notifications.states.{name}.alerts[{index}]")
                     if "to" not in alert:
                         raise StrategyDefinitionError(f"notifications.states.{name}.alerts[{index}].to is required")
+                    event = str(alert.get("on", "changed"))
+                    if event not in {"changed", "confirmation_started"}:
+                        raise StrategyDefinitionError(
+                            f"notifications.states.{name}.alerts[{index}].on must be changed or confirmation_started"
+                        )
+                    targets = alert["to"] if isinstance(alert["to"], list) else [alert["to"]]
+                    if not targets:
+                        raise StrategyDefinitionError(
+                            f"notifications.states.{name}.alerts[{index}].to must not be empty"
+                        )
+                    if event == "confirmation_started" and "from" in alert:
+                        raise StrategyDefinitionError(
+                            f"notifications.states.{name}.alerts[{index}].from is not valid for confirmation_started"
+                        )
                     if "message" in alert and not str(alert["message"]).strip():
                         raise StrategyDefinitionError(f"notifications.states.{name}.alerts[{index}].message must not be empty")
     market_notifications = notifications.get("market", [])
@@ -711,16 +751,6 @@ def _validate_definition(raw: Any, source: str) -> dict[str, Any]:
         known_tickers = {str(value) for value in required + observations}
         if str(item["ticker"]) not in known_tickers:
             raise StrategyDefinitionError(f"notifications.market[{index}].ticker is not configured")
-    confirmation_alerts = notifications.get("confirmation_alerts", [])
-    if not isinstance(confirmation_alerts, list):
-        raise StrategyDefinitionError("notifications.confirmation_alerts must be a list")
-    for index, item in enumerate(confirmation_alerts):
-        item = _require_mapping(item, f"notifications.confirmation_alerts[{index}]")
-        _reject_unknown(item, {"state", "values"}, f"notifications.confirmation_alerts[{index}]")
-        if not str(item.get("state", "")).strip() or not isinstance(item.get("values"), list) or not item["values"]:
-            raise StrategyDefinitionError(f"notifications.confirmation_alerts[{index}] requires state and values")
-        if str(item["state"]) not in state:
-            raise StrategyDefinitionError(f"notifications.confirmation_alerts[{index}].state is not defined")
     prealerts = notifications.get("prealerts", [])
     if not isinstance(prealerts, list):
         raise StrategyDefinitionError("notifications.prealerts must be a list")
@@ -737,14 +767,21 @@ def _validate_definition(raw: Any, source: str) -> dict[str, Any]:
     return definition
 
 
-def load_strategy_definition(path: str | Path) -> dict[str, Any]:
-    """Load and validate one UTF-8 YAML strategy definition."""
+def load_strategy_yaml(path: str | Path) -> dict[str, Any]:
+    """Load one UTF-8 strategy YAML file using the DSL's YAML rules."""
     source = Path(path)
     try:
         with source.open("r", encoding="utf-8") as stream:
-            raw = yaml.safe_load(stream)
+            raw = yaml.load(stream, Loader=_StrategyYamlLoader)
     except yaml.YAMLError as exc:
         raise StrategyDefinitionError(f"invalid YAML in {source}: {exc}") from exc
+    return raw
+
+
+def load_strategy_definition(path: str | Path) -> dict[str, Any]:
+    """Load and validate one UTF-8 YAML strategy definition."""
+    source = Path(path)
+    raw = load_strategy_yaml(source)
     return _validate_definition(raw, str(source))
 
 
@@ -813,6 +850,7 @@ class DeclarativeStrategy:
             for name, config in self.definition.get("state", {}).items()
         }
         self._state_candidates: dict[str, dict[str, Any]] = {}
+        self._previous_state_candidates: dict[str, dict[str, Any]] = {}
         self._last_state_periods: dict[str, Any] = {}
         self._previous_state_values = deepcopy(self._state_values)
         self._changed_state: set[str] = set()
@@ -910,6 +948,7 @@ class DeclarativeStrategy:
         self, date: Any, market: Mapping[str, Any], portfolio: Any
     ) -> None:
         self._previous_state_values = deepcopy(self._state_values)
+        self._previous_state_candidates = deepcopy(self._state_candidates)
         self._changed_state = set()
         for name, config in self.definition.get("state", {}).items():
             period = self._period(date, str(config.get("check", "daily")))
@@ -943,7 +982,11 @@ class DeclarativeStrategy:
                 self._changed_state.add(name)
                 self._state_candidates.pop(name, None)
             else:
-                self._state_candidates[name] = {"value": desired, "days": days}
+                self._state_candidates[name] = {
+                    "value": desired,
+                    "days": days,
+                    "required_days": required_days,
+                }
         self.state = self._representative_state()
 
     def _selected_target(self, market: Mapping[str, Any], portfolio: Any) -> Mapping[str, Any]:
@@ -1439,10 +1482,23 @@ class DeclarativeStrategy:
 
     def _build_notification_context(
         self, date: Any, market: Mapping[str, Any], portfolio: Any,
-        target: Mapping[str, float],
+        target: Mapping[str, float], previous_target: Mapping[str, float],
+        *, rebalance: bool, execution_days: int,
     ) -> dict[str, Any]:
         policy = self._notification_policy()
         evaluator = self._evaluator(market, portfolio, target)
+        prices = {
+            ticker: market[ticker].get("Close")
+            for ticker in self.holding_tickers
+            if ticker in market and market[ticker].get("Close") is not None
+        }
+        current_weights = portfolio.weights(prices) if prices else {}
+        target_tickers = set(previous_target) | set(target)
+        target_changed = bool(previous_target) and any(
+            abs(float(previous_target.get(ticker, 0.0)) - float(target.get(ticker, 0.0)))
+            > 1e-12
+            for ticker in target_tickers
+        )
         return {
             "date": str(date),
             "state_values": deepcopy(self._state_values),
@@ -1454,6 +1510,38 @@ class DeclarativeStrategy:
                 }
                 for name in self._changed_state
             ],
+            "confirmations": [
+                {
+                    "name": name,
+                    "desired": candidate["value"],
+                    "days": int(candidate["days"]),
+                    "required_days": int(candidate["required_days"]),
+                }
+                for name, candidate in self._state_candidates.items()
+            ],
+            "confirmation_started": [
+                {
+                    "name": name,
+                    "desired": candidate["value"],
+                    "days": int(candidate["days"]),
+                    "required_days": int(candidate["required_days"]),
+                }
+                for name, candidate in self._state_candidates.items()
+                if candidate["days"] == 1
+                and (
+                    name not in self._previous_state_candidates
+                    or self._previous_state_candidates[name].get("value")
+                    != candidate["value"]
+                )
+            ],
+            "current_weights": {
+                ticker: float(current_weights.get(ticker, 0.0)) for ticker in target
+            },
+            "previous_target_weights": deepcopy(dict(previous_target)),
+            "target_weights": deepcopy(dict(target)),
+            "target_changed": target_changed,
+            "rebalance_required": bool(rebalance),
+            "execution_days": int(execution_days),
             "notification_policy": policy,
             "prealerts": [
                 {
@@ -1467,6 +1555,7 @@ class DeclarativeStrategy:
         }
 
     def evaluate(self, date: Any, market: Mapping[str, Any], portfolio: Any) -> dict[str, Any]:
+        previous_target = deepcopy(self.target or {})
         self._calculate_variables(market, portfolio)
         self._update_state(date, market, portfolio)
         target = self._target_weights(market, portfolio)
@@ -1496,15 +1585,17 @@ class DeclarativeStrategy:
             # mix, but retaining the audit message makes that decision visible
             # to API callers and daily history consumers.
             reason = rotation_reason
-        self.target = target
+        execution_days = rule_days or self._execution_days(market, portfolio)
         self.notification_context = self._build_notification_context(
-            date, market, portfolio, target
+            date, market, portfolio, target, previous_target,
+            rebalance=rebalance, execution_days=execution_days,
         )
+        self.target = target
         self._evaluated_once = True
         return {
             "rebalance": rebalance,
             "target": target.copy(),
-            "days": rule_days or self._execution_days(market, portfolio),
+            "days": execution_days,
             "reason": reason,
         }
 
@@ -1636,6 +1727,7 @@ class ProductMappedStrategy:
             for product in self.products.get(source_asset, {source_asset: 1.0})
         ))
         self.target: dict[str, float] | None = None
+        self.notification_context: dict[str, Any] | None = None
 
     def __getattr__(self, name: str) -> Any:
         source = self.__dict__.get("source_strategy")
@@ -1701,6 +1793,31 @@ class ProductMappedStrategy:
             _require_mapping(source_signal.get("target"), "source target"),
             source_portfolio.actual_weights,
         )
+        source_context = deepcopy(
+            getattr(self.source_strategy, "notification_context", None)
+        )
+        if isinstance(source_context, dict):
+            previous_source_target = source_context.get(
+                "previous_target_weights", {}
+            )
+            previous_target = (
+                self._map_target(previous_source_target, source_portfolio.actual_weights)
+                if previous_source_target else {}
+            )
+            current_weights = {
+                ticker: float(source_portfolio.actual_weights.get(ticker, 0.0))
+                for ticker in mapped_target
+            }
+            source_context.update({
+                "mapped_products": True,
+                "source_strategy_id": self.source_strategy_id,
+                "source_current_weights": source_context.get("current_weights", {}),
+                "source_target_weights": source_context.get("target_weights", {}),
+                "current_weights": current_weights,
+                "previous_target_weights": previous_target,
+                "target_weights": deepcopy(mapped_target),
+            })
+            self.notification_context = source_context
         self.target = mapped_target
         return {
             **dict(source_signal),
