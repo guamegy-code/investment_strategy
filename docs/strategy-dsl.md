@@ -166,7 +166,9 @@ target:
 - 함수: `abs`, `min`, `max`, `sum`, `count`, `all`, `any`, `round`, `clamp`
 - 상태: `changed(state.name)`, `previous(state.name)`
 - 현재 비중: `portfolio.weight.QQQ`
-- 비중 차이: `target_deviation()` — 현재 비중과 목표 비중의 최대 차이
+- 비중 차이: `target_deviation()` — 현재 비중과 목표 비중의 최대 절대 차이
+- 자산별 방향 괴리: `weight_deviation('QQQ')` — 해당 자산의 현재 비중에서 목표
+  비중을 뺀 값. 음수는 과소비중, 양수는 과대비중이다.
 - 퍼센트 리터럴: `70%`, `-8%`
 
 시장 데이터는 `QQQ.close`, `QQQ.ema200`, `BND.roc40`처럼 참조한다. 대소문자는

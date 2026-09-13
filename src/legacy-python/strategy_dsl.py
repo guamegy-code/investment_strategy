@@ -916,6 +916,14 @@ class DeclarativeStrategy:
             "portfolio": {"weight": weights},
         }
         if target is not None:
+            def weight_deviation(ticker: Any) -> float:
+                ticker = str(ticker)
+                if ticker not in target:
+                    raise StrategyExpressionError(
+                        f"weight_deviation() target asset is unknown: {ticker}"
+                    )
+                return float(weights.get(ticker, 0.0)) - float(target[ticker])
+
             deviation = max(
                 (
                     abs(float(weights.get(ticker, 0.0)) - goal)
@@ -924,6 +932,7 @@ class DeclarativeStrategy:
                 default=0.0,
             )
             context["target_deviation"] = lambda: deviation
+            context["weight_deviation"] = weight_deviation
         return context
 
     def _evaluator(

@@ -396,6 +396,12 @@ test('visible x-axis zoom derives a new y-axis range from only visible points',(
   assert.ok(updates['yaxis.range'][1]<10);
 });
 
+test('browser DSL exposes signed per-asset weight deviation',()=>{
+  assert.match(source,/weight_deviation/);
+  assert.match(source,/weightDeviation=ticker=>/);
+  assert.match(source,/Number\(weights\[ticker\]\|\|0\)-Number\(target\[ticker\]\)/);
+});
+
 test('wheel zoom-out stops at the full x-axis range without blocking other interactions',()=>{
   const {shouldStopFullRangeWheel,bindMaxRangeWheelGuard}=extractedFullRangeWheelGuard();
   let listener,options,prevented=0,stopped=0;

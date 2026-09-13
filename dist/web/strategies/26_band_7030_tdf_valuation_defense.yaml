@@ -1,7 +1,7 @@
 strategy:
   id: band-7030-tdf-valuation-defense
   name: 70/30 TDF Valuation Defense (26) [BIL]
-  version: 1
+  version: 2
   dsl_version: 1
   enabled: true
 
@@ -276,6 +276,10 @@ notifications:
     - {ticker: QQQ, field: drawdown120, label: 120일 고점 대비, format: ratio_percent}
     - {ticker: QQQ, field: valuation_score, label: 밸류에이션, format: number}
   prealerts:
+    - id: qqq-underweight
+      when: weight_deviation('QQQ') <= -3%
+      reset_when: weight_deviation('QQQ') > -2%
+      message: QQQ 비중이 목표보다 3.0%p 이상 낮음 (매수 기준 -4.0%p)
     - id: target-deviation
       when: >
         target_deviation() >= 5%
@@ -284,9 +288,11 @@ notifications:
       message: 목표 비중 괴리가 실행 기준에 접근 (5.0%p 이상 / 실행 7.5%p)
 
 rebalance:
-  # 목표와 실제 비중의 최대 차이가 7.5%p 이상일 때만 주문한다.
+  # 기존 최대 절대 괴리 7.5%p는 유지하고, QQQ 과소비중은 -4%p에서 먼저 채운다.
   - check: daily
-    when: target_deviation() >= 7.5%
+    when: >
+      target_deviation() >= 7.5%
+      or weight_deviation('QQQ') <= -4%
 
 execution:
   # 종가 신호 다음 거래일 시가에 한 번에 목표 비중으로 이동한다.
