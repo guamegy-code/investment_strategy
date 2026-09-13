@@ -514,7 +514,7 @@ body {
   min-height: 88px;
   padding: 16px;
 }
-.research-detail-actions { display: flex; align-items: center; gap: 16px; }
+.research-detail-actions { display: flex; align-items: center; gap: 10px; }
 .research-detail-fx-toggle {
   display: flex;
   align-items: center;
@@ -522,9 +522,11 @@ body {
   padding: 0 !important;
   font-size: 13px;
   white-space: nowrap;
+  min-height: var(--research-control-height);
 }
 .research-detail-actions > .research-detail-dropdown { order: 1; }
 .research-detail-actions > .research-detail-fx-toggle { order: 2; }
+.research-detail-actions > .research-detail-select { order: 1; }
 .research-detail-select { width: min(var(--research-strategy-select-width), 100%); }
 .research-detail-actions .research-detail-dropdown { width: var(--research-strategy-select-width); max-width: 100%; }
 .research-detail-dropdown { font-size: 13px; }
@@ -627,6 +629,38 @@ body {
   margin-bottom: 2px;
   padding-top: 2px;
   border-bottom: 1px solid #e6e9ee;
+}
+.research-notification-tooltip-separator {
+  margin-top: 5px;
+  padding-top: 5px;
+}
+.research-notification-tooltip-section {
+  contain: inline-size;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+}
+.research-notification-tooltip-note {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  color: #667382;
+  line-height: 1.4;
+}
+.research-notification-tooltip-note strong {
+  display: block;
+  color: #182433;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.research-notification-tooltip-note span {
+  display: block;
+  margin-top: 3px;
+  width: 100%;
+  min-width: 0;
+  overflow: visible;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 .research-indicator-tooltip-strategy {
   display: grid;
@@ -773,6 +807,7 @@ body:has(.research-navigation-graph .nsewdrag:active) .dragcover {
 .research-detail-fx-toggle { margin: 0; }
 .research-indicator-fx-toggle label,
 .research-detail-fx-toggle label,
+label.research-indicator-fx-toggle,
 label.research-detail-fx-toggle {
   display: flex !important;
   align-items: center;
@@ -814,8 +849,52 @@ label.research-detail-fx-toggle {
 }
 .research-indicator-fx-toggle input:checked,
 .research-detail-fx-toggle input:checked { background: var(--research-primary); }
+.research-indicator-fx-toggle input:focus,
+.research-detail-fx-toggle input:focus,
+.research-indicator-fx-toggle input:focus-visible,
+.research-detail-fx-toggle input:focus-visible {
+  outline: 0 !important;
+  box-shadow: none !important;
+  border-color: var(--research-border) !important;
+}
+.research-indicator-fx-toggle:focus,
+.research-detail-fx-toggle:focus,
+.research-indicator-fx-toggle:focus-visible,
+.research-detail-fx-toggle:focus-visible,
+label.research-indicator-fx-toggle:focus,
+label.research-detail-fx-toggle:focus {
+  outline: 0 !important;
+  box-shadow: none !important;
+}
 .research-indicator-fx-toggle input:checked::before,
 .research-detail-fx-toggle input:checked::before { transform: translateX(1em); }
+.research-indicator-fx-toggle input,
+.research-detail-fx-toggle input {
+  /* Exact compact dimensions from the previous research toolbar. */
+  flex-basis: 26px;
+  width: 26px !important;
+  height: 13px !important;
+  min-height: 13px !important;
+}
+.research-indicator-fx-toggle input::before,
+.research-detail-fx-toggle input::before {
+  width: .72em;
+  height: .72em;
+  margin: .08em;
+}
+.research-indicator-fx-toggle input:checked::before,
+.research-detail-fx-toggle input:checked::before { transform: translateX(1em); }
+.research-indicator-strategy-fx-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-height: var(--research-control-height);
+  align-items: center;
+  gap: 10px;
+}
+.research-indicator-strategy-fx-row .research-indicator-fx-toggle {
+  min-height: var(--research-control-height);
+  align-items: center;
+}
 .research-indicator-inline-options {
   display: flex;
   min-height: 36px;
@@ -1144,7 +1223,7 @@ label.research-detail-fx-toggle {
 
 @media (min-width: 1101px) {
   .research-indicator-toolbar {
-    grid-template-columns: 342px minmax(420px, var(--research-strategy-select-width)) minmax(0, 1fr);
+    grid-template-columns: 342px minmax(360px, 1fr) max-content;
   }
 }
 

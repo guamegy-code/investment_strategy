@@ -3,7 +3,7 @@ strategy:
   name: Buy 3 Dip Composite Valuation 70-30 (a-b-c-d) [BIL]
   version: 2
   dsl_version: 1
-  enabled: true
+  enabled: false
 
 # 21번 전략의 하락 단계와 회복 지연 구조를 그대로 유지하면서,
 # 매월 한 번 합성 밸류에이션을 확인해 고평가 구간의 QQQ 비중을 추가로 낮춘다.

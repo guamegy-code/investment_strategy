@@ -623,14 +623,14 @@ class ResearchWebTests(unittest.TestCase):
             figure.layout.annotations[-1].y * plot_height,
             -0.235 * (520 - 96 - 78),
         )
-        self.assertEqual(figure.layout.margin.t, 117)
+        self.assertEqual(figure.layout.margin.t, 133)
         self.assertEqual(figure.layout.xaxis3.rangeselector.x, 0)
         self.assertEqual(figure.layout.xaxis3.rangeselector.xanchor, "left")
         self.assertAlmostEqual((figure.layout.legend.y - 1) * plot_height, 42)
         self.assertAlmostEqual(
             (figure.layout.xaxis3.rangeselector.y - figure.layout.legend.y)
             * plot_height - 19,
-            24,
+            40,
         )
         self.assertEqual(figure.layout.legend.entrywidth, 0.2)
         self.assertEqual(figure.layout.legend.entrywidthmode, "fraction")
@@ -757,8 +757,8 @@ class ResearchWebTests(unittest.TestCase):
         )
 
         self.assertGreaterEqual(len(figure.layout.shapes), 2)
-        self.assertEqual(figure.data[-1].name, "AlphaStrategy · 리밸런싱")
-        self.assertFalse(figure.data[-1].showlegend)
+        self.assertEqual(figure.data[-1].name, "리밸런싱")
+        self.assertTrue(figure.data[-1].showlegend)
         self.assertEqual(figure.data[-2].name, "AlphaStrategy")
         self.assertEqual(
             [round(value, 6) for value in figure.data[-2].y],
@@ -781,6 +781,7 @@ class ResearchWebTests(unittest.TestCase):
                 {"name": "BIL", "current": "30.00%", "target": None},
             ],
         )
+
         self.assertEqual(rebalance_portfolio["return"], "10.00%")
         self.assertEqual(rebalance_portfolio["assets"][0]["target"], "80.00%")
         self.assertEqual(rebalance_portfolio["assets"][1]["target"], "20.00%")
@@ -806,7 +807,7 @@ class ResearchWebTests(unittest.TestCase):
         )
         self.assertEqual(len(hidden.layout.shapes), 0)
         self.assertNotIn(
-            "AlphaStrategy · 리밸런싱",
+            "리밸런싱",
             [trace.name for trace in hidden.data],
         )
 
@@ -822,6 +823,75 @@ class ResearchWebTests(unittest.TestCase):
             "AlphaStrategy",
             [trace.name for trace in oscillator_only.data],
         )
+
+    def test_indicator_research_can_overlay_state_change_and_prealert_notifications(self):
+        result = make_result(AlphaStrategy(), [100, 110, 121])
+        result["history"]["NotificationContext"] = [
+            {
+                "notification_policy": {
+                    "states": {"mode": {"label": "시장 상태"}},
+                    "prealerts": [],
+                },
+                "state_changes": [],
+                "prealerts": [],
+            },
+            {
+                "notification_policy": {
+                    "states": {"mode": {"label": "시장 상태"}},
+                    "prealerts": [],
+                },
+                "state_changes": [{
+                    "name": "mode", "previous": "NORMAL", "current": "WARNING",
+                }],
+                "prealerts": [{
+                    "id": "drift", "message": "목표 비중 괴리 접근",
+                    "matched": True, "reset": False,
+                }],
+            },
+            {
+                "notification_policy": {
+                    "states": {"mode": {"label": "시장 상태"}},
+                    "prealerts": [],
+                },
+                "state_changes": [],
+                "prealerts": [{
+                    "id": "drift", "message": "목표 비중 괴리 접근",
+                    "matched": True, "reset": False,
+                }],
+            },
+        ]
+        figure = ResearchViewModel((result,)).indicator_figure(
+            ["QQQ"], ["Close"], overlay_strategy="AlphaStrategy",
+            overlay_options=["notifications"],
+        )
+
+        notification_trace = next(trace for trace in figure.data if trace.name == "알림")
+        self.assertEqual(len(notification_trace.x), 2)
+        self.assertIn("NORMAL → WARNING", notification_trace.text[0])
+        self.assertEqual(notification_trace.marker.color, "#9C27B0")
+        self.assertEqual(notification_trace.marker.symbol, "triangle-up")
+        self.assertEqual(notification_trace.hoverinfo, "none")
+        self.assertTrue(notification_trace.meta["notificationMarker"])
+        tooltip_data = ResearchViewModel((result,)).indicator_tooltip_data("AlphaStrategy")
+        self.assertEqual(tooltip_data["2024-01-02"]["notifications"][0]["label"], "상태 변경")
+
+    def test_indicator_notification_overlay_restores_cached_state_changes_and_legends(self):
+        result = make_result(AlphaStrategy(), [100, 110, 121])
+        result["history"]["StrategyState"] = ["NORMAL", "WARNING", "WARNING"]
+        figure = ResearchViewModel((result,)).indicator_figure(
+            ["QQQ"], ["Close"], overlay_strategy="AlphaStrategy",
+            overlay_options=["rebalances", "notifications"],
+        )
+
+        traces = {trace.name: trace for trace in figure.data}
+        self.assertEqual(
+            {"리밸런싱", "알림"} - set(traces), set()
+        )
+        self.assertEqual(len(traces["알림"].x), 1)
+        self.assertIn("NORMAL → WARNING", traces["알림"].text[0])
+        self.assertTrue(traces["리밸런싱"].showlegend)
+        self.assertTrue(traces["알림"].showlegend)
+        self.assertTrue(all(trace.uid for trace in figure.data))
 
     def test_indicator_research_can_toggle_qqq_daily_weekly_monthly_candles(self):
         index = pd.date_range("2024-01-01", periods=45, freq="D")
@@ -897,6 +967,22 @@ class ResearchWebTests(unittest.TestCase):
         self.assertLess(ranges["yaxis"][1], 120.0)
         self.assertLess(ranges["yaxis2"][1], 70.0)
 
+    def test_indicator_visible_y_range_excludes_legend_hidden_traces(self):
+        figure = {
+            "data": [
+                {"x": ["2024-01-01", "2024-01-02"], "y": [100, 240],
+                 "mode": "lines", "visible": "legendonly"},
+                {"x": ["2024-01-01", "2024-01-02"], "y": [10, 12],
+                 "mode": "lines"},
+            ]
+        }
+
+        ranges = _visible_indicator_y_ranges(
+            figure, ["2024-01-01", "2024-01-02"]
+        )
+
+        self.assertLess(ranges["yaxis"][1], 20)
+
     def test_summary_columns_use_compact_display_formats(self):
         app = create_research_app(self.results)
         grid = find_component(app.layout, "research-summary-grid")
@@ -958,7 +1044,7 @@ class ResearchWebTests(unittest.TestCase):
         app = create_research_app(self.results)
 
         self.assertEqual(app.title, "Investment Strategy Research")
-        self.assertEqual(len(app.callback_map), 21)
+        self.assertEqual(len(app.callback_map), 22)
         strategy_selector = find_component(app.layout, "research-strategies")
         self.assertTrue(strategy_selector.persistence)
         self.assertEqual(strategy_selector.persistence_type, "local")
@@ -1008,6 +1094,11 @@ class ResearchWebTests(unittest.TestCase):
         indicator_overlays = find_component(
             app.layout, "research-indicator-overlays"
         )
+        self.assertEqual(
+            [option["value"] for option in indicator_overlays.options],
+            ["states", "rebalances", "notifications"],
+        )
+        self.assertEqual(indicator_overlays.value, ["states", "rebalances"])
         self.assertEqual(indicator_overlays.style, {"display": "none"})
         self.assertIsNotNone(find_component(
             app.layout, "research-indicator-overlay-hint"
@@ -1042,6 +1133,17 @@ class ResearchWebTests(unittest.TestCase):
         self.assertTrue(detail_fx.persistence)
         self.assertEqual(indicator_fx.value, [])
         self.assertTrue(indicator_fx.persistence)
+        strategy_fx_row = find_component_by_class(
+            app.layout, "research-indicator-strategy-fx-row"
+        )
+        self.assertIs(
+            find_component(strategy_fx_row, "research-indicator-strategy"),
+            find_component(app.layout, "research-indicator-strategy"),
+        )
+        self.assertIs(
+            find_component(strategy_fx_row, "research-indicator-remove-fx"),
+            indicator_fx,
+        )
         self.assertIsNotNone(find_component(app.layout, "research-performance-tooltip"))
         self.assertIsNotNone(find_component(app.layout, "research-drawdown-tooltip"))
         self.assertIn(

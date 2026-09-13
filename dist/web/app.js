@@ -5,6 +5,9 @@ let marketData = null;
 let definitions = bundle.strategies || [];
 let precomputedResults = null;
 let dashboardResults = new Map();
+let hostedManifestUrl = null;
+let hostedResultFiles = {};
+const hostedResultCache = new Map();
 const proxyUrl = bundle.data_proxy || localStorage.getItem('investment-strategy:data-proxy') || '';
 
 function bytesFromBase64(text) {
@@ -145,6 +148,76 @@ installRotation(Declarative);
 installRotationStability(Declarative);
 installRotationSuspension(Declarative);
 installFinalTargetRebalance(Declarative);
+let latestBrowserNotificationContext=null;
+function browserNotificationPolicy(definition){
+  if(definition.notifications)return definition.notifications;
+  let threshold=null;
+  for(const rule of definition.rebalance||[]){const match=String(rule.when||'').match(/target_deviation\(\)\s*>=\s*(\d+(?:\.\d+)?)%/);if(match){threshold=Number(match[1])/100;break;}}
+  const states=Object.fromEntries(Object.entries(definition.state||{}).filter(([,config])=>(config.rules||[]).length).map(([name])=>[name,{label:name}]));
+  return{states,prealerts:threshold?[{id:'target-deviation',when:`target_deviation() >= ${threshold*2/3}`,reset_when:`target_deviation() < ${threshold*8/15}`,message:`목표 비중 괴리가 ${(threshold*200/3).toFixed(1)}%p에 도달 (리밸런싱 조건 ${threshold*100}%p)`}]:[]};
+}
+async function loadHostedPrecomputedResult(strategyId){
+  if(hostedResultCache.has(strategyId))return hostedResultCache.get(strategyId);
+  const path=hostedResultFiles[strategyId];
+  if(!path||!hostedManifestUrl)return null;
+  const request=(async()=>{
+    const response=await fetch(new URL(path,hostedManifestUrl));
+    if(!response.ok)throw Error(`저장된 전략 결과를 불러오지 못했습니다: ${strategyId}`);
+    const bytes=new Uint8Array(await response.arrayBuffer());
+    const stream=new Blob([bytes],{type:'application/gzip'}).stream().pipeThrough(new DecompressionStream('gzip'));
+    return validateCalculatedHistory(JSON.parse(await new Response(stream).text()));
+  })().catch(error=>{hostedResultCache.delete(strategyId);console.warn(error);return null;});
+  hostedResultCache.set(strategyId,request);return request;
+}
+function installBrowserNotificationContext(StrategyClass){
+  const baseStep=StrategyClass.prototype.step;
+  function step(date,market,portfolio){
+    const previous={...this.state},signal=baseStep.call(this,date,market,portfolio),policy=browserNotificationPolicy(this.def),ctx=this.context(market,portfolio,signal.target);
+    const stateChanges=Object.keys(this.state).filter(name=>previous[name]!==this.state[name]).map(name=>({name,previous:previous[name],current:this.state[name]}));
+    const prealerts=(policy.prealerts||[]).map(rule=>({id:String(rule.id),message:String(rule.message),matched:Boolean(evaluate(rule.when,ctx)),reset:Boolean(evaluate(rule.reset_when,ctx))})).filter(item=>item.matched||item.reset);
+    const context=stateChanges.length||prealerts.length?{date,state_values:{...this.state},state_changes:stateChanges,notification_policy:policy,prealerts}:null;
+    latestBrowserNotificationContext=context;
+    return context?{...signal,notificationContext:context}:signal;
+  }
+  StrategyClass.prototype.step=step;
+}
+function installBrowserNotificationRecording(PortfolioClass){const baseRecord=PortfolioClass.prototype.record;PortfolioClass.prototype.record=function(...args){baseRecord.apply(this,args);if(this.history.length)this.history.at(-1).notificationContext=latestBrowserNotificationContext;};}
+function browserNotificationEvents(history){
+  const result={stateChanges:[],prealerts:[]},armed=new Set;
+  let hasContext=false;
+  for(const row of history){
+    const context=row.notificationContext;
+    if(!context)continue;
+    hasContext=true;
+    const states=context.notification_policy?.states||{};
+    for(const change of context.state_changes||[]){
+      const configured=states[change.name];
+      let alert=null;
+      if(configured&&Object.prototype.hasOwnProperty.call(configured,'alerts')){
+        alert=(configured.alerts||[]).find(item=>String(item.to)===String(change.current)&&(!Object.prototype.hasOwnProperty.call(item,'from')||String(item.from)===String(change.previous)));
+        if(!alert)continue;
+      }else if(!configured&&change.name!=='defense_mode'&&!(['trend_mode','market_mode'].includes(change.name)&&[change.previous,change.current].some(value=>['BEAR','RECOVERY'].includes(String(value)))))continue;
+      const transition=`${configured?.label||change.name}: ${change.previous} → ${change.current}`;
+      result.stateChanges.push({row,text:alert?.message?`${transition}<br>${alert.message}`:transition});
+    }
+    for(const rule of context.prealerts||[]){
+      if(rule.reset)armed.delete(rule.id);
+      if(rule.matched&&!armed.has(rule.id)){
+        result.prealerts.push({row,text:rule.message||rule.id});
+        armed.add(rule.id);
+      }
+    }
+  }
+  if(!hasContext){
+    for(let index=1;index<history.length;index++){
+      const previous=history[index-1].state,current=history[index].state;
+      if(previous&&current&&previous!==current)result.stateChanges.push({row:history[index],text:`상태: ${previous} → ${current}`});
+    }
+  }
+  return result;
+}
+installBrowserNotificationContext(Declarative);
+installBrowserNotificationRecording(Portfolio);
 function applyRotationRiskCap(def,target){
   const rotation=def.rotation,riskAssets=new Set(def.assets?.risk||[]),cap=.70;
   if(!rotation||!riskAssets.size)return {target,capped:false};
@@ -187,7 +260,7 @@ function fmtPercent(value){return `${(value*100).toFixed(2)}%`;}
 function localizeDashboard(){document.documentElement.lang='ko';document.querySelector('.research-brand-caption').textContent='퀀트 리서치';document.querySelector('.research-eyebrow').textContent='백테스트 대시보드';document.querySelector('.research-title').textContent='투자 전략 리서치';document.querySelector('.research-subtitle').textContent='전략 성과를 비교하고 종목별 지표를 분석합니다.';document.querySelector('.research-status').textContent='● 준비 완료';$('analysis-tab').textContent='성과 분석';$('indicators-tab').textContent='지표 연구';document.querySelector('#analysis-view .form-label').textContent='분석 기간';$('strategy-list').previousElementSibling.textContent='비교 전략';document.querySelector('label.btn').childNodes[0].textContent='YAML 가져오기';$('indicator-type').innerHTML='<option value="price">가격 · 추세</option><option value="oscillator">오실레이터</option><option value="risk">리스크</option>';document.querySelectorAll('.card-title').forEach((node,index)=>{const labels=['누적 수익률','낙폭 경로','전략 상세','성과 요약','지표 연구'];if(labels[index])node.textContent=labels[index];});const descriptions=[['performance-plot','동일 시작점으로 정규화한 전략별 성과'],['drawdown-plot','고점 대비 손실과 회복 구간 비교'],['detail-plot','자산 비중과 실제 리밸런싱 시점을 확인합니다.'],['summary','열을 정렬하거나 너비를 조절해 전략을 비교할 수 있습니다.'],['indicator-plot','종목과 지표를 조합해 시장 구간을 분석합니다.']];for(const [id,label] of descriptions){const card=$(id).closest('.research-card');card?.querySelector('.research-card-description')&&(card.querySelector('.research-card-description').textContent=label);}}
 const graphConfig={responsive:true,displaylogo:false,scrollZoom:true,doubleClick:'reset',showAxisDragHandles:false,showAxisRangeEntryBoxes:false,modeBarButtonsToRemove:['lasso2d','select2d','zoom2d','zoomIn2d','zoomOut2d','autoScale2d','pan2d']};
 function chartLayout(title,{slider=false,selector=true,detail=false,indicator=false}={}){const buttons=[{count:1,label:'1년',step:'year',stepmode:'backward'},{count:3,label:'3년',step:'year',stepmode:'backward'},{count:5,label:'5년',step:'year',stepmode:'backward'},{label:'전체',step:'all'}],top=selector?(indicator?154:detail?96:210):48,selectorPosition=indicator?{x:0,xanchor:'left',y:1.40}:detail?{x:1,xanchor:'right',y:1.18}:{x:0,xanchor:'left',y:1.65};return {dragmode:'pan',margin:{l:58,r:52,t:top,b:slider?78:54},paper_bgcolor:'transparent',plot_bgcolor:'transparent',hovermode:'x unified',hoverdistance:-1,spikedistance:-1,hoverlabel:{bgcolor:'rgba(255,255,255,.96)',bordercolor:'#dce1e7',font:{color:'#182433',size:12,family:'-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif'},align:'left',namelength:-1},xaxis:{type:'date',tickformat:'%Y.%m',hoverformat:'%Y.%m.%d',gridcolor:'#e7eaf0',linecolor:'#dce1e7',zeroline:false,rangeslider:{visible:slider,thickness:.09,bgcolor:'rgba(106,109,120,.06)',bordercolor:'#dce1e7',borderwidth:1},rangeselector:selector?{buttons,...selectorPosition,yanchor:'bottom',bgcolor:'rgba(106,109,120,.08)',activecolor:'rgba(41,98,255,.18)',bordercolor:'#dce1e7',borderwidth:1,font:{size:11}}:undefined},yaxis:{gridcolor:'#e7eaf0',linecolor:'#dce1e7',zeroline:false,tickformat:'.0f',ticksuffix:'%',title:{text:title==='낙폭 경로'?'낙폭 (%)':'수익률 (%)',standoff:10}},legend:{orientation:'h',y:1.02,x:0,yanchor:'bottom',entrywidth:indicator ? .2 : .5,entrywidthmode:'fraction',font:{size:12}},font:{family:'-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif',color:'#182433',size:13}};}
-function bindChartTooltip(plotId,kind){const plot=$(plotId);if(!plot||plot.dataset.tooltipBound)return;plot.dataset.tooltipBound='1';let card;const hide=()=>{if(card)card.style.display='none';};plot.on('plotly_unhover',hide);plot.on('plotly_hover',event=>{const points=event.points||[];if(!points.length)return;const date=String(points[0].x||'').slice(0,10).replaceAll('-','.');const rows=points.filter(point=>point.data?.hoverinfo!=='skip').map(point=>{const value=typeof point.y==='number'?`${point.y.toFixed(2)}%`:'';return `<div class="research-custom-tooltip-row"><span class="research-custom-tooltip-label">${point.data?.name||''}</span><strong class="research-custom-tooltip-value">${value}</strong></div>`;});const returnPoint=points.find(point=>point.data?.name==='누적 수익률')||points[0],extra=returnPoint.customdata&&kind==='detail'?`<div class="research-custom-tooltip-separator"></div><div class="research-custom-tooltip-extra">${returnPoint.customdata}</div>`:'';if(!rows.length&&!extra)return;if(!card){card=document.createElement('div');card.className='offline-chart-tooltip';document.body.append(card);}card.innerHTML=`<div class="research-custom-tooltip-card"><div class="research-custom-tooltip-date">${date}</div><div class="research-custom-tooltip-grid">${rows.join('')}</div>${extra}</div>`;card.style.display='block';const rect=plot.getBoundingClientRect(),bbox=points[0].bbox||{},x=rect.left+(bbox.x0||rect.width/2),y=rect.top+(bbox.y0||rect.height/2),above=y-rect.top>rect.height-(y-rect.top);card.style.left=`${Math.max(12,Math.min(window.innerWidth-card.offsetWidth-12,x-card.offsetWidth/2))}px`;card.style.top=`${above?Math.max(12,y-card.offsetHeight-16):Math.min(window.innerHeight-card.offsetHeight-12,y+20)}px`;});}
+function bindChartTooltip(plotId,kind){const plot=$(plotId);if(!plot||plot.dataset.tooltipBound)return;plot.dataset.tooltipBound='1';let card;const hide=()=>{if(card)card.style.display='none';};plot.on('plotly_unhover',hide);plot.on('plotly_hover',event=>{const points=event.points||[];if(!points.length)return;const dateKey=String(points[0].x||'').slice(0,10),date=dateKey.replaceAll('-','.');const rows=points.filter(point=>point.data?.hoverinfo!=='skip'&&!point.data?.meta?.excludeTooltip).map(point=>{const value=typeof point.y==='number'?`${point.y.toFixed(2)}%`:'';return `<div class="research-custom-tooltip-row"><span class="research-custom-tooltip-label">${point.data?.name||''}</span><strong class="research-custom-tooltip-value">${value}</strong></div>`;});const returnPoint=points.find(point=>point.data?.name==='누적 수익률')||points[0],extra=returnPoint.customdata&&kind==='detail'?`<div class="research-custom-tooltip-separator"></div><div class="research-custom-tooltip-extra">${returnPoint.customdata}</div>`:'',notificationNotes=kind==='indicator'?indicatorNotificationTooltipByDate.get(dateKey):null;if(!rows.length&&!extra&&!notificationNotes?.length)return;if(!card){card=document.createElement('div');card.className='offline-chart-tooltip';card.dataset.for=plotId;document.body.append(card);}card.innerHTML=`<div class="research-custom-tooltip-card"><div class="research-custom-tooltip-date">${date}</div><div class="research-custom-tooltip-grid">${rows.join('')}</div>${extra}</div>`;card.style.display='block';const rect=plot.getBoundingClientRect(),bbox=points[0].bbox||{},x=rect.left+(bbox.x0||rect.width/2),y=rect.top+(bbox.y0||rect.height/2),above=y-rect.top>rect.height-(y-rect.top);card.style.left=`${Math.max(12,Math.min(window.innerWidth-card.offsetWidth-12,x-card.offsetWidth/2))}px`;card.style.top=`${above?Math.max(12,y-card.offsetHeight-16):Math.min(window.innerHeight-card.offsetHeight-12,y+20)}px`;});}
 function selectedDefinitions(){const ids=[...document.querySelectorAll('#strategy-list input:checked')].map(input=>input.value);return definitions.filter(def=>ids.includes(def.strategy.id));}
 function visibleHistory(history){const start=$('start-date').value,end=$('end-date').value;return history.filter(row=>(!start||row.date>=start)&&(!end||row.date<=end));}
 function formatTransactionCost(value){return Number.isFinite(value)?Number(value).toFixed(6):'-';}
@@ -232,7 +305,7 @@ chartLayout=function(title,{slider=false,selector=true,separateSelector=false,le
 
 function positionTooltip(card,plot,kind,pointer){const graph=plot.getBoundingClientRect();let cx=pointer?.clientX,cy=pointer?.clientY;if(cx===undefined&&pointer?.touches?.length){cx=pointer.touches[0].clientX;cy=pointer.touches[0].clientY;}const anchorX=Number.isFinite(cx)?cx:graph.left+graph.width/2,anchorY=Number.isFinite(cy)?cy:graph.top+graph.height/2,placeLeft=anchorX>graph.left+graph.width/2,placeAbove=anchorY>graph.top+graph.height/2;let left,top;if(kind==='comparison'){left=anchorX-card.offsetWidth/2;top=placeAbove?anchorY-card.offsetHeight-18:anchorY+18;}else{left=placeLeft?anchorX-card.offsetWidth-14:anchorX+14;top=anchorY-card.offsetHeight/2;}card.style.left=`${Math.max(12,Math.min(window.innerWidth-card.offsetWidth-12,left))}px`;card.style.top=`${Math.max(12,Math.min(window.innerHeight-card.offsetHeight-12,top))}px`;}
 
-bindChartTooltip=function(plotId,kind){const plot=$(plotId);if(!plot||plot.dataset.dashTooltipBound)return;plot.dataset.dashTooltipBound='1';let card;const hide=()=>{if(card)card.style.display='none';};const checkOutside=event=>{let cx=event.clientX,cy=event.clientY;if(cx===undefined&&event.changedTouches?.length){cx=event.changedTouches[0].clientX;cy=event.changedTouches[0].clientY;}else if(cx===undefined&&event.touches?.length){cx=event.touches[0].clientX;cy=event.touches[0].clientY;}if(cx===undefined)return;const rect=plot.getBoundingClientRect();if(cx<rect.left||cx>rect.right||cy<rect.top||cy>rect.bottom)hide();};document.addEventListener('touchstart',checkOutside,{passive:true});plot.on('plotly_unhover',hide);['plotly_hover', 'plotly_click'].forEach(evt => plot.on(evt, event=>{const all=event.points||[],points=all.filter(point=>kind==='indicator'?point.data?.meta&&!point.data.meta.excludeTooltip:Boolean(point.customdata));if(!points.length)return hide();const date=String(points[0].x||points[0].customdata?.date||'').slice(0,10).replaceAll('-','.');let html;if(kind==='comparison'){const rows=points.filter(point=>point.customdata?.name).map(point=>tooltipRow(point.customdata.name,point.customdata.value));if(!rows.length)return hide();html=tooltipCard(points[0].customdata.date||date,rows);}else if(kind==='detail'){const point=points.find(item=>item.customdata?.assets);if(!point)return hide();const data=point.customdata,targets=data.assets.some(asset=>asset.target),rows=[tooltipRow('누적 수익률',data.return,null,targets),'<div class="research-custom-tooltip-separator"></div>',...data.assets.map(asset=>tooltipRow(asset.name,asset.current,asset.target,targets))];html=tooltipCard(data.date,rows,{detail:true,targets,footer:data.executionDays?`분할 체결 ${data.executionDays}거래일`:''});points.splice(0,points.length,point);}else{const panel=points[0].data.meta.panel,strategy=points.find(point=>point.data.meta.isStrategySeries)?.customdata,strategyContext=panel==='price'?strategy:null,targets=strategyContext?.assets?.some(asset=>asset.target)||false,rows=[];if(strategyContext){const state=strategyContext.state?` (${strategyContext.state})`:'';rows.push(tooltipRow(`누적 수익률${state}`,strategyContext.return,null,targets),'<div class="research-custom-tooltip-separator"></div>',...strategyContext.assets.map(asset=>tooltipRow(asset.name,asset.current,asset.target,targets)),'<div class="research-indicator-tooltip-section-separator"></div>');}rows.push(...points.filter(point=>!point.data.meta.isStrategySeries).map(point=>tooltipRow(point.data.meta.tooltipName,tooltipIndicatorValue(point),null,targets)));if(!rows.length)return hide();html=tooltipCard(date,rows,{targets,footer:strategyContext?.executionDays?`분할 체결 ${strategyContext.executionDays}거래일`:''});}if(!card){card=document.createElement('div');card.className=`offline-chart-tooltip research-chart-tooltip research-${kind}-tooltip`;document.body.append(card);}card.innerHTML=html;card.style.display='block';positionTooltip(card,plot,kind,event.event);}));};
+bindChartTooltip=function(plotId,kind){const plot=$(plotId);if(!plot||plot.dataset.dashTooltipBound)return;plot.dataset.dashTooltipBound='1';let card;const hide=()=>{if(card)card.style.display='none';};const checkOutside=event=>{let cx=event.clientX,cy=event.clientY;if(cx===undefined&&event.changedTouches?.length){cx=event.changedTouches[0].clientX;cy=event.changedTouches[0].clientY;}else if(cx===undefined&&event.touches?.length){cx=event.touches[0].clientX;cy=event.touches[0].clientY;}if(cx===undefined)return;const rect=plot.getBoundingClientRect();if(cx<rect.left||cx>rect.right||cy<rect.top||cy>rect.bottom)hide();};document.addEventListener('touchstart',checkOutside,{passive:true});plot.on('plotly_unhover',hide);['plotly_hover', 'plotly_click'].forEach(evt => plot.on(evt, event=>{const all=event.points||[],points=all.filter(point=>kind==='indicator'?point.data?.meta&&!point.data.meta.excludeTooltip:Boolean(point.customdata));if(!points.length)return hide();const date=String(points[0].x||points[0].customdata?.date||'').slice(0,10).replaceAll('-','.');let html;if(kind==='comparison'){const rows=points.filter(point=>point.customdata?.name).map(point=>tooltipRow(point.customdata.name,point.customdata.value));if(!rows.length)return hide();html=tooltipCard(points[0].customdata.date||date,rows);}else if(kind==='detail'){const point=points.find(item=>item.customdata?.assets);if(!point)return hide();const data=point.customdata,targets=data.assets.some(asset=>asset.target),rows=[tooltipRow('누적 수익률',data.return,null,targets),'<div class="research-custom-tooltip-separator"></div>',...data.assets.map(asset=>tooltipRow(asset.name,asset.current,asset.target,targets))];html=tooltipCard(data.date,rows,{detail:true,targets,footer:data.executionDays?`분할 체결 ${data.executionDays}거래일`:''});points.splice(0,points.length,point);}else{const panel=points[0].data.meta.panel,strategy=points.find(point=>point.data.meta.isStrategySeries)?.customdata,strategyContext=panel==='price'?strategy:null,targets=strategyContext?.assets?.some(asset=>asset.target)||false,rows=[];if(strategyContext){const state=strategyContext.state?` (${strategyContext.state})`:'';rows.push(tooltipRow(`누적 수익률${state}`,strategyContext.return,null,targets),'<div class="research-custom-tooltip-separator"></div>',...strategyContext.assets.map(asset=>tooltipRow(asset.name,asset.current,asset.target,targets)),'<div class="research-indicator-tooltip-section-separator"></div>');}rows.push(...points.filter(point=>!point.data.meta.isStrategySeries).map(point=>tooltipRow(point.data.meta.tooltipName,tooltipIndicatorValue(point),null,targets)));if(!rows.length)return hide();html=tooltipCard(date,rows,{targets,footer:strategyContext?.executionDays?`분할 체결 ${strategyContext.executionDays}거래일`:''});}if(!card){card=document.createElement('div');card.className=`offline-chart-tooltip research-chart-tooltip research-${kind}-tooltip`;card.dataset.for=plotId;document.body.append(card);}card.innerHTML=html;card.style.display='block';positionTooltip(card,plot,kind,event.event);}));};
 
 function detailTooltipPayload(history,returns,tickers){return history.map((row,index)=>{const target=row.target&&typeof row.target==='object'?row.target:null,preWeights=row.preWeights&&typeof row.preWeights==='object'?row.preWeights:null;return {date:row.date.replaceAll('-','.'),return:percentText(returns[index]),assets:tickers.map(ticker=>({name:ticker,current:percentText(((preWeights||row.weights||{})[ticker]||0)*100),target:target?percentText((target[ticker]||0)*100):null})),executionDays:target?row.executionDays:null,state:row.state||''};});}
 
@@ -286,7 +359,7 @@ function scheduleDashboardRun(){
   dashboardRunTimer=setTimeout(()=>{
     dashboardRunTimer=null;
     void runDashboard(revision);
-  },1000);
+  },80);
 }
 function clearDashboardVisuals(){
   dashboardResults=new Map();
@@ -315,7 +388,9 @@ runDashboard=async function(requestedRevision){
     }
     const cached=bundle.precomputed_results_currency==='KRW'?await loadPrecomputedResults():{};
     const settled=await Promise.allSettled(selected.map(async def=>{
-      const saved=cached[def.strategy.id]||[];
+      const current=dashboardResults.get(def.strategy.id);
+      if(current)return current;
+      const saved=cached[def.strategy.id]||await loadHostedPrecomputedResult(def.strategy.id)||[];
       return [def,saved.length?saved:await run(def)];
     }));
     if(revision!==dashboardRunRevision)return false;
@@ -398,7 +473,7 @@ const statefulIndicatorControls=setupIndicatorControls;
 setupIndicatorControls=function(){const state=loadUiState(),type=$('indicator-type');if(state.indicatorType&&[...type.options].some(option=>option.value===state.indicatorType))type.value=state.indicatorType;statefulIndicatorControls();const strategy=$('indicator-strategy');if(Object.hasOwn(state,'indicatorStrategy')&&[...strategy.options].some(option=>option.value===state.indicatorStrategy))strategy.value=state.indicatorStrategy;if(state.indicatorStart)$('indicator-start-date').value=state.indicatorStart;if(state.indicatorEnd)$('indicator-end-date').value=state.indicatorEnd;if(Array.isArray(state.indicatorOverlays))for(const input of $('indicator-overlays').querySelectorAll('input'))input.checked=state.indicatorOverlays.includes(input.value);strategy.onchange=async()=>{saveUiState();await renderIndicators();};for(const input of [$('indicator-start-date'),$('indicator-end-date'),$('indicator-overlays')])input.addEventListener('change',saveUiState);$('indicator-panel-tabs').addEventListener('click',()=>setTimeout(saveUiState));$('indicator-matrix').addEventListener('change',()=>setTimeout(saveUiState));};
 const viewRestoringDashboardSetup=setupDashboard;
 setupDashboard=async function(){const restoreIndicators=loadUiState().activeView==='indicators';if(restoreIndicators){$('analysis-view').classList.add('offline-hidden');$('indicators-view').classList.remove('offline-hidden');$('analysis-tab').classList.remove('active');$('indicators-tab').classList.add('active');}await viewRestoringDashboardSetup();const analysisTab=$('analysis-tab'),indicatorsTab=$('indicators-tab'),showAnalysis=analysisTab.onclick,showIndicators=indicatorsTab.onclick;analysisTab.onclick=()=>{showAnalysis();saveUiState('analysis');};indicatorsTab.onclick=async()=>{await showIndicators();saveUiState('indicators');};if(restoreIndicators)await indicatorsTab.onclick();};
-const productDisplayNames={'379810.KS':'KODEX 미국나스닥100','426030.KS':'TIME 미국나스닥100액티브','0015B0.KS':'KoAct 미국나스닥성장액티브','434060.KS':'KODEX TDF2050액티브','069500.KS':'KODEX 200 (069500.KS)','114100.KS':'KODEX 국고채 3년 (114100.KS)','148070.KS':'KOSEF 국고채 10년 (148070.KS)'};
+const productDisplayNames={'379810.KS':'KODEX 미국나스닥100','426030.KS':'TIME 미국나스닥100액티브','0015B0.KS':'KoAct 미국나스닥성장기업액티브','434060.KS':'KODEX TDF2050액티브 적격','488770.KS':'KODEX 머니마켓액티브','069500.KS':'KODEX 200 (069500.KS)','114100.KS':'KODEX 국고채 3년 (114100.KS)','148070.KS':'KOSEF 국고채 10년 (148070.KS)'};
 function productDetailAssets(def,tickers){const displayTickers=tickers.filter(ticker=>!Object.values(FX_TICKER_BY_SUFFIX).includes(ticker)),source=def.source?definitions.find(item=>item.strategy.id===def.source):def,required=source?.assets?.required||[],products=def.products||{},items=[],byTicker=new Map(),claimed=new Set(),hiddenAssets=new Set();for(const asset of required){const entries=Object.entries(products[asset]||((displayTickers.includes(asset))?{[asset]:1}:{})).filter(([ticker])=>displayTickers.includes(ticker)),mapped=entries.map(([ticker])=>ticker);if(mapped.some(ticker=>ticker!==asset))hiddenAssets.add(asset);for(const [ticker,share] of entries){const item=byTicker.get(ticker)||{ticker,mappings:[]};if(!byTicker.has(ticker)){byTicker.set(ticker,item);items.push(item);}item.mappings.push({asset,share});claimed.add(ticker);}}for(const ticker of displayTickers)if(!claimed.has(ticker)&&!hiddenAssets.has(ticker))items.push({ticker,mappings:[{asset:ticker,share:1}]});return items;}
 function productDetailLabel(item){const name=productDisplayNames[item.ticker]||item.ticker,mappings=item.mappings||[];if(mappings.length===1&&mappings[0].asset===item.ticker&&Math.abs(pct(mappings[0].share)-1)<1e-8)return name;return `${name} (${mappings.map(({asset,share})=>`${asset}${Math.abs(pct(share)-1)<1e-8?'':` ${percentText(pct(share)*100)}`}`).join(' · ')})`;}
 function productDetailPayload(history,returns,items){return history.map((row,index)=>{const target=row.target&&typeof row.target==='object'?row.target:null,weights=row.preWeights&&typeof row.preWeights==='object'?row.preWeights:row.weights||{};return {date:row.date.replaceAll('-','.'),return:percentText(returns[index]),assets:items.map(item=>({name:productDetailLabel(item,weights),current:percentText(Number(weights[item.ticker]||0)*100),target:target?percentText(Number(target[item.ticker]||0)*100):null})),executionDays:target?row.executionDays:null,state:row.state||''};});}
@@ -570,7 +645,7 @@ renderIndicators=async function(){
 // Imported strategies use this single preparation path: download, calculate,
 // validate and cache. It intentionally sits after the dashboard compatibility
 // wrappers above, so existing chart behavior is left unchanged.
-const BROWSER_ENGINE_VERSION = '2026-09-08.1';
+const BROWSER_ENGINE_VERSION = '2026-09-12.1';
 const FX_TICKER_BY_SUFFIX = {'.KS': 'KRW=X', '.KQ': 'KRW=X'};
 const TDF2050_PROXY_COMPONENT_WEIGHTS = {SPY:.4081,VXUS:.3339,BND:.258};
 const KRW_ADJUSTED_SUFFIX = '_KRW';
@@ -596,21 +671,23 @@ function strategyTickers(def){return strategyDependencies(def).tickers;}
 function rollingValues(values,index,period,fn){return index<period-1?NaN:fn(values.slice(index-period+1,index+1));}
 function sampleStd(values){if(values.length<2)return NaN;const mean=values.reduce((sum,value)=>sum+value,0)/values.length;return Math.sqrt(values.reduce((sum,value)=>sum+(value-mean)**2,0)/(values.length-1));}
 function emaValues(values,span){const alpha=2/(span+1),out=[];values.forEach((value,index)=>out.push(index?value*alpha+out[index-1]*(1-alpha):value));return out;}
+function rollingMeanSeries(values,period){let sum=0,finite=0;return values.map((value,index)=>{if(Number.isFinite(value)){sum+=value;finite++;}const expired=values[index-period];if(Number.isFinite(expired)){sum-=expired;finite--;}return index>=period-1&&finite===period?sum/period:NaN;});}
+function rollingStdSeries(values,period){let sum=0,squares=0,finite=0;return values.map((value,index)=>{if(Number.isFinite(value)){sum+=value;squares+=value*value;finite++;}const expired=values[index-period];if(Number.isFinite(expired)){sum-=expired;squares-=expired*expired;finite--;}if(index<period-1||finite!==period||period<2)return NaN;return Math.sqrt(Math.max(0,(squares-sum*sum/period)/(period-1)));});}
+function rollingExtremeSeries(values,period,minimum=false){const deque=[],out=Array(values.length).fill(NaN);for(let index=0;index<values.length;index++){while(deque.length&&deque[0]<=index-period)deque.shift();while(deque.length&&(minimum?values[deque.at(-1)]>=values[index]:values[deque.at(-1)]<=values[index]))deque.pop();deque.push(index);if(index>=period-1)out[index]=values[deque[0]];}return out;}
 function addStrategyIndicators(rows){
   const close=rows.map(row=>Number(row.Close)),high=rows.map(row=>Number(row.High)),low=rows.map(row=>Number(row.Low));
   const ema=Object.fromEntries([12,20,26,55,120,200].map(span=>[span,emaValues(close,span)]));
   const changes=close.map((value,index)=>index?value-close[index-1]:NaN),returns=close.map((value,index)=>index?value/close[index-1]-1:NaN);
   const tr=close.map((value,index)=>index===0?high[index]-low[index]:Math.max(high[index]-low[index],Math.abs(high[index]-close[index-1]),Math.abs(low[index]-close[index-1])));
-  const atr=tr.map((_,index)=>rollingValues(tr,index,14,items=>items.reduce((sum,value)=>sum+value,0)/14));
+  const atr=rollingMeanSeries(tr,14),means=Object.fromEntries([20,55,60,120,200].map(period=>[period,rollingMeanSeries(close,period)]));
+  const peaks=Object.fromEntries([20,60,120,252].map(period=>[period,rollingExtremeSeries(close,period)]));
   const macd=close.map((_,index)=>ema[12][index]-ema[26][index]),macdSignal=emaValues(macd,9);
-  const stochK=close.map((value,index)=>{const lowest=rollingValues(low,index,14,items=>Math.min(...items)),highest=rollingValues(high,index,14,items=>Math.max(...items));return Number.isFinite(lowest)&&highest!==lowest?(value-lowest)/(highest-lowest)*100:NaN;});
-  const drawdown252=close.map((value,index)=>{const peak=rollingValues(close,index,252,items=>Math.max(...items));return Number.isFinite(peak)?(value-peak)/peak:NaN;});
+  const lowest14=rollingExtremeSeries(low,14,true),highest14=rollingExtremeSeries(high,14),stochK=close.map((value,index)=>Number.isFinite(lowest14[index])&&highest14[index]!==lowest14[index]?(value-lowest14[index])/(highest14[index]-lowest14[index])*100:NaN),stochD=rollingMeanSeries(stochK,3);
+  const drawdown252=close.map((value,index)=>Number.isFinite(peaks[252][index])?(value-peaks[252][index])/peaks[252][index]:NaN),mdd252=rollingExtremeSeries(drawdown252,252,true);
+  const gains=changes.map(value=>Number.isFinite(value)?Math.max(value,0):NaN),losses=changes.map(value=>Number.isFinite(value)?Math.max(-value,0):NaN),avgGain=rollingMeanSeries(gains,14),avgLoss=rollingMeanSeries(losses,14),sigma20=rollingStdSeries(close,20),vol20=rollingStdSeries(returns,20),vol60=rollingStdSeries(returns,60),atr60=rollingMeanSeries(atr,60);
   rows.forEach((row,index)=>{
-    const mean=period=>rollingValues(close,index,period,items=>items.reduce((sum,value)=>sum+value,0)/period),roc=period=>index<period?NaN:(close[index]/close[index-period]-1)*100;
-    const gains=changes.slice(index-13,index+1).map(value=>Math.max(value,0)),losses=changes.slice(index-13,index+1).map(value=>Math.max(-value,0));
-    const avgGain=index<14?NaN:gains.reduce((sum,value)=>sum+value,0)/14,avgLoss=index<14?NaN:losses.reduce((sum,value)=>sum+value,0)/14;
-    const ma20=mean(20),sigma20=rollingValues(close,index,20,sampleStd);
-    Object.assign(row,{MA20:ma20,MA55:mean(55),MA120:mean(120),MA200:mean(200),EMA20:ema[20][index],EMA55:ema[55][index],EMA120:ema[120][index],EMA200:ema[200][index],RSI14:Number.isFinite(avgGain)&&Number.isFinite(avgLoss)?(avgLoss===0?100:100-100/(1+avgGain/avgLoss)):NaN,DISPARITY60:index<59?NaN:close[index]/mean(60)*100,MACD:macd[index],MACD_SIGNAL:macdSignal[index],MACD_HIST:macd[index]-macdSignal[index],STOCH_K:stochK[index],STOCH_D:rollingValues(stochK,index,3,items=>items.reduce((sum,value)=>sum+value,0)/3),ROC5:roc(5),ROC20:roc(20),ROC40:roc(40),ROC60:roc(60),ROC90:roc(90),ROC120:roc(120),ROC252:roc(252),EMA20_SLOPE5:index<5?NaN:(ema[20][index]/ema[20][index-5]-1)*100,EMA200_SLOPE20:index<20?NaN:(ema[200][index]/ema[200][index-20]-1)*100,DRAWDOWN20:index<19?NaN:close[index]/rollingValues(close,index,20,items=>Math.max(...items))-1,DRAWDOWN60:index<59?NaN:close[index]/rollingValues(close,index,60,items=>Math.max(...items))-1,DRAWDOWN120:index<119?NaN:close[index]/rollingValues(close,index,120,items=>Math.max(...items))-1,TR:tr[index],ATR:atr[index],ATR60:rollingValues(atr,index,60,items=>items.reduce((sum,value)=>sum+value,0)/60),ATR_PCT:atr[index]/close[index],BB_MIDDLE:ma20,BB_UPPER:ma20+sigma20*2,BB_LOWER:ma20-sigma20*2,VOL20:rollingValues(returns,index,20,items=>sampleStd(items)*Math.sqrt(252)),VOL60:rollingValues(returns,index,60,items=>sampleStd(items)*Math.sqrt(252)),MDD252:rollingValues(drawdown252,index,252,items=>Math.min(...items))});
+    const roc=period=>index<period?NaN:(close[index]/close[index-period]-1)*100,ma20=means[20][index];
+    Object.assign(row,{MA20:ma20,MA55:means[55][index],MA120:means[120][index],MA200:means[200][index],EMA20:ema[20][index],EMA55:ema[55][index],EMA120:ema[120][index],EMA200:ema[200][index],RSI14:Number.isFinite(avgGain[index])&&Number.isFinite(avgLoss[index])?(avgLoss[index]===0?100:100-100/(1+avgGain[index]/avgLoss[index])):NaN,DISPARITY60:index<59?NaN:close[index]/means[60][index]*100,MACD:macd[index],MACD_SIGNAL:macdSignal[index],MACD_HIST:macd[index]-macdSignal[index],STOCH_K:stochK[index],STOCH_D:stochD[index],ROC5:roc(5),ROC20:roc(20),ROC40:roc(40),ROC60:roc(60),ROC90:roc(90),ROC120:roc(120),ROC252:roc(252),EMA20_SLOPE5:index<5?NaN:(ema[20][index]/ema[20][index-5]-1)*100,EMA200_SLOPE20:index<20?NaN:(ema[200][index]/ema[200][index-20]-1)*100,DRAWDOWN20:index<19?NaN:close[index]/peaks[20][index]-1,DRAWDOWN60:index<59?NaN:close[index]/peaks[60][index]-1,DRAWDOWN120:index<119?NaN:close[index]/peaks[120][index]-1,TR:tr[index],ATR:atr[index],ATR60:atr60[index],ATR_PCT:atr[index]/close[index],BB_MIDDLE:ma20,BB_UPPER:ma20+sigma20[index]*2,BB_LOWER:ma20-sigma20[index]*2,VOL20:vol20[index]*Math.sqrt(252),VOL60:vol60[index]*Math.sqrt(252),MDD252:mdd252[index]});
   });
   return rows;
 }
@@ -625,7 +702,41 @@ async function loadCachedTickerData(data,tickers){for(const ticker of tickers)if
 function latestCachedDate(rows){return rows.reduce((latest,row)=>row.Date&&row.Date>latest?row.Date:latest,'');}
 function earliestCachedDate(rows){return rows.reduce((earliest,row)=>row.Date&&(!earliest||row.Date<earliest)?row.Date:earliest,'');}
 function mergeTickerRows(existing,incoming){const merged=new Map((existing||[]).map(row=>[row.Date,row]));for(const row of incoming)merged.set(row.Date,row);return addStrategyIndicators([...merged.values()].sort((left,right)=>left.Date.localeCompare(right.Date)));}
-async function fetchProxyTickerData(data,tickers,historyStart=null){const groups=new Map();for(const ticker of [...new Set(tickers.filter(isDataProxyTicker))]){const rows=data[ticker]||[],earliest=earliestCachedDate(rows),start=historyStart&&(!earliest||earliest>historyStart)?historyStart:latestCachedDate(rows)||'2010-01-01';(groups.get(start)||groups.set(start,[]).get(start)).push(ticker);}if(!groups.size)return;if(!proxyUrl){const unavailable=[...groups.values()].flat().filter(ticker=>!data[ticker]);if(unavailable.length)throw Error(`시장 데이터가 없습니다: ${unavailable.join(', ')}`);return;}for(const [startDate,group] of groups)for(let offset=0;offset<group.length;offset+=20){const requested=group.slice(offset,offset+20),endpoint=new URL('/prices',proxyUrl);endpoint.searchParams.set('tickers',requested.join(','));endpoint.searchParams.set('start',startDate);endpoint.searchParams.set('runtime',BROWSER_ENGINE_VERSION);try{const response=await fetch(endpoint,{cache:'no-store'}),payload=await response.json();if(!response.ok)throw Error(payload.error||'시장 데이터 다운로드에 실패했습니다.');for(const [ticker,rows] of Object.entries(payload.data||{})){const incoming=rows.map(row=>({Date:row.date,Open:row.open,High:row.high,Low:row.low,Close:row.close,Volume:row.volume,RawClose:row.raw_close??row.close,Dividends:row.dividends??0})),merged=mergeTickerRows(data[ticker],incoming);data[ticker]=merged;await saveCachedPrices(ticker,merged);}}catch(error){const unavailable=requested.filter(ticker=>!(data[ticker]||[]).length);if(unavailable.length){const message=error instanceof TypeError&&/fetch/i.test(error.message)?`데이터 프록시(${endpoint.origin})에 연결할 수 없습니다. Cloudflare Worker 배포 주소와 상태를 확인하세요.`:error instanceof Error?error.message:'시장 데이터 다운로드에 실패했습니다.';throw Error(message);}console.warn('시장 데이터 갱신이 지연되어 저장된 데이터를 사용합니다.',{tickers:requested,error:error instanceof Error?error.message:String(error)});}}}
+const proxyTickerFreshness=new Map(),proxyRequests=new Map();
+const PROXY_REFRESH_INTERVAL_MS=15*60*1000;
+async function fetchProxyTickerData(data,tickers,historyStart=null){
+  const now=Date.now(),groups=new Map();
+  for(const ticker of [...new Set(tickers.filter(isDataProxyTicker))]){
+    const rows=data[ticker]||[],earliest=earliestCachedDate(rows),requiredStart=historyStart&&(!earliest||earliest>historyStart)?historyStart:null;
+    if(!requiredStart&&rows.length&&now-(proxyTickerFreshness.get(ticker)||0)<PROXY_REFRESH_INTERVAL_MS)continue;
+    const start=requiredStart||latestCachedDate(rows)||'2010-01-01';
+    (groups.get(start)||groups.set(start,[]).get(start)).push(ticker);
+  }
+  if(!groups.size)return;
+  if(!proxyUrl){const unavailable=[...groups.values()].flat().filter(ticker=>!data[ticker]);if(unavailable.length)throw Error(`시장 데이터가 없습니다: ${unavailable.join(', ')}`);return;}
+  const batches=[];
+  for(const [startDate,group] of groups)for(let offset=0;offset<group.length;offset+=20)batches.push([startDate,group.slice(offset,offset+20)]);
+  await Promise.all(batches.map(async([startDate,requested])=>{
+    const requestKey=`${startDate}:${requested.slice().sort().join(',')}`;
+    if(proxyRequests.has(requestKey))return proxyRequests.get(requestKey);
+    const request=(async()=>{
+      const endpoint=new URL('/prices',proxyUrl);endpoint.searchParams.set('tickers',requested.join(','));endpoint.searchParams.set('start',startDate);
+      try{
+        const response=await fetch(endpoint,{cache:'default'}),payload=await response.json();
+        if(!response.ok)throw Error(payload.error||'시장 데이터 다운로드에 실패했습니다.');
+        await Promise.all(Object.entries(payload.data||{}).map(async([ticker,rows])=>{
+          const incoming=rows.map(row=>({Date:row.date,Open:row.open,High:row.high,Low:row.low,Close:row.close,Volume:row.volume,RawClose:row.raw_close??row.close,Dividends:row.dividends??0})),merged=mergeTickerRows(data[ticker],incoming);
+          data[ticker]=merged;proxyTickerFreshness.set(ticker,Date.now());await saveCachedPrices(ticker,merged);
+        }));
+      }catch(error){
+        const unavailable=requested.filter(ticker=>!(data[ticker]||[]).length);
+        if(unavailable.length){const message=error instanceof TypeError&&/fetch/i.test(error.message)?`데이터 프록시(${endpoint.origin})에 연결할 수 없습니다. Cloudflare Worker 배포 주소와 상태를 확인하세요.`:error instanceof Error?error.message:'시장 데이터 다운로드에 실패했습니다.';throw Error(message);}
+        console.warn('시장 데이터 갱신이 지연되어 저장된 데이터를 사용합니다.',{tickers:requested,error:error instanceof Error?error.message:String(error)});
+      }
+    })().finally(()=>proxyRequests.delete(requestKey));
+    proxyRequests.set(requestKey,request);return request;
+  }));
+}
 
 // 22번 전략의 네 지표 합성점수를 월말에 확정하고 다음 달부터 사용한다.
 function addCompositeValuationScore(data){
@@ -715,13 +826,15 @@ runWithMixedValuation=function(def,data,availableDefinitions=definitions){
   return validateCalculatedHistory(portfolio.history.map(row=>{const event=events.get(row.date);return event?{...row,target:event.Target,preWeights:event.PreWeights||null,executionDays:event.ExecutionDays,reason:event.Reason}:row;}));
 };
 function backgroundRun(def,data,all){
-  if(validateStrategy(def,all).calculation.valuation)return Promise.resolve(runWithData(def,data,all));
   if(!window.Worker)return Promise.resolve(runWithData(def,data,all));
   const runtime=[
     `const FX_TICKER_BY_SUFFIX=${JSON.stringify(FX_TICKER_BY_SUFFIX)};`,
     `const KRW_ADJUSTED_SUFFIX=${JSON.stringify(KRW_ADJUSTED_SUFFIX)};`,
     `const KNOWN_MARKET_FIELDS=new Set(${JSON.stringify([...KNOWN_MARKET_FIELDS])});`,
-    definitionById,tickerFxRate,krwAdjustedBaseTicker,isKrwAdjustedTicker,strategyDependencies,expressionStrings,requiredMarketFields,validateStrategy,pct,normalizeExpr,evaluate,period,recordsFor,marketRow,stateName,rotationNumber,sameRotationMix,selectRotation,rotationExplanation,installRotation,installRotationStability,installRotationSuspension,installFinalTargetRebalance,applyRotationRiskCap,installRotationRiskCap,addStrategyIndicators,applyValuationData,portfolioPrices,strategyHoldingTickers,resolve,Portfolio,Declarative,rotationOptionalTickers,validateCalculatedHistory,runWithData
+    `const SIMPLE_ROTATION_ASSET_CLASSES=${JSON.stringify(SIMPLE_ROTATION_ASSET_CLASSES)};`,
+    definitionById,tickerFxRate,krwAdjustedBaseTicker,isKrwAdjustedTicker,strategyDependencies,expressionStrings,requiredMarketFields,
+    `const simpleRotationValidator=${simpleRotationValidator.toString()};`,normalizeSimpleRotation,normalizeAutomaticValuation,validateStrategy,
+    pct,normalizeExpr,evaluate,period,recordsFor,marketRow,stateName,rotationNumber,sameRotationMix,selectRotation,rotationExplanation,installRotation,installRotationStability,installRotationSuspension,installFinalTargetRebalance,browserNotificationPolicy,installBrowserNotificationContext,installBrowserNotificationRecording,applyRotationRiskCap,installRotationRiskCap,rollingMeanSeries,rollingStdSeries,rollingExtremeSeries,emaValues,addStrategyIndicators,applyValuationData,portfolioPrices,strategyHoldingTickers,valuationWeightPortfolio,resolve,Portfolio,Declarative,rotationOptionalTickers,validateCalculatedHistory,runWithMixedValuation,runWithData
   ].map(item=>{
     if(typeof item!=='function')return item;
     const source=item.toString();
@@ -730,7 +843,7 @@ function backgroundRun(def,data,all){
     return `const ${item.name}=${source};`;
   }).join('\n');
   return new Promise((resolve,reject)=>{
-    const source=`${runtime}\ninstallRotation(Declarative);\ninstallRotationStability(Declarative);\ninstallRotationSuspension(Declarative);\ninstallFinalTargetRebalance(Declarative);\ninstallRotationRiskCap(Declarative);\nself.onmessage=event=>{try{self.postMessage({history:runWithData(event.data.def,event.data.data,event.data.all)});}catch(error){self.postMessage({error:error.message||String(error)});}};`;
+    const source=`let latestBrowserNotificationContext=null;\n${runtime}\ninstallRotation(Declarative);\ninstallRotationStability(Declarative);\ninstallRotationSuspension(Declarative);\ninstallFinalTargetRebalance(Declarative);\ninstallBrowserNotificationContext(Declarative);\ninstallBrowserNotificationRecording(Portfolio);\ninstallRotationRiskCap(Declarative);\nself.onmessage=event=>{try{self.postMessage({history:runWithData(event.data.def,event.data.data,event.data.all)});}catch(error){self.postMessage({error:error.message||String(error)});}};`;
     const url=URL.createObjectURL(new Blob([source],{type:'text/javascript'})),worker=new Worker(url);
     const finish=()=>{worker.terminate();URL.revokeObjectURL(url);};
     worker.onmessage=event=>{finish();event.data.error?reject(Error(event.data.error)):resolve(event.data.history);};
@@ -738,7 +851,7 @@ function backgroundRun(def,data,all){
     worker.postMessage({def,data,all});
   });
 }
-async function run(def){const data=await downloadMissingData(def),key=await resultKey(def,data),cached=await cachedResult(key).catch(()=>null);if(cached?.history){try{return validateCalculatedHistory(cached.history);}catch(error){console.warn('유효하지 않은 계산 캐시를 다시 계산합니다.',error);}}let history;try{history=await backgroundRun(def,data,definitions);}catch(error){console.warn('Worker calculation unavailable; using the main thread.',error);history=runWithData(def,data);}validateCalculatedHistory(history);saveCachedResult(key,{history,savedAt:new Date().toISOString()}).catch(()=>{});return history;}
+async function run(def){const data=await downloadMissingData(def),key=await resultKey(def,data),cached=await cachedResult(key).catch(()=>null);if(cached?.history){try{return validateCalculatedHistory(cached.history);}catch(error){console.warn('유효하지 않은 계산 캐시를 다시 계산합니다.',error);}}let history;try{history=await backgroundRun(def,data,definitions);}catch(error){console.warn(`Worker calculation unavailable for ${def.strategy.id}; using the main thread.`,error);history=runWithData(def,data);}validateCalculatedHistory(history);saveCachedResult(key,{history,savedAt:new Date().toISOString()}).catch(()=>{});return history;}
 globalThis.OfflineStrategyRuntime={...globalThis.OfflineStrategyRuntime,addStrategyIndicators,validateStrategy,strategyDependencies,runWithData};
 function indicatorTickerData(data){
   const visible=new Set();
@@ -842,22 +955,43 @@ localizeIndicatorView();
 async function loadHostedStrategies(){
   if(!bundle.strategy_manifest_url)return;
   const manifestUrl=new URL(bundle.strategy_manifest_url,window.location.href);
+  hostedManifestUrl=manifestUrl;
   const response=await fetch(manifestUrl);
   if(!response.ok)throw Error('기본 전략 목록을 불러오지 못했습니다.');
   const manifest=await response.json(),entries=Array.isArray(manifest)?manifest:manifest.strategies;
   if(!Array.isArray(entries))throw Error('기본 전략 목록 형식이 올바르지 않습니다.');
-  const loaded=await Promise.all(entries.map(async entry=>{
+  const hiddenStrategyIds=new Set(
+    Array.isArray(manifest)?[]:(Array.isArray(manifest.hidden_strategy_ids)?manifest.hidden_strategy_ids:[])
+  );
+  hostedResultFiles=Array.isArray(manifest)||!manifest.results?{}:manifest.results;
+  let loaded;
+  if(!Array.isArray(manifest)&&manifest.enabled_bundle){
+    const bundleResponse=await fetch(new URL(manifest.enabled_bundle,manifestUrl));
+    if(!bundleResponse.ok)throw Error('기본 전략 묶음을 불러오지 못했습니다.');
+    loaded=await bundleResponse.json();
+    if(!Array.isArray(loaded))throw Error('기본 전략 묶음 형식이 올바르지 않습니다.');
+  }else loaded=await Promise.all(entries.filter(entry=>typeof entry==='string'||entry.enabled!==false).map(async entry=>{
     const path=typeof entry==='string'?entry:entry.path;
     const yamlResponse=await fetch(new URL(path,manifestUrl));
     if(!yamlResponse.ok)throw Error(`전략 파일을 불러오지 못했습니다: ${path}`);
     const definition=parseYaml(await yamlResponse.text());
     definition._yaml_file=String(path).split(/[\\/]/).at(-1);
+    if(typeof entry==='object'&&typeof entry.enabled==='boolean'){
+      definition.strategy.enabled=entry.enabled;
+    }
+    if(hiddenStrategyIds.has(definition?.strategy?.id)){
+      definition.strategy.enabled=false;
+    }
     return definition;
   }));
   const state=loadUiState();
   const imported=(state.importedDefinitions||[])
     .map(migrateStrategyDefinition)
-    .filter(definition=>definition?.strategy?.id);
+    .filter(definition=>definition?.strategy?.id)
+    .filter(definition=>{
+      const hosted=loaded.find(item=>item?.strategy?.id===definition.strategy.id);
+      return hosted?.strategy?.enabled!==false;
+    });
   const importedIds=new Set(imported.map(definition=>definition.strategy.id));
   definitions=[...loaded.filter(definition=>!importedIds.has(definition.strategy.id)),...imported];
 }
@@ -1200,16 +1334,22 @@ Plotly.react=function(target,traces,layout,...args){
   }
   return tradingDayAxisReact(target,traces,layout,...args);
 };
+const indicatorHiddenTraceNames=new Set();
 bindVisibleYAutoscale=function(plotId){
   const plot=$(plotId);
   if(!plot||plot.dataset.visibleYAutoscaleBound)return;
   plot.dataset.visibleYAutoscaleBound='1';
-  plot.on('plotly_relayout',change=>{
-    if(!Object.keys(change||{}).some(key=>/^xaxis\d*\.(range|autorange)/.test(key)))return;
+  const rescale=()=>{
     const updates={};
     for(const yaxis of [...new Set((plot.data||[]).map(trace=>trace.yaxis||'y'))]){
       const values=[];
-      for(const trace of (plot.data||[]).filter(item=>(item.yaxis||'y')===yaxis)){
+      // Markers annotate a line; they must not participate in visible-window
+      // autoscaling when the user pans or zooms horizontally.
+      for(const [index,trace] of (plot.data||[]).entries()){
+        const visible=plot._fullData?.[index]?.visible??trace.visible;
+        if((trace.yaxis||'y')!==yaxis||visible===false||visible==='legendonly'||
+          trace.meta?.excludeFromYAutoscale||
+          (String(trace.mode||'').includes('markers')&&!String(trace.mode||'').includes('lines')))continue;
         const xaxis=trace.xaxis||'x',range=plot._fullLayout?.[axisLayoutKey(xaxis)]?.range||plot.layout?.[axisLayoutKey(xaxis)]?.range;
         if(!range?.length)continue;
         const lower=Date.parse(range[0]),upper=Date.parse(range[1]);
@@ -1223,7 +1363,19 @@ bindVisibleYAutoscale=function(plotId){
       if(values.length)updates[`${axisLayoutKey(yaxis)}.range`]=visibleAxisRange(values);
     }
     if(Object.keys(updates).length)Plotly.relayout(plot,updates);
+  };
+  plot.on('plotly_relayout',change=>{
+    if(Object.keys(change||{}).some(key=>/^xaxis\d*\.(range|autorange)/.test(key)))rescale();
   });
+  if(plotId==='indicator-plot')plot.on('plotly_legendclick',event=>{
+    const trace=event?.data?.[event.curveNumber]||event?.fullData;
+    const name=trace?.name;
+    if(!name)return;
+    const currentlyHidden=trace.visible===false||trace.visible==='legendonly';
+    if(currentlyHidden)indicatorHiddenTraceNames.delete(name);
+    else indicatorHiddenTraceNames.add(name);
+  });
+  plot.on('plotly_restyle',()=>requestAnimationFrame(rescale));
 };
 const candleDateAwareTooltip=bindChartTooltip;
 bindChartTooltip=function(plotId,kind){
@@ -1401,7 +1553,10 @@ renderIndicators=async function(){
   if(!plot?.data||window.innerWidth<=760)return;
   const {entryWidth,rows}=indicatorLegendGeometry(plot);
   // 이전 렌더링의 큰 상단 여백을 그대로 유지하지 않고 현재 행 수에 맞춰 다시 계산한다.
-  const requiredTop=Math.max(96,32+24+19*rows+42);
+  // Keep the range buttons in their own row.  Without this breathing room the
+  // first legend row reads as though it belongs to the selector.
+  const selectorLegendGap=40;
+  const requiredTop=Math.max(112,32+selectorLegendGap+19*rows+42);
   const height=Number(plot.layout.height||plot.clientHeight||450),bottom=Number(plot.layout.margin?.b||54),plotHeight=Math.max(height-requiredTop-bottom,1),legendY=1+42/plotHeight;
   const selectorAxis=Object.keys(plot.layout||{}).find(key=>/^xaxis\d*$/.test(key)&&plot.layout[key]?.rangeselector);
   const update={
@@ -1410,7 +1565,7 @@ renderIndicators=async function(){
     'legend.y':legendY,
     'margin.t':requiredTop,
   };
-  if(selectorAxis)update[`${selectorAxis}.rangeselector.y`]=legendY+(19*rows+24)/plotHeight;
+  if(selectorAxis)update[`${selectorAxis}.rangeselector.y`]=legendY+(19*rows+selectorLegendGap)/plotHeight;
   await Plotly.relayout(plot,update);
 };
 
@@ -1520,8 +1675,8 @@ async function ensureIndicatorStrategyHistory(strategyId){
     const definition=definitions.find(item=>item?.strategy?.id===strategyId);
     if(!definition)return;
     const load=(async()=>{
-      const cached=await loadPrecomputedResults();
-      const history=cached[strategyId]?.length?cached[strategyId]:await run(definition);
+      const cached=await loadPrecomputedResults(),hosted=await loadHostedPrecomputedResult(strategyId);
+      const history=cached[strategyId]?.length?cached[strategyId]:hosted?.length?hosted:await run(definition);
       if(history?.length)dashboardResults.set(strategyId,[definition,history]);
     })().finally(()=>indicatorStrategyHistoryLoads.delete(strategyId));
     indicatorStrategyHistoryLoads.set(strategyId,load);
@@ -1532,4 +1687,489 @@ const restoredIndicatorStrategyRenderer=renderIndicators;
 renderIndicators=async function(){
   await ensureIndicatorStrategyHistory(String($('indicator-strategy')?.value||''));
   return restoredIndicatorStrategyRenderer();
+};
+
+function installIndicatorNotificationControl(){
+  const overlays=$('indicator-overlays');
+  if(overlays&&!overlays.querySelector('input[value="notifications"]')){
+    const label=document.createElement('label');
+    label.innerHTML='<input type="checkbox" value="notifications">알림 표시';
+    overlays.append(label);
+  }
+  const notificationInput=overlays?.querySelector('input[value="notifications"]');
+  if(notificationInput?.closest('label')?.lastChild)notificationInput.closest('label').lastChild.textContent='알림 표시';
+  const fx=$('indicator-remove-fx');
+  if(fx){
+    const label=fx.closest('label');
+    label?.classList.remove('research-detail-fx-toggle');
+    label?.classList.add('research-indicator-fx-toggle');
+  }
+}
+installIndicatorNotificationControl();
+
+const notificationIndicatorRenderer=renderIndicators;
+renderIndicators=async function(){
+  return notificationIndicatorRenderer();
+};
+
+const indicatorEventLegendRenderer=renderIndicators;
+renderIndicators=async function(){
+  // Event legends are created only in the final Plotly.react path below.
+  // This legacy post-render pass used to add state/prealert placeholder
+  // traces again, defeating the single "알림" legend.
+  return indicatorEventLegendRenderer();
+};
+
+// Keep all event overlays on the same final rendering path.  Precomputed
+// histories do not always include execution or notification metadata, so
+// calculate the selected strategy once when an event overlay is requested.
+const definitiveIndicatorEventRenderer=renderIndicators;
+renderIndicators=async function(){
+  return definitiveIndicatorEventRenderer();
+  const selected=String($('indicator-strategy')?.value||'');
+  const definition=definitions.find(item=>item?.strategy?.id===selected);
+  const overlays=[...($('indicator-overlays')?.querySelectorAll('input:checked')||[])]
+    .map(input=>input.value);
+  const wantsEvents=overlays.includes('rebalances')||overlays.includes('notifications');
+  const existing=dashboardResults.get(selected)?.[1]||[];
+  if(definition&&wantsEvents&&(
+    (overlays.includes('rebalances')&&!existing.some(row=>row.target))||
+    (overlays.includes('notifications')&&!existing.some(row=>row.notificationContext))
+  )){
+    try{dashboardResults.set(selected,[definition,await run(definition)]);}
+    catch(error){console.warn('Unable to enrich indicator event history',error);}
+  }
+  await definitiveIndicatorEventRenderer();
+  if(!definition||!wantsEvents)return;
+
+  const plot=$('indicator-plot'),strategyTrace=(plot?.data||[])
+    .find(trace=>trace.meta?.isStrategySeries);
+  const allHistory=dashboardResults.get(selected)?.[1]||[];
+  if(!plot||!strategyTrace||!allHistory.length)return;
+  const start=$('indicator-start-date')?.value||'',end=$('indicator-end-date')?.value||'';
+  const inRange=row=>(!start||row.date>=start)&&(!end||row.date<=end);
+  const history=allHistory.filter(inRange);
+  if(!history.length)return;
+  const base=Number(history[0].value);
+  const yAtDate=new Map(history.map(row=>[row.date,Number(row.value)/base*100]));
+  const notifications=browserNotificationEvents(allHistory);
+  const labels={
+    rebalances:'\ub9ac\ubc38\ub7f0\uc2f1',
+    stateChanges:'\uc0c1\ud0dc \ubcc0\uacbd',
+    prealerts:'\uc0ac\uc804 \uacbd\uace0',
+  };
+  const definitionsByKind=[
+    ['rebalances',(allHistory.filter(row=>row.target)).filter(inRange),'diamond','#F23645',9],
+    ['stateChanges',notifications.stateChanges.filter(item=>inRange(item.row)),'triangle-up','#F23645',12],
+    ['prealerts',notifications.prealerts.filter(item=>inRange(item.row)),'triangle-down','#FF9800',12],
+  ];
+  const wanted=definitionsByKind.filter(([kind])=>
+    kind==='rebalances'?overlays.includes('rebalances'):overlays.includes('notifications')
+  );
+  const removeIndexes=(plot.data||[])
+    .map((trace,index)=>Object.values(labels).includes(trace.name)?index:-1)
+    .filter(index=>index>=0);
+  if(removeIndexes.length)await Plotly.deleteTraces(plot,removeIndexes);
+  const axis={xaxis:strategyTrace.xaxis||'x',yaxis:strategyTrace.yaxis||'y'};
+  const traces=wanted.map(([kind,items,symbol,color,size])=>{
+    const rows=kind==='rebalances'?items:items.map(item=>item.row);
+    const text=kind==='rebalances'
+      ? rows.map(()=>labels.rebalances)
+      : items.map(item=>item.text);
+    return {
+      type:'scattergl',
+      x:rows.length?rows.map(row=>row.date):[null],
+      y:rows.length?rows.map(row=>yAtDate.get(row.date)): [null],
+      name:labels[kind], showlegend:true, ...axis, mode:'markers',
+      marker:{symbol,size,color,line:{color:'#fff',width:1}},
+      text:rows.length?text:[''], meta:{excludeTooltip:true,panel:'price'},
+      hovertemplate:rows.length?`<b>${labels[kind]}</b><br>%{text}<extra></extra>`:'skip',
+      hoverinfo:rows.length?undefined:'skip',
+    };
+  });
+  if(traces.length)await Plotly['addTraces'](plot,traces);
+  if(window.innerWidth>760){
+    const {entryWidth,rows}=indicatorLegendGeometry(plot);
+    const height=Number(plot.layout.height||plot.clientHeight||700);
+    const bottom=Number(plot.layout.margin?.b||54);
+    const top=Math.max(96,32+24+19*rows+42);
+    const plotHeight=Math.max(height-top-bottom,1);
+    await Plotly.relayout(plot,{
+      'legend.entrywidth':entryWidth,
+      'legend.entrywidthmode':'pixels',
+      'legend.y':1+42/plotHeight,
+      'margin.t':top,
+    });
+  }
+};
+
+// Plotly 3 no longer exposes the rendered trace array on the graph element.
+// Build these traces from the strategy history instead of inspecting the graph
+// so legends and event markers cannot disappear on that version.
+const plotly3SafeIndicatorEventRenderer=renderIndicators;
+renderIndicators=async function(){
+  return plotly3SafeIndicatorEventRenderer();
+  await plotly3SafeIndicatorEventRenderer();
+  const selected=String($('indicator-strategy')?.value||'');
+  const definition=definitions.find(item=>item?.strategy?.id===selected);
+  const overlays=[...($('indicator-overlays')?.querySelectorAll('input:checked')||[])]
+    .map(input=>input.value);
+  if(!definition||(!overlays.includes('rebalances')&&!overlays.includes('notifications')))return;
+  let history=dashboardResults.get(selected)?.[1]||[];
+  if(!history.some(row=>row.target)||(
+    overlays.includes('notifications')&&!history.some(row=>row.notificationContext)
+  )){
+    try{
+      history=await run(definition);
+      dashboardResults.set(selected,[definition,history]);
+    }catch(error){console.warn('Unable to calculate indicator event history',error);}
+  }
+  const start=$('indicator-start-date')?.value||'',end=$('indicator-end-date')?.value||'';
+  const visible=history.filter(row=>(!start||row.date>=start)&&(!end||row.date<=end));
+  if(!visible.length)return;
+  const base=Number(visible[0].value);
+  const yAtDate=new Map(visible.map(row=>[row.date,Number(row.value)/base*100]));
+  const notifications=browserNotificationEvents(history);
+  const labels={
+    rebalances:'\ub9ac\ubc38\ub7f0\uc2f1',
+    stateChanges:'\uc0c1\ud0dc \ubcc0\uacbd',
+    prealerts:'\uc0ac\uc804 \uacbd\uace0',
+  };
+  const entries=[];
+  if(overlays.includes('rebalances')){
+    const rows=history.filter(row=>row.target&&(!start||row.date>=start)&&(!end||row.date<=end));
+    entries.push({name:labels.rebalances,rows,text:rows.map(()=>labels.rebalances),symbol:'diamond',color:'#F23645',size:9});
+  }
+  if(overlays.includes('notifications')){
+    for(const [kind,symbol,color] of [
+      ['stateChanges','triangle-up','#F23645'],
+      ['prealerts','triangle-down','#FF9800'],
+    ]){
+      const items=notifications[kind].filter(item=>(!start||item.row.date>=start)&&(!end||item.row.date<=end));
+      entries.push({name:labels[kind],rows:items.map(item=>item.row),text:items.map(item=>item.text),symbol,color,size:12});
+    }
+  }
+  const traces=entries.map(entry=>({
+    type:'scattergl',
+    x:entry.rows.length?entry.rows.map(row=>row.date):[null],
+    y:entry.rows.length?entry.rows.map(row=>yAtDate.get(row.date)):[null],
+    name:entry.name,showlegend:true,xaxis:'x',yaxis:'y',mode:'markers',
+    marker:{symbol:entry.symbol,size:entry.size,color:entry.color,line:{color:'#fff',width:1}},
+    text:entry.rows.length?entry.text:[''],meta:{excludeTooltip:true,panel:'price'},
+    hovertemplate:entry.rows.length?`<b>${entry.name}</b><br>%{text}<extra></extra>`:'skip',
+    hoverinfo:entry.rows.length?undefined:'skip',
+  }));
+  if(traces.length)await Plotly['addTraces']('indicator-plot',traces);
+};
+
+let pendingIndicatorEventOverlay=null;
+const indicatorNotificationHydrations=new Set();
+const preparedIndicatorEventRenderer=renderIndicators;
+renderIndicators=async function(){
+  const selected=String($('indicator-strategy')?.value||'');
+  const history=dashboardResults.get(selected)?.[1]||[];
+  const start=$('indicator-start-date')?.value||'',end=$('indicator-end-date')?.value||'';
+  const visible=row=>(!start||row.date>=start)&&(!end||row.date<=end);
+  const notifications=browserNotificationEvents(history);
+  pendingIndicatorEventOverlay={
+    selected,
+    rebalances:history.filter(row=>row.target&&visible(row)),
+    stateChanges:notifications.stateChanges.filter(item=>visible(item.row)),
+    prealerts:notifications.prealerts.filter(item=>visible(item.row)),
+    base:Number(history.find(visible)?.value||1),
+  };
+  const wantsNotifications=[...($('indicator-overlays')?.querySelectorAll('input:checked')||[])]
+    .some(input=>input.value==='notifications');
+  const definition=definitions.find(item=>item?.strategy?.id===selected);
+  if(wantsNotifications&&definition&&!history.some(row=>row.notificationContext)&&
+    !indicatorNotificationHydrations.has(selected)){
+    indicatorNotificationHydrations.add(selected);
+    void run(definition).then(enriched=>{
+      if(enriched?.length){
+        dashboardResults.set(selected,[definition,enriched]);
+        if(String($('indicator-strategy')?.value||'')===selected)void renderIndicators();
+      }
+    }).catch(error=>console.warn('Unable to enrich notification markers',error));
+  }
+  return preparedIndicatorEventRenderer();
+};
+
+const eventLegendPlotlyReact=Plotly.react.bind(Plotly);
+Plotly.react=function(target,traces,layout,...args){
+  const id=typeof target==='string'?target:target?.id;
+  if(id==='indicator-plot'&&pendingIndicatorEventOverlay){
+    const overlays=[...($('indicator-overlays')?.querySelectorAll('input:checked')||[])]
+      .map(input=>input.value);
+    const events=pendingIndicatorEventOverlay;
+    const strategyTrace=traces.find(trace=>trace.meta?.isStrategySeries);
+    const axis={xaxis:strategyTrace?.xaxis||'x',yaxis:strategyTrace?.yaxis||'y'};
+    const labels={
+      rebalances:'\ub9ac\ubc38\ub7f0\uc2f1',
+      stateChanges:'\uc0c1\ud0dc \ubcc0\uacbd',
+      prealerts:'\uc0ac\uc804 \uacbd\uace0',
+    };
+    const rebalanceTrace=traces.find(trace=>trace.name===labels.rebalances);
+    if(overlays.includes('rebalances')){
+      if(rebalanceTrace){
+        rebalanceTrace.showlegend=true;
+        rebalanceTrace.marker={...rebalanceTrace.marker,size:9};
+      }else{
+        const rows=events.rebalances;
+        traces.push({type:'scattergl',x:rows.length?rows.map(row=>row.date):[null],
+          y:rows.length?rows.map(row=>Number(row.value)/events.base*100):[null],
+          name:labels.rebalances,showlegend:true,...axis,mode:'markers',
+          marker:{symbol:'diamond',size:9,color:'#F23645'},hoverinfo:'skip',
+          meta:{excludeTooltip:true,panel:'price'}});
+      }
+    }
+    if(overlays.includes('notifications')){
+      for(const [kind,symbol,color] of [
+        ['stateChanges','triangle-up','#F23645'],
+        ['prealerts','triangle-down','#FF9800'],
+      ]){
+        const items=events[kind],rows=items.map(item=>item.row);
+        traces.push({type:'scattergl',x:rows.length?rows.map(row=>row.date):[null],
+          y:rows.length?rows.map(row=>Number(row.value)/events.base*100):[null],
+          name:labels[kind],showlegend:true,...axis,mode:'markers',
+          marker:{symbol,size:12,color,line:{color:'#fff',width:1}},
+          text:items.length?items.map(item=>item.text):[''],
+          hovertemplate:items.length?`<b>${labels[kind]}</b><br>%{text}<extra></extra>`:'skip',
+          hoverinfo:items.length?undefined:'skip',meta:{excludeTooltip:true,panel:'price'}});
+      }
+    }
+  }
+  return eventLegendPlotlyReact(target,traces,layout,...args);
+};
+
+// Stable final path: never block first paint on a second backtest run.  Use the
+// history already loaded for the selected strategy and inject event traces into
+// the same Plotly.react call that draws the indicator chart.
+let stableIndicatorEvents=null;
+let indicatorNotificationTooltipByDate=new Map();
+const stableIndicatorRenderer=indicatorEventLegendRenderer;
+renderIndicators=async function(){
+  const selected=String($('indicator-strategy')?.value||'');
+  const history=dashboardResults.get(selected)?.[1]||[];
+  const start=$('indicator-start-date')?.value||'',end=$('indicator-end-date')?.value||'';
+  const visible=row=>(!start||row.date>=start)&&(!end||row.date<=end);
+  const transitions=[];
+  for(let index=1;index<history.length;index++){
+    const previous=history[index-1].state,current=history[index].state;
+    if(previous&&current&&previous!==current&&visible(history[index])){
+      transitions.push({row:history[index],text:`${previous} → ${current}`});
+    }
+  }
+  const contextual=browserNotificationEvents(history);
+  stableIndicatorEvents={
+    base:Number(history.find(visible)?.value||1),
+    rebalances:history.filter(row=>row.target&&visible(row)),
+    stateChanges:contextual.stateChanges.length
+      ? contextual.stateChanges.filter(item=>visible(item.row))
+      : transitions,
+    prealerts:contextual.prealerts.filter(item=>visible(item.row)),
+  };
+  indicatorNotificationTooltipByDate=new Map();
+  for(const [kind,label] of [['stateChanges','\uc0c1\ud0dc \ubcc0\uacbd'],['prealerts','\uc0ac\uc804 \uacbd\uace0']]){
+    for(const item of stableIndicatorEvents[kind]){
+      const date=String(item.row?.date||item.date||'').slice(0,10);
+      if(!date)continue;
+      const notes=indicatorNotificationTooltipByDate.get(date)||[];
+      notes.push({label,text:String(item.text||label)});
+      indicatorNotificationTooltipByDate.set(date,notes);
+    }
+  }
+  pendingIndicatorEventOverlay=null;
+  return stableIndicatorRenderer();
+};
+
+const stableEventLegendReact=Plotly.react.bind(Plotly);
+Plotly.react=function(target,traces,layout,...args){
+  const id=typeof target==='string'?target:target?.id;
+  if(id==='indicator-plot'&&stableIndicatorEvents){
+    const plot=typeof target==='string'?$(target):target;
+    const hiddenTraceNames=new Set([
+      ...indicatorHiddenTraceNames,
+      ...(plot?.data||[])
+        .filter((trace,index)=>{
+          const visible=plot?._fullData?.[index]?.visible??trace.visible;
+          return visible===false||visible==='legendonly';
+        })
+        .map(trace=>trace.name),
+      ...[...(plot?.querySelectorAll('.legend .traces')||[])]
+        .filter(group=>Number.parseFloat(getComputedStyle(group).opacity)<.75)
+        .map(group=>group.querySelector('.legendtext')?.textContent?.trim())
+        .filter(Boolean),
+    ]);
+    const overlays=[...($('indicator-overlays')?.querySelectorAll('input:checked')||[])]
+      .map(input=>input.value);
+    const events=stableIndicatorEvents;
+    const strategyTrace=traces.find(trace=>trace.meta?.isStrategySeries);
+    const axis={xaxis:strategyTrace?.xaxis||'x',yaxis:strategyTrace?.yaxis||'y'};
+    const strategyValueAt=date=>{
+      let value=null;
+      for(let index=0;index<(strategyTrace?.x||[]).length;index++){
+        if(String(strategyTrace.x[index]).slice(0,10)>date)break;
+        value=strategyTrace.y[index];
+      }
+      return value;
+    };
+    const labels={
+      rebalances:'\ub9ac\ubc38\ub7f0\uc2f1',
+      notifications:'\uc54c\ub9bc',
+    };
+    const append=(name,items,symbol,color,size)=>traces.push({
+      type:'scattergl',x:items.length?items.map(item=>item.row?.date||item.date):[null],
+      y:items.length?items.map(item=>strategyValueAt(String(item.row?.date||item.date||'').slice(0,10))):[null],
+      name,showlegend:true,...axis,mode:'markers',
+      marker:{symbol,size,color,line:{color:'#fff',width:1}},
+      text:items.length?items.map(item=>item.text||name):[''],
+      // The marker is deliberately silent.  Its information is appended to the
+      // established crosshair tooltip below, rather than opening a second card.
+      hoverinfo:'skip',meta:{excludeTooltip:true,excludeFromYAutoscale:true,panel:'price'},
+    });
+    if(overlays.includes('rebalances')){
+      const existing=traces.find(trace=>trace.name===labels.rebalances);
+      if(existing){existing.showlegend=true;existing.marker={...existing.marker,size:9};}
+      else append(labels.rebalances,events.rebalances,'diamond','#F23645',9);
+    }
+    if(overlays.includes('notifications')){
+      const items=[
+        ...events.stateChanges.map(item=>({...item,notificationKind:'state'})),
+        ...events.prealerts.map(item=>({...item,notificationKind:'prealert'})),
+      ].sort((left,right)=>String(left.row?.date||left.date).localeCompare(String(right.row?.date||right.date)));
+      traces.push({
+        type:'scattergl',x:items.length?items.map(item=>item.row?.date||item.date):[null],
+        y:items.length?items.map(item=>strategyValueAt(String(item.row?.date||item.date||'').slice(0,10))):[null],
+        name:labels.notifications,showlegend:true,...axis,mode:'markers',
+        marker:{symbol:'triangle-up',size:12,color:'#9C27B0',line:{color:'#fff',width:1}},
+        text:items.length?items.map(item=>item.text||labels.notifications):[''],
+        customdata:items.length?items.map(item=>({
+          label:item.notificationKind==='state'?'상태 변경':'사전 경고',
+          text:item.text||labels.notifications,
+        })):[null],
+        hoverinfo:'none',meta:{excludeTooltip:true,excludeFromYAutoscale:true,notificationMarker:true,panel:'price'},
+      });
+    }
+    for(const trace of traces){
+      if(hiddenTraceNames.has(trace.name))trace.visible='legendonly';
+    }
+  }
+  return stableEventLegendReact(target,traces,layout,...args);
+};
+
+// Notification markers share the existing indicator tooltip.  Plotly's own
+// marker tooltip is disabled above so two different cards can never overlap.
+const integratedIndicatorTooltipBinder=bindChartTooltip;
+bindChartTooltip=function(plotId,kind){
+  integratedIndicatorTooltipBinder(plotId,kind);
+  if(kind!=='indicator')return;
+  const plot=$(plotId);
+  if(!plot||plot.dataset.notificationTooltipBound)return;
+  plot.dataset.notificationTooltipBound='1';
+  const appendNotificationNotes=event=>{
+    const card=document.querySelector(`.offline-chart-tooltip[data-for="${plotId}"]`);
+    const grid=card?.querySelector('.research-custom-tooltip-grid');
+    const date=card?.querySelector('.research-custom-tooltip-date')?.textContent
+      ?.trim().replaceAll('.','-');
+    // Unified hover may include the nearest notification trace even when its
+    // point belongs to another trading day.  Only the popup's exact date may
+    // contribute a notification message.
+    const notes=date?indicatorNotificationTooltipByDate.get(date):null;
+    if(!grid||!notes?.length)return;
+    const escape=value=>String(value).replace(/[&<>"']/g,char=>({
+      '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+    })[char]);
+    const fullMessage=value=>String(value||'')
+      .replace(/<br\s*\/?\s*>/gi,'\n')
+      .replace(/<[^>]*>/g,' ')
+      .replace(/\s*\(/g,'\n(')
+      .split(/\n+/)
+      .map(line=>line.replace(/\s+/g,' ').trim())
+      .filter(Boolean)
+      .join('\n');
+    card.querySelector('.research-notification-tooltip-section')?.remove();
+    const section=document.createElement('div');
+    section.className='research-notification-tooltip-section';
+    section.style.width=`${Math.ceil(grid.getBoundingClientRect().width)}px`;
+    section.innerHTML=[
+      '<div class="research-custom-tooltip-separator research-notification-tooltip-separator"></div>',
+      ...notes.map(note=>`<div class="research-notification-tooltip-note"><strong>${escape(note.label)}</strong><span>${escape(fullMessage(note.text))}</span></div>`),
+    ].join('');
+    grid.insertAdjacentElement('afterend',section);
+  };
+  plot.on('plotly_hover',appendNotificationNotes);
+  plot.on('plotly_click',appendNotificationNotes);
+};
+
+// QQQ on its own is the quick technical view, so its moving averages are
+// helpful.  Once a strategy is overlaid, however, those automatic averages
+// obscure the strategy line and event marks.  Keep only the explicitly chosen
+// price series in that combined view.
+function bindIndicatorLegendPersistence(){
+  const plot=$('indicator-plot');
+  if(!plot||plot.dataset.indicatorLegendPersistenceBound)return;
+  plot.dataset.indicatorLegendPersistenceBound='1';
+  const rescaleAfterLegendChange=()=>{
+    const traces=plot._fullData||plot.data||[],layout=plot._fullLayout||plot.layout||{},updates={};
+    for(const yaxis of [...new Set(traces.map(trace=>trace.yaxis||'y'))]){
+      const values=[];
+      for(const trace of traces){
+        if((trace.yaxis||'y')!==yaxis||trace.visible===false||trace.visible==='legendonly'||trace.meta?.excludeFromYAutoscale||(String(trace.mode||'').includes('markers')&&!String(trace.mode||'').includes('lines')))continue;
+        const range=layout[axisLayoutKey(trace.xaxis||'x')]?.range;
+        if(!range?.length)continue;
+        const lower=Date.parse(range[0]),upper=Date.parse(range[1]);
+        for(let index=0;index<(trace.x||[]).length;index++){
+          const date=Date.parse(trace.x[index]),value=Number(trace.y?.[index]);
+          if(Number.isFinite(date)&&Number.isFinite(value)&&date>=lower&&date<=upper)values.push(value);
+        }
+      }
+      if(values.length){updates[`${axisLayoutKey(yaxis)}.autorange`]=false;updates[`${axisLayoutKey(yaxis)}.range`]=visibleAxisRange(values);}
+    }
+    if(Object.keys(updates).length)Plotly.relayout(plot,updates);
+  };
+  const captureHiddenLegendItems=()=>{
+    indicatorHiddenTraceNames.clear();
+    for(const group of plot.querySelectorAll('.legend .traces')){
+      if(Number.parseFloat(getComputedStyle(group).opacity)>=.75)continue;
+      const name=group.querySelector('.legendtext')?.textContent?.trim();
+      if(name)indicatorHiddenTraceNames.add(name);
+    }
+  };
+  const overlays=$('indicator-overlays');
+  if(overlays&&!overlays.dataset.legendVisibilityCaptureBound){
+    overlays.dataset.legendVisibilityCaptureBound='1';
+    overlays.addEventListener('change',captureHiddenLegendItems,true);
+  }
+  plot.on('plotly_legendclick',event=>{
+    const trace=event?.data?.[event.curveNumber]||event?.fullData;
+    const name=trace?.name;
+    if(!name)return;
+    const currentlyHidden=trace.visible===false||trace.visible==='legendonly';
+    if(currentlyHidden)indicatorHiddenTraceNames.delete(name);
+    else indicatorHiddenTraceNames.add(name);
+    requestAnimationFrame(()=>requestAnimationFrame(rescaleAfterLegendChange));
+  });
+}
+const strategyAwareMovingAverageRenderer=renderIndicators;
+renderIndicators=async function(){
+  const selectedStrategy=String($('indicator-strategy')?.value||'');
+  const selectedTickers=new Set([...indicatorSelection].map(key=>key.split('|')[0]));
+  if(selectedStrategy&&selectedTickers.size===1&&selectedTickers.has('QQQ')){
+    let removed=false;
+    for(const field of ['MA20','MA55','MA120','MA200','EMA20','EMA55','EMA120','EMA200']){
+      removed=indicatorSelection.delete(`QQQ|${field}`)||removed;
+    }
+    if(removed){
+      const state=loadUiState();
+      localStorage.setItem(uiStateKey,JSON.stringify({...state,indicatorSelection:[...indicatorSelection]}));
+    }
+  }
+  const result=await strategyAwareMovingAverageRenderer();
+  bindIndicatorLegendPersistence();
+  const plot=$('indicator-plot');
+  const hiddenIndexes=(plot?.data||[])
+    .map((trace,index)=>indicatorHiddenTraceNames.has(trace.name)?index:-1)
+    .filter(index=>index>=0);
+  if(hiddenIndexes.length)await Plotly.restyle(plot,{visible:'legendonly'},hiddenIndexes);
+  return result;
 };

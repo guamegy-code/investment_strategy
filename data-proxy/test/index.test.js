@@ -238,6 +238,26 @@ test("error responses are never cached by the browser", async () => {
   assert.equal(result.headers.get("Cache-Control"), "no-store");
 });
 
+test("price cache ignores runtime versions and ticker order", async (context) => {
+  const originalCaches = globalThis.caches;
+  let matchedUrl = "";
+  context.after(() => { globalThis.caches = originalCaches; });
+  globalThis.caches = {default: {
+    match: async (request) => {
+      matchedUrl = request.url;
+      return Response.json({data: {}}, {headers: {"Cache-Control": "public, max-age=43200"}});
+    },
+  }};
+
+  const result = await worker.fetch(new Request(
+    "https://example.test/prices?tickers=SPY,BIL&start=2024-01-01&runtime=old",
+  ), {}, null);
+
+  assert.equal(new URL(matchedUrl).searchParams.get("tickers"), "BIL,SPY");
+  assert.equal(new URL(matchedUrl).searchParams.has("runtime"), false);
+  assert.equal(result.headers.get("Server-Timing"), 'edge-cache;desc="HIT"');
+});
+
 test("mapped risk products keep their current mix while risk stays above 70%", () => {
   const source = {
     assets: {risk: ["QQQ"]},
@@ -297,7 +317,7 @@ test("strategy 24 Korean-commented YAML is available to the Worker runtime", () 
   const definition = parseYaml(source);
 
   assert.equal(definition.strategy.id, "qqq-valuation-breakdown-defense");
-  assert.equal(definition.strategy.enabled, true);
+  assert.equal(definition.strategy.enabled, false);
   assert.equal(definition.state.defense_mode.initial, "NORMAL");
   assert.equal(definition.state.defense_mode.rules[2].confirm, 6);
   assert.deepEqual(strategyTickers([definition], definition), ["QQQ", "BIL", "SPY"]);

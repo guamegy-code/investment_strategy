@@ -1,5 +1,7 @@
 # YAML 전략 안내
 
+여러 전략의 목록 노출을 한곳에서 관리하려면 [전략 목록 노출 설정](strategy-visibility.md)을 참고하세요.
+
 이 문서는 `strategies/`의 YAML 파일을 사람이 읽기 쉽게 정리한 안내서입니다. 실행 규칙의
 진실 원천은 항상 YAML이며, 문서와 YAML이 다르면 YAML을 우선합니다. YAML 문법과 필드의
 의미는 [전략 DSL](strategy-dsl.md)을 참고하세요.
@@ -33,9 +35,11 @@
 | `23_qqq_structural_defense_balanced.yaml` | `qqq-structural-defense-balanced` | 예 | 개인연금용 QQQ 100%와 4상태 추세 방어를 결합한 23B |
 | `24_qqq_valuation_breakdown_defense.yaml` | `qqq-valuation-breakdown-defense` | 예 | 합성 밸류에이션 고점 붕괴를 주 방어 신호로 쓰고 23번 추세 상한을 결합한 전략 |
 | `25_qqq_valuation_breakdown_balanced.yaml` | `qqq-valuation-breakdown-balanced` | 예 | 월간 밸류에이션 급락과 빠른 가격 확인을 결합한 개인연금 균형형 |
+| `25P_qqq_valuation_breakdown_balanced_kodex_koact.yaml` | `qqq-valuation-breakdown-balanced-kodex-koact` | 예 | 25의 QQQ를 KODEX·KoAct에 반반, BIL을 KODEX 머니마켓에 매핑 |
 | `26_band_7030_tdf_valuation_defense.yaml` | `band-7030-tdf-valuation-defense` | 예 | 15번 퇴직연금 70/30 구조에 25번 밸류에이션 방어를 결합한 전략 |
+| `26P_band_7030_tdf_valuation_defense_kodex_koact.yaml` | `band-7030-tdf-valuation-defense-kodex-koact` | 예 | 26의 QQQ를 KODEX·KoAct에 반반, TDF·BIL을 국내 상품에 매핑 |
 
-다음 네 파일은 독립 규칙이 아니라 `source` 전략의 신호·상태·리밸런싱을 그대로 사용해 실제
+다음 파일들은 독립 규칙이 아니라 `source` 전략의 신호·상태·리밸런싱·알림 규칙을 그대로 사용해 실제
 상품만 바꾸는 매핑입니다. 자세한 매핑은 [국내 상품 매핑](#국내-상품-매핑)에 있습니다.
 
 | 파일 | 전략 ID | 기준 전략 | 자동 로드 |
@@ -44,6 +48,12 @@
 | `04P_time_nasdaq.yaml` | `time-nasdaq` | `profit-band-vxus` | 아니요 |
 | `04P_koact_nasdaq.yaml` | `koact-nasdaq` | `profit-band-vxus` | 아니요 |
 | `04P_nasdaq_mix.yaml` | `nasdaq-mix` | `profit-band-vxus` | 아니요 |
+| `05P_profit_band_time_tdf2050.yaml` | `time-vxus-tdf2050` | `profit-band-vxus-v2` | 아니요 |
+| `06P_profit_band_time_tdf2050.yaml` | `time-tdf2050-profit-band` | `profit-band-tdf2050` | 예 |
+| `08P_band_7030_nasdaq_tdf2050.yaml` | `nasdaq-tdf2050-7030` | `band-7030-tdf` | 아니요 |
+| `19P_buy_3dip_buyer_tdf.yaml` | `buy-3dip-tdf` | `buy-3dip-bil` | 아니요 |
+| `25P_qqq_valuation_breakdown_balanced_kodex_koact.yaml` | `qqq-valuation-breakdown-balanced-kodex-koact` | `qqq-valuation-breakdown-balanced` | 예 |
+| `26P_band_7030_tdf_valuation_defense_kodex_koact.yaml` | `band-7030-tdf-valuation-defense-kodex-koact` | `band-7030-tdf-valuation-defense` | 예 |
 
 ## 공통 용어와 상태 전이
 
@@ -347,6 +357,9 @@ BIL 중 ROC40이 더 좋은 쪽을 안전자산으로 고릅니다. `02_allocati
 | `time-vxus-tdf2050` | `profit-band-vxus-v2` | QQQ·VXUS → `426030.KS` 100%씩, BND·BIL → `434060.KS` 100%씩 |
 | `time-tdf2050-profit-band` | `profit-band-tdf2050` | QQQ → `426030.KS` 100%, TDF2050 프록시 → `434060.KS` 100%; BND·BIL은 그대로 |
 | `nasdaq-tdf2050-7030` | `band-7030-tdf` | QQQ → `426030.KS` 100%, TDF2050 프록시 → `434060.KS` 100% |
+| `buy-3dip-tdf` | `buy-3dip-bil` | QQQ는 그대로, BIL → `434060.KS` 100% |
+| `qqq-valuation-breakdown-balanced-kodex-koact` | `qqq-valuation-breakdown-balanced` | QQQ → `379810.KS` 50% + `0015B0.KS` 50%, BIL → `488770.KS` 100% |
+| `band-7030-tdf-valuation-defense-kodex-koact` | `band-7030-tdf-valuation-defense` | QQQ → `379810.KS` 50% + `0015B0.KS` 50%, TDF2050 프록시 → `434060.KS` 100%, BIL → `488770.KS` 100% |
 
 상품 코드에 대한 메모는 각 매핑 YAML의 주석을 따릅니다. 특히 `time-vxus-tdf2050`은 기준
 전략에서 서로 다른 QQQ와 VXUS 비중을 모두 `426030.KS`로 합산하므로, 기준 자산별 비중과

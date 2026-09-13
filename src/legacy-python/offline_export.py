@@ -9,6 +9,7 @@ import gzip
 import hashlib
 import json
 from pathlib import Path
+import re
 import shutil
 
 import plotly
@@ -200,6 +201,67 @@ def _compressed_market_data(data_dir: Path) -> bytes:
     )
 
 
+def _precomputed_results(
+    strategies: list[dict[str, object]], definition_paths: dict[str, Path]
+) -> dict[str, list[dict[str, object]]]:
+    """Load fresh result histories without bundling the market-data archive."""
+    precomputed = {}
+    for definition in strategies:
+        metadata = definition.get("strategy", {})
+        name = metadata.get("name")
+        strategy_id = metadata.get("id")
+        if not name or not strategy_id or str(strategy_id) not in definition_paths:
+            continue
+        history_path = RESULT_DIR / f"{name}_history.csv"
+        if not history_path.exists():
+            continue
+        source_path = definition_paths.get(str(definition.get("source") or ""))
+        latest_definition_mtime = max(
+            definition_paths[str(strategy_id)].stat().st_mtime,
+            source_path.stat().st_mtime if source_path else 0,
+        )
+        if history_path.stat().st_mtime < latest_definition_mtime:
+            continue
+        frame = pd.read_csv(history_path, usecols=lambda column: column in {
+            "Date", "Portfolio", "Weights", "StrategyState", "TransactionCosts",
+        })
+        if not {"Date", "Portfolio", "Weights"}.issubset(frame.columns):
+            continue
+        rebalance_path = RESULT_DIR / f"{name}_rebalances.json"
+        try:
+            events = json.loads(rebalance_path.read_text(encoding="utf-8")) \
+                if rebalance_path.exists() else []
+        except (json.JSONDecodeError, OSError):
+            events = []
+        events_by_date = {
+            str(event.get("ExecutionDate") or event.get("Date", ""))[:10]: event
+            for event in events
+            if isinstance(event, dict) and (event.get("ExecutionDate") or event.get("Date"))
+        }
+        rows = []
+        for row in frame.itertuples(index=False):
+            values = row._asdict()
+            try:
+                weights = ast.literal_eval(values["Weights"])
+            except (ValueError, SyntaxError):
+                continue
+            date = str(values["Date"])[:10]
+            event = events_by_date.get(date)
+            rows.append({
+                "date": date,
+                "value": float(values["Portfolio"]),
+                "weights": weights,
+                "state": "" if pd.isna(values.get("StrategyState")) else str(values.get("StrategyState", "")),
+                "costs": float(values.get("TransactionCosts", 0) or 0),
+                "target": event.get("Target") if event else None,
+                "preWeights": event.get("PreWeights") if event else None,
+                "executionDays": event.get("ExecutionDays") if event else None,
+            })
+        if rows:
+            precomputed[str(strategy_id)] = rows
+    return precomputed
+
+
 def build_bundle(
     data_dir: Path,
     strategy_dir: Path,
@@ -217,64 +279,7 @@ def build_bundle(
         if strategy_id:
             definition_paths[strategy_id] = path
     compressed = _compressed_market_data(data_dir)
-    precomputed = {}
-    for definition in strategies:
-        metadata = definition.get("strategy", {})
-        name = metadata.get("name")
-        strategy_id = metadata.get("id")
-        if not name or not strategy_id:
-            continue
-        history_path = RESULT_DIR / f"{name}_history.csv"
-        if not history_path.exists():
-            continue
-        source_path = definition_paths.get(str(definition.get("source") or ""))
-        latest_definition_mtime = max(
-            definition_paths[strategy_id].stat().st_mtime,
-            source_path.stat().st_mtime if source_path else 0,
-        )
-        if history_path.stat().st_mtime < latest_definition_mtime:
-            continue
-        frame = pd.read_csv(history_path, usecols=lambda column: column in {
-            "Date", "Portfolio", "Weights", "StrategyState", "TransactionCosts",
-        })
-        if not {"Date", "Portfolio", "Weights"}.issubset(frame.columns):
-            continue
-        rows = []
-        rebalance_path = RESULT_DIR / f"{name}_rebalances.json"
-        try:
-            rebalance_events = json.loads(rebalance_path.read_text(
-                encoding="utf-8"
-            )) if rebalance_path.exists() else []
-        except (json.JSONDecodeError, OSError):
-            rebalance_events = []
-        events_by_date = {
-            str(event.get("ExecutionDate") or event.get("Date", ""))[:10]: event
-            for event in rebalance_events
-            if isinstance(event, dict) and (event.get("ExecutionDate") or event.get("Date"))
-        }
-        for row in frame.itertuples(index=False):
-            values = row._asdict()
-            try:
-                weights = ast.literal_eval(values["Weights"])
-            except (ValueError, SyntaxError):
-                continue
-            date = str(values["Date"])[:10]
-            event = events_by_date.get(date)
-            rows.append({
-                "date": date,
-                "value": float(values["Portfolio"]),
-                "weights": weights,
-                "state": (
-                    "" if pd.isna(values.get("StrategyState"))
-                    else str(values.get("StrategyState", ""))
-                ),
-                "costs": float(values.get("TransactionCosts", 0) or 0),
-                "target": event.get("Target") if event else None,
-                "preWeights": event.get("PreWeights") if event else None,
-                "executionDays": event.get("ExecutionDays") if event else None,
-            })
-        if rows:
-            precomputed[strategy_id] = rows
+    precomputed = _precomputed_results(strategies, definition_paths)
     compressed_results = gzip.compress(
         json.dumps(precomputed, ensure_ascii=False, separators=(",", ":")).encode("utf-8"),
         compresslevel=9,
@@ -354,7 +359,21 @@ def export_static_site(
     strategies_dir.mkdir(parents=True, exist_ok=True)
     assets_dir.mkdir(parents=True, exist_ok=True)
 
+    visibility_path = strategy_dir / "manifest.json"
+    visibility = {}
+    if visibility_path.is_file():
+        visibility = json.loads(visibility_path.read_text(encoding="utf-8"))
+        if not isinstance(visibility, dict):
+            raise ValueError("strategies/manifest.json must be a JSON object")
+    hidden_strategy_ids = visibility.get("hidden_strategy_ids", [])
+    if not isinstance(hidden_strategy_ids, list) or any(
+        not isinstance(strategy_id, str) or not strategy_id
+        for strategy_id in hidden_strategy_ids
+    ):
+        raise ValueError("hidden_strategy_ids must be a list of non-empty strings")
+
     manifest = []
+    definitions_by_id = {}
     for path in sorted((*strategy_dir.glob("*.yaml"), *strategy_dir.glob("*.yml"))):
         definition = yaml.safe_load(path.read_text(encoding="utf-8"))
         metadata = definition.get("strategy") or {}
@@ -367,9 +386,63 @@ def export_static_site(
             "id": strategy_id,
             "path": path.name,
             "version": metadata.get("version"),
+            "enabled": metadata.get("enabled", True) is not False,
         })
+        definition["_yaml_file"] = path.name
+        definitions_by_id[strategy_id] = definition
+
+    # One immutable JSON request replaces dozens of small YAML requests.  Include
+    # source definitions transitively so product strategies still resolve locally.
+    included_ids = {
+        item["id"] for item in manifest
+        if item["enabled"] and item["id"] not in hidden_strategy_ids
+    }
+    pending = list(included_ids)
+    while pending:
+        source_id = str(definitions_by_id.get(pending.pop(), {}).get("source") or "")
+        if source_id and source_id not in included_ids and source_id in definitions_by_id:
+            included_ids.add(source_id)
+            pending.append(source_id)
+    enabled_definitions = [
+        definitions_by_id[item["id"]] for item in manifest if item["id"] in included_ids
+    ]
+    enabled_bytes = json.dumps(
+        enabled_definitions, ensure_ascii=False, separators=(",", ":")
+    ).encode("utf-8")
+    enabled_name = f"enabled.{hashlib.sha256(enabled_bytes).hexdigest()[:12]}.json"
+    (strategies_dir / enabled_name).write_bytes(enabled_bytes)
+    definition_paths = {
+        strategy_id: strategy_dir / str(definition["_yaml_file"])
+        for strategy_id, definition in definitions_by_id.items()
+    }
+    result_files = {}
+    results_dir = output_dir / "results"
+    results_dir.mkdir(exist_ok=True)
+    for stale_result in results_dir.glob("*.json.gz"):
+        stale_result.unlink()
+    for strategy_id, rows in _precomputed_results(
+        enabled_definitions, definition_paths
+    ).items():
+        compressed = gzip.compress(
+            json.dumps(rows, ensure_ascii=False, separators=(",", ":")).encode("utf-8"),
+            compresslevel=9,
+        )
+        safe_id = re.sub(r"[^A-Za-z0-9_.-]+", "-", strategy_id)
+        result_name = f"{safe_id}.{hashlib.sha256(compressed).hexdigest()[:12]}.json.gz"
+        (results_dir / result_name).write_bytes(compressed)
+        result_files[strategy_id] = f"../results/{result_name}"
     (strategies_dir / "manifest.json").write_text(
-        json.dumps({"version": 1, "strategies": manifest}, ensure_ascii=False),
+        json.dumps(
+            {
+                "version": 1,
+                "hidden_strategy_ids": hidden_strategy_ids,
+                "enabled_bundle": enabled_name,
+                "results": result_files,
+                "strategies": manifest,
+            },
+            ensure_ascii=False,
+            indent=2,
+        ) + "\n",
         encoding="utf-8",
     )
 
@@ -398,7 +471,7 @@ def export_static_site(
     css_name = write_hashed_asset("app", ".css", css.encode("utf-8"))
     plotly_name = write_hashed_asset(
         "plotly", ".min.js",
-        (Path(plotly.__file__).parent / "package_data" / "plotly.min.js").read_bytes(),
+        (source_assets_dir / "vendor" / "plotly-finance.min.js").read_bytes(),
     )
     runtime_bytes = (WEB_SOURCE_DIR / "app.js").read_bytes()
     shared_ui_bytes = (source_assets_dir / "research_shared_ui.js").read_bytes()
@@ -445,6 +518,7 @@ def export_static_site(
         "market_data_version": market_data_version,
         "data_proxy": data_proxy or "",
         "strategy_manifest_url": "./strategies/manifest.json",
+        "precomputed_results_currency": "KRW",
         "static_site": True,
     }, ensure_ascii=False)
     template = (WEB_SOURCE_DIR / "index.html").read_text(encoding="utf-8")
@@ -466,8 +540,10 @@ def export_static_site(
     index.write_text(document, encoding="utf-8")
     (output_dir / "_headers").write_text(
         "/assets/*\n  Cache-Control: public, max-age=31536000, immutable\n"
-        "/strategies/*\n  Cache-Control: public, max-age=3600\n"
         "/strategies/manifest.json\n  Cache-Control: no-cache\n"
+        "/strategies/enabled.*.json\n  Cache-Control: public, max-age=31536000, immutable\n"
+        "/strategies/*\n  Cache-Control: public, max-age=3600\n"
+        "/results/*\n  Cache-Control: public, max-age=31536000, immutable\n"
         "/index.html\n  Cache-Control: no-cache\n"
         "/app.js\n  Cache-Control: no-cache\n",
         encoding="utf-8",

@@ -410,6 +410,9 @@ class Backtest:
                     "RecoveryScore": getattr(self.strategy, "recovery_score", None),
                     "SafeAsset": getattr(self.strategy, "safe_asset", None),
                     "RotationDecision": rotation_decision,
+                    "NotificationContext": getattr(
+                        self.strategy, "notification_context", None
+                    ),
                 },
             )
 
