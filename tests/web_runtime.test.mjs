@@ -47,6 +47,15 @@ function extractedVisibleYAutoscale(){
   return Function('$','Plotly',`${axisKey};${range};${bind};return bindVisibleYAutoscale;`);
 }
 
+function extractedFullRangeWheelGuard(){
+  const dateMillis=source.match(/function chartDateMillis\(value\)\{[^\n]+\}/)?.[0];
+  const covers=source.match(/function chartXAxisCoversFullRange\(plot\)\{[\s\S]*?\n\}/)?.[0];
+  const shouldStop=source.match(/function shouldStopFullRangeWheel\(plot,event\)\{[\s\S]*?\n\}/)?.[0];
+  const bind=source.match(/function bindMaxRangeWheelGuard\(plot\)\{[\s\S]*?\n\}/)?.[0];
+  assert.ok(dateMillis&&covers&&shouldStop&&bind,'full-range wheel guard source was not found');
+  return Function(`${dateMillis};${covers};${shouldStop};${bind};return {chartXAxisCoversFullRange,shouldStopFullRangeWheel,bindMaxRangeWheelGuard};`)();
+}
+
 function extractedQqqCandleRows(){
   const helper=source.match(/function qqqCandleRows\(rows,timeframe\)\{[\s\S]*?\n\}/)?.[0];
   assert.ok(helper,'QQQ candle aggregation source was not found');
@@ -358,6 +367,30 @@ test('visible x-axis zoom derives a new y-axis range from only visible points',(
   plot._fullLayout.xaxis.range=['2024-01-01','2024-01-01T12:00:00Z'];
   handler({'xaxis.range[0]':'2024-01-01'});
   assert.ok(updates['yaxis.range'][1]<10);
+});
+
+test('wheel zoom-out stops at the full x-axis range without blocking other interactions',()=>{
+  const {shouldStopFullRangeWheel,bindMaxRangeWheelGuard}=extractedFullRangeWheelGuard();
+  let listener,options,prevented=0,stopped=0;
+  const plot={
+    dataset:{},
+    data:[{x:['2024-01-01','2024-12-31'],y:[1,2]}],
+    _fullLayout:{xaxis:{range:['2024-01-01','2024-12-31'],minallowed:'2024-01-01',maxallowed:'2024-12-31'},_size:{l:50,t:20,w:500,h:300}},
+    getBoundingClientRect:()=>({left:100,top:200}),
+    addEventListener:(event,next,nextOptions)=>{assert.equal(event,'wheel');listener=next;options=nextOptions;},
+  };
+  const wheel={deltaY:100,clientX:300,clientY:300,preventDefault:()=>prevented++,stopImmediatePropagation:()=>stopped++};
+  assert.equal(shouldStopFullRangeWheel(plot,wheel),true);
+  assert.equal(shouldStopFullRangeWheel(plot,{...wheel,deltaY:-100}),false);
+  assert.equal(shouldStopFullRangeWheel(plot,{...wheel,clientY:600}),false);
+  plot._fullLayout.xaxis.range=['2024-03-01','2024-10-01'];
+  assert.equal(shouldStopFullRangeWheel(plot,wheel),false);
+  plot._fullLayout.xaxis.range=['2024-01-01','2024-12-31'];
+  bindMaxRangeWheelGuard(plot);
+  listener(wheel);
+  assert.deepEqual(options,{capture:true,passive:false});
+  assert.equal(prevented,1);
+  assert.equal(stopped,1);
 });
 
 test('detail and indicator charts retain zoom until their selected period changes',()=>{

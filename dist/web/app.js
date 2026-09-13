@@ -1355,9 +1355,43 @@ Plotly.react=function(target,traces,layout,...args){
   return tradingDayAxisReact(target,traces,layout,...args);
 };
 function saveIndicatorLegendState(){try{localStorage.setItem(uiStateKey,JSON.stringify({...loadUiState(),indicatorHiddenTraceNames:[...indicatorHiddenTraceNames]}));}catch{}}
+function chartDateMillis(value){const parsed=Date.parse(String(value));return Number.isFinite(parsed)?parsed:NaN;}
+function chartXAxisCoversFullRange(plot){
+  const axis=plot?._fullLayout?.xaxis||plot?.layout?.xaxis,range=axis?.range;
+  if(!range?.length)return false;
+  let minimum=chartDateMillis(axis.minallowed),maximum=chartDateMillis(axis.maxallowed);
+  if(!Number.isFinite(minimum)||!Number.isFinite(maximum)){
+    const primary=(plot.data||[]).filter(trace=>(trace.xaxis||'x')==='x').flatMap(trace=>trace.x||[]).map(chartDateMillis).filter(Number.isFinite);
+    const values=primary.length?primary:(plot.data||[]).flatMap(trace=>trace.x||[]).map(chartDateMillis).filter(Number.isFinite);
+    if(!values.length)return false;
+    minimum=Math.min(...values);maximum=Math.max(...values);
+  }
+  const endpoints=range.map(chartDateMillis);
+  if(endpoints.some(value=>!Number.isFinite(value)))return false;
+  const lower=Math.min(...endpoints),upper=Math.max(...endpoints),tolerance=Math.max(1,(maximum-minimum)*1e-9);
+  return lower<=minimum+tolerance&&upper>=maximum-tolerance;
+}
+function shouldStopFullRangeWheel(plot,event){
+  if(!plot||!event||event.ctrlKey||Number(event.deltaY)<=0||!chartXAxisCoversFullRange(plot))return false;
+  const size=plot._fullLayout?._size,rect=plot.getBoundingClientRect?.();
+  if(!size||!rect)return false;
+  const x=event.clientX-rect.left,y=event.clientY-rect.top;
+  return x>=size.l&&x<=size.l+size.w&&y>=size.t&&y<=size.t+size.h;
+}
+function bindMaxRangeWheelGuard(plot){
+  if(!plot||plot.dataset.maxRangeWheelGuardBound)return;
+  plot.dataset.maxRangeWheelGuardBound='1';
+  plot.addEventListener('wheel',event=>{
+    if(!shouldStopFullRangeWheel(plot,event))return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  },{capture:true,passive:false});
+}
 bindVisibleYAutoscale=function(plotId){
   const plot=$(plotId);
-  if(!plot||plot.dataset.visibleYAutoscaleBound)return;
+  if(!plot)return;
+  bindMaxRangeWheelGuard(plot);
+  if(plot.dataset.visibleYAutoscaleBound)return;
   plot.dataset.visibleYAutoscaleBound='1';
   const rescale=()=>{
     const updates={};
