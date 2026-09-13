@@ -443,8 +443,27 @@ function migrateStrategyDefinition(definition){
   return {...definition,strategy,...(definition.source?{source:migrateStrategyId(definition.source)}:{})};
 }
 function loadUiState(){try{const state=JSON.parse(localStorage.getItem(uiStateKey)||'{}')||{};for(const key of ['strategyIds','knownStrategyIds','indicatorSelection'])if(Array.isArray(state[key]))state[key]=state[key].map(migrateStrategyId);for(const key of ['detailStrategy','indicatorStrategy'])if(state[key])state[key]=migrateStrategyId(state[key]);return state;}catch{return {};}}
-function saveUiState(activeView){try{activeView=typeof activeView==='string'?activeView:null;const previous=loadUiState(),strategyInputs=[...$('strategy-list').querySelectorAll('input[type="checkbox"]')],state={...previous,strategyIds:strategyInputs.length?strategyInputs.filter(input=>input.checked).map(input=>input.value):previous.strategyIds,knownStrategyIds:definitions.filter(def=>def.strategy.enabled!==false).map(def=>def.strategy.id),analysisStart:$('start-date').value||previous.analysisStart,analysisEnd:$('end-date').value||previous.analysisEnd,detailStrategy:$('detail-strategy').value||previous.detailStrategy,indicatorSelection:[...indicatorSelection],indicatorType:indicatorControlsInitialized?$('indicator-type').value:previous.indicatorType,indicatorStrategy:indicatorControlsInitialized?$('indicator-strategy').value:previous.indicatorStrategy,indicatorStart:indicatorControlsInitialized?$('indicator-start-date').value:previous.indicatorStart,indicatorEnd:indicatorControlsInitialized?$('indicator-end-date').value:previous.indicatorEnd,indicatorOverlays:indicatorControlsInitialized?[...$('indicator-overlays').querySelectorAll('input:checked')].map(input=>input.value):previous.indicatorOverlays,activeView:activeView||previous.activeView||($('indicators-view').classList.contains('offline-hidden')?'analysis':'indicators')};localStorage.setItem(uiStateKey,JSON.stringify(state));}catch{}}
+function saveUiState(activeView){try{activeView=typeof activeView==='string'?activeView:null;const previous=loadUiState(),strategyInputs=[...$('strategy-list').querySelectorAll('input[type="checkbox"]')],state={...previous,strategyIds:strategyInputs.length?strategyInputs.filter(input=>input.checked).map(input=>input.value):previous.strategyIds,knownStrategyIds:definitions.filter(def=>def.strategy.enabled!==false).map(def=>def.strategy.id),analysisStart:$('start-date').value||previous.analysisStart,analysisEnd:$('end-date').value||previous.analysisEnd,detailStrategy:$('detail-strategy').value||previous.detailStrategy,detailRemoveFx:Boolean($('detail-remove-fx')?.checked),indicatorSelection:[...indicatorSelection],indicatorType:indicatorControlsInitialized?$('indicator-type').value:previous.indicatorType,indicatorStrategy:indicatorControlsInitialized?$('indicator-strategy').value:previous.indicatorStrategy,indicatorStart:$('indicator-start-date')?.value||previous.indicatorStart,indicatorEnd:$('indicator-end-date')?.value||previous.indicatorEnd,indicatorOverlays:[...($('indicator-overlays')?.querySelectorAll('input:checked')||[])].map(input=>input.value),indicatorCandles:[...($('indicator-candles')?.querySelectorAll('input:checked')||[])].map(input=>input.value).filter(Boolean),indicatorRemoveFx:Boolean($('indicator-remove-fx')?.checked),indicatorHiddenTraceNames:[...indicatorHiddenTraceNames],activeView:activeView||($('indicators-view').classList.contains('offline-hidden')?'analysis':'indicators')};localStorage.setItem(uiStateKey,JSON.stringify(state));}catch{}}
 const savedUiState=loadUiState();
+let indicatorHiddenTraceNames=new Set(Array.isArray(savedUiState.indicatorHiddenTraceNames)?savedUiState.indicatorHiddenTraceNames:[]);
+function applyImmediateUiState(state){
+  const indicators=state.activeView==='indicators';
+  $('analysis-view').classList.toggle('offline-hidden',indicators);
+  $('indicators-view').classList.toggle('offline-hidden',!indicators);
+  $('analysis-tab').classList.toggle('active',!indicators);
+  $('indicators-tab').classList.toggle('active',indicators);
+  if(state.analysisStart)$('start-date').value=state.analysisStart;
+  if(state.analysisEnd)$('end-date').value=state.analysisEnd;
+  if(state.indicatorStart)$('indicator-start-date').value=state.indicatorStart;
+  if(state.indicatorEnd)$('indicator-end-date').value=state.indicatorEnd;
+  if(Array.isArray(state.indicatorOverlays))for(const input of $('indicator-overlays').querySelectorAll('input'))input.checked=state.indicatorOverlays.includes(input.value);
+  if(Array.isArray(state.indicatorCandles)){const candle=state.indicatorCandles[0]||'';for(const input of $('indicator-candles').querySelectorAll('input'))input.checked=input.value===candle;}
+  if(Object.hasOwn(state,'detailRemoveFx'))$('detail-remove-fx').checked=Boolean(state.detailRemoveFx);
+  if(Object.hasOwn(state,'indicatorRemoveFx'))$('indicator-remove-fx').checked=Boolean(state.indicatorRemoveFx);
+  if(Array.isArray(state.strategyIds))$('strategy-list').style.visibility='hidden';
+  document.documentElement.classList.add('research-ui-state-ready');
+}
+applyImmediateUiState(savedUiState);
 if(Array.isArray(savedUiState.indicatorSelection))indicatorSelection=new Set(savedUiState.indicatorSelection);
 if(Array.isArray(savedUiState.importedDefinitions)){const importedDefinitions=savedUiState.importedDefinitions.map(migrateStrategyDefinition),importedIds=new Set(importedDefinitions.map(def=>def?.strategy?.id).filter(Boolean));definitions=[...definitions.filter(def=>!importedIds.has(def.strategy.id)),...importedDefinitions];}
 setupDashboard=async function(){
@@ -470,7 +489,7 @@ setupDashboard=async function(){
 const importReadyDashboardSetup=setupDashboard;
 setupDashboard=async function(){await importReadyDashboardSetup();$('import').onchange=async event=>{try{const def=parseYaml(await event.target.files[0].text());if(!def?.strategy?.id)throw Error('strategy.id가 필요합니다.');def.strategy.enabled=true;definitions=definitions.filter(item=>item.strategy.id!==def.strategy.id);definitions.push(def);const state=loadUiState(),imported=(state.importedDefinitions||[]).filter(item=>item?.strategy?.id!==def.strategy.id);localStorage.setItem(uiStateKey,JSON.stringify({...state,importedDefinitions:[...imported,def]}));await setupDashboard();$('status').textContent='YAML 전략을 비교 목록에 추가했습니다.';}catch(error){$('status').textContent=`YAML 오류: ${error.message}`;}finally{event.target.value='';}};};
 const statefulIndicatorControls=setupIndicatorControls;
-setupIndicatorControls=function(){const state=loadUiState(),type=$('indicator-type');if(state.indicatorType&&[...type.options].some(option=>option.value===state.indicatorType))type.value=state.indicatorType;statefulIndicatorControls();const strategy=$('indicator-strategy');if(Object.hasOwn(state,'indicatorStrategy')&&[...strategy.options].some(option=>option.value===state.indicatorStrategy))strategy.value=state.indicatorStrategy;if(state.indicatorStart)$('indicator-start-date').value=state.indicatorStart;if(state.indicatorEnd)$('indicator-end-date').value=state.indicatorEnd;if(Array.isArray(state.indicatorOverlays))for(const input of $('indicator-overlays').querySelectorAll('input'))input.checked=state.indicatorOverlays.includes(input.value);strategy.onchange=async()=>{saveUiState();await renderIndicators();};for(const input of [$('indicator-start-date'),$('indicator-end-date'),$('indicator-overlays')])input.addEventListener('change',saveUiState);$('indicator-panel-tabs').addEventListener('click',()=>setTimeout(saveUiState));$('indicator-matrix').addEventListener('change',()=>setTimeout(saveUiState));};
+setupIndicatorControls=function(){const state=loadUiState(),type=$('indicator-type');if(state.indicatorType&&[...type.options].some(option=>option.value===state.indicatorType))type.value=state.indicatorType;statefulIndicatorControls();const strategy=$('indicator-strategy');if(Object.hasOwn(state,'indicatorStrategy')&&[...strategy.options].some(option=>option.value===state.indicatorStrategy))strategy.value=state.indicatorStrategy;if(state.indicatorStart)$('indicator-start-date').value=state.indicatorStart;if(state.indicatorEnd)$('indicator-end-date').value=state.indicatorEnd;if(Array.isArray(state.indicatorOverlays))for(const input of $('indicator-overlays').querySelectorAll('input'))input.checked=state.indicatorOverlays.includes(input.value);strategy.onchange=async()=>{saveUiState();await renderIndicators();};for(const input of [$('indicator-start-date'),$('indicator-end-date'),$('indicator-overlays')])input.addEventListener('change',saveUiState,true);$('indicator-panel-tabs').addEventListener('click',()=>setTimeout(saveUiState));$('indicator-matrix').addEventListener('change',()=>setTimeout(saveUiState));};
 const viewRestoringDashboardSetup=setupDashboard;
 setupDashboard=async function(){const restoreIndicators=loadUiState().activeView==='indicators';if(restoreIndicators){$('analysis-view').classList.add('offline-hidden');$('indicators-view').classList.remove('offline-hidden');$('analysis-tab').classList.remove('active');$('indicators-tab').classList.add('active');}await viewRestoringDashboardSetup();const analysisTab=$('analysis-tab'),indicatorsTab=$('indicators-tab'),showAnalysis=analysisTab.onclick,showIndicators=indicatorsTab.onclick;analysisTab.onclick=()=>{showAnalysis();saveUiState('analysis');};indicatorsTab.onclick=async()=>{await showIndicators();saveUiState('indicators');};if(restoreIndicators)await indicatorsTab.onclick();};
 const productDisplayNames={'379810.KS':'KODEX 미국나스닥100','426030.KS':'TIME 미국나스닥100액티브','0015B0.KS':'KoAct 미국나스닥성장기업액티브','434060.KS':'KODEX TDF2050액티브 적격','488770.KS':'KODEX 머니마켓액티브','069500.KS':'KODEX 200 (069500.KS)','114100.KS':'KODEX 국고채 3년 (114100.KS)','148070.KS':'KOSEF 국고채 10년 (148070.KS)'};
@@ -524,7 +543,7 @@ renderDetail=function(){
 const detailFxHistories=new Map();
 const detailUsdToggle=$('detail-remove-fx');
 if(detailUsdToggle){
-  detailUsdToggle.checked=false;
+  detailUsdToggle.checked=Boolean(savedUiState.detailRemoveFx);
   detailUsdToggle.nextElementSibling.textContent='달러 기준으로 보기';
 }
 async function updateDetailFxView(){
@@ -943,7 +962,7 @@ setupDashboard=async function(){
   $('reset').onclick=resetUserState;
   const fxToggle=$('detail-remove-fx');
   if(fxToggle){
-    fxToggle.onchange=updateDetailFxView;
+    fxToggle.onchange=()=>{saveUiState();void updateDetailFxView();};
     $('detail-strategy')?.addEventListener('change',()=>{if(fxToggle.checked)void updateDetailFxView();});
   }
 };
@@ -1334,7 +1353,7 @@ Plotly.react=function(target,traces,layout,...args){
   }
   return tradingDayAxisReact(target,traces,layout,...args);
 };
-const indicatorHiddenTraceNames=new Set();
+function saveIndicatorLegendState(){try{localStorage.setItem(uiStateKey,JSON.stringify({...loadUiState(),indicatorHiddenTraceNames:[...indicatorHiddenTraceNames]}));}catch{}}
 bindVisibleYAutoscale=function(plotId){
   const plot=$(plotId);
   if(!plot||plot.dataset.visibleYAutoscaleBound)return;
@@ -1374,6 +1393,7 @@ bindVisibleYAutoscale=function(plotId){
     const currentlyHidden=trace.visible===false||trace.visible==='legendonly';
     if(currentlyHidden)indicatorHiddenTraceNames.delete(name);
     else indicatorHiddenTraceNames.add(name);
+    saveIndicatorLegendState();
   });
   plot.on('plotly_restyle',()=>requestAnimationFrame(rescale));
 };
@@ -1588,6 +1608,9 @@ function installIndicatorTabFastPath(){
   },true);
 }
 installIndicatorTabFastPath();
+
+window.addEventListener('pagehide',()=>saveUiState());
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden')saveUiState();});
 
 // 지표연구의 환율 제거 옵션은 원화 환산 티커에는 원자산을 사용하고,
 // 국내 상장 종목에는 같은 날의 USD/KRW 환율을 나누어 달러 기준 가격을 만든다.
@@ -2134,6 +2157,7 @@ function bindIndicatorLegendPersistence(){
       const name=group.querySelector('.legendtext')?.textContent?.trim();
       if(name)indicatorHiddenTraceNames.add(name);
     }
+    saveIndicatorLegendState();
   };
   const overlays=$('indicator-overlays');
   if(overlays&&!overlays.dataset.legendVisibilityCaptureBound){
@@ -2147,6 +2171,7 @@ function bindIndicatorLegendPersistence(){
     const currentlyHidden=trace.visible===false||trace.visible==='legendonly';
     if(currentlyHidden)indicatorHiddenTraceNames.delete(name);
     else indicatorHiddenTraceNames.add(name);
+    saveIndicatorLegendState();
     requestAnimationFrame(()=>requestAnimationFrame(rescaleAfterLegendChange));
   });
 }
