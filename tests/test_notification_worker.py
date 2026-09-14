@@ -52,6 +52,8 @@ class NotificationWorkerContractTests(unittest.TestCase):
         self.assertIn("function isMonthlySummaryDay_(date)", source)
         self.assertIn("function sendScheduledSummaryTest()", source)
         self.assertIn("requestEvaluations_(subscriptions, true)", source)
+        self.assertIn("function requestPreviewWithSeed_(subscriptions)", source)
+        self.assertIn("if (!message.includes('notification seed is required:')) throw error", source)
         self.assertIn("function signalBar_(value, max)", source)
         self.assertIn("function formatAllocationTable_(event)", source)
         self.assertIn("event.product_names?.[ticker] || ticker", source)

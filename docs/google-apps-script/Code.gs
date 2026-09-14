@@ -105,7 +105,7 @@ function sendScheduledSummaryTest() {
   try {
     const subscriptions = enabledSubscriptions_();
     if (!subscriptions.length) throw new Error('알림 전략 시트에서 테스트할 전략을 하나 이상 선택하세요.');
-    const evaluations = requestEvaluations_(subscriptions, true);
+    const evaluations = requestPreviewWithSeed_(subscriptions);
     let sent = 0;
     evaluations.forEach(evaluation => {
       const summary = evaluation.scheduled_summary;
@@ -119,6 +119,17 @@ function sendScheduledSummaryTest() {
   } catch (error) {
     logRun_(0, 0, 'SUMMARY_TEST_FAILED', error.message || String(error));
     throw error;
+  }
+}
+
+function requestPreviewWithSeed_(subscriptions) {
+  try {
+    return requestEvaluations_(subscriptions, true);
+  } catch (error) {
+    const message = String(error?.message || error);
+    if (!message.includes('notification seed is required:')) throw error;
+    initializeNotificationStates();
+    return requestEvaluations_(subscriptions, true);
   }
 }
 
