@@ -358,26 +358,14 @@ function messageFor_(event) {
   if (event.includes_summary) lines[0] += ' · 정기 요약 포함';
   return lines.filter(line => line !== undefined && line !== null).join('\n');
 }
-function displayWidth_(text) {
-  return Array.from(String(text)).reduce((width, character) => width + (/[\u1100-\u115f\u2e80-\ua4cf\uac00-\ud7a3\uf900-\ufaff\uff00-\uffef]/.test(character) ? 2 : 1), 0);
-}
-function truncateDisplay_(text, width) {
-  let result = '';
-  for (const character of Array.from(String(text))) {
-    if (displayWidth_(result + character) > width - 1) return `${result}…`;
-    result += character;
-  }
-  return result;
-}
 function formatAllocationTable_(event) {
   const current = event.current_weights || {}, target = event.target_weights || {};
   const tickers = [...Object.keys(target), ...Object.keys(current).filter(ticker => !Object.prototype.hasOwnProperty.call(target, ticker))];
   if (!tickers.length) return '-';
-  const names = tickers.map(ticker => truncateDisplay_(event.product_names?.[ticker] || ticker, 20));
-  return tickers.map((ticker, index) => {
+  return tickers.map(ticker => {
     const before = Number(current[ticker] || 0) * 100, after = Number(target[ticker] || 0) * 100, change = after - before;
     const delta = `${change >= 0 ? '+' : ''}${change.toFixed(1)}%p`;
-    return `${names[index]}\n현재 ${before.toFixed(1)}% → 목표 ${after.toFixed(1)}% (${delta})`;
+    return `${event.product_names?.[ticker] || ticker}\n현재 ${before.toFixed(1)}% → 목표 ${after.toFixed(1)}% (${delta})`;
   }).join('\n\n');
 }
 function formattedMessageFor_(event) {

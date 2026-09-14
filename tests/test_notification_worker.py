@@ -59,6 +59,7 @@ class NotificationWorkerContractTests(unittest.TestCase):
         self.assertIn("event.product_names?.[ticker] || ticker", source)
         self.assertIn("'현재 → 목표'", source)
         self.assertNotIn("parse_mode: 'HTML'", source)
+        self.assertNotIn("truncateDisplay_", source)
         self.assertIn("'📌 시장 상태'", source)
         self.assertIn("'📊 신호'", source)
         self.assertIn("'📈 시장 지표'", source)
