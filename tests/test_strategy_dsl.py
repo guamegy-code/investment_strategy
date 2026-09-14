@@ -240,6 +240,29 @@ class DeclarativeStrategyTests(unittest.TestCase):
                 "schedule": "weekly", "weekly": True,
             }))
 
+    def test_notification_presentation_supports_state_labels_and_score_bars(self):
+        strategy = DeclarativeStrategy(definition(
+            state={"mode": {"initial": "NORMAL", "rules": []}},
+            variables={"score": "1"},
+            notifications={
+                "states": {"mode": {
+                    "label": "국면",
+                    "values": {"NORMAL": "정상"},
+                }},
+                "variables": {"score": {
+                    "label": "점수", "max": 6, "display": "bar",
+                }},
+            },
+        ))
+        self.assertEqual(strategy.definition["notifications"]["states"]["mode"]["values"], {"NORMAL": "정상"})
+        with self.assertRaises(StrategyDefinitionError):
+            DeclarativeStrategy(definition(
+                variables={"score": "1"},
+                notifications={"variables": {"score": {
+                    "label": "점수", "display": "gauge",
+                }}},
+            ))
+
     def test_evaluation_records_notification_context_for_research_charts(self):
         strategy = DeclarativeStrategy(definition(
             state={

@@ -116,6 +116,10 @@
             "required": ["label"],
             "properties": {
               "label": {"type": "string", "minLength": 1},
+              "values": {
+                "type": "object",
+                "additionalProperties": {"type": "string", "minLength": 1}
+              },
               "alerts": {
                 "type": "array",
                 "items": {
@@ -147,7 +151,8 @@
             "properties": {
               "label": {"type": "string", "minLength": 1},
               "max": {"type": "number"},
-              "decimals": {"type": "integer", "minimum": 0, "maximum": 6}
+              "decimals": {"type": "integer", "minimum": 0, "maximum": 6},
+              "display": {"enum": ["number", "bar"]}
             }
           }
         },
