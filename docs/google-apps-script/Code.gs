@@ -207,8 +207,9 @@ function sendTelegram_(text) {
   const settings = PropertiesService.getScriptProperties();
   const token = requiredProperty_(settings, 'TELEGRAM_BOT_TOKEN');
   const chatId = requiredProperty_(settings, 'TELEGRAM_CHAT_ID');
+  const html = telegramHtml_(text);
   const response = UrlFetchApp.fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-    method: 'post', payload: {chat_id: chatId, text: text}, muteHttpExceptions: true,
+    method: 'post', payload: {chat_id: chatId, text: html, parse_mode: 'HTML'}, muteHttpExceptions: true,
   });
   if (response.getResponseCode() !== 200) throw new Error('Telegram 메시지 전송에 실패했습니다.');
 }
@@ -312,6 +313,7 @@ function formatConfirmations_(confirmations) {
   return (confirmations || []).map(item => `${item.name} → ${item.desired} ${item.days}/${item.required_days}일`).join('\n');
 }
 function messageFor_(event) {
+  return formattedMessageFor_(event);
   const type = event.type || 'REBALANCE';
   const summaryTitles = {daily: '[일간 시장 브리핑]', weekly: '[주간 시장 브리핑]', monthly: '[월간 시장 브리핑]'};
   const titles = {REBALANCE: '[리밸런싱 예정]', PREALERT: '[사전주의 · 매매 없음]', SUMMARY: summaryTitles[event.summary_schedule] || summaryTitles.weekly};
@@ -342,6 +344,54 @@ function messageFor_(event) {
   } else {
     lines.push('', '현재 비중', formatWeights_(event.current_weights), '목표 비중', formatWeights_(event.target_weights), '현재 행동: 리밸런싱 없음');
   }
+  if (event.test) lines[0] += ' · 테스트';
+  if (event.includes_summary) lines[0] += ' · 정기 요약 포함';
+  return lines.filter(line => line !== undefined && line !== null).join('\n');
+}
+function displayWidth_(text) {
+  return Array.from(String(text)).reduce((width, character) => width + (/[\u1100-\u115f\u2e80-\ua4cf\uac00-\ud7a3\uf900-\ufaff\uff00-\uffef]/.test(character) ? 2 : 1), 0);
+}
+function truncateDisplay_(text, width) {
+  let result = '';
+  for (const character of Array.from(String(text))) {
+    if (displayWidth_(result + character) > width - 1) return `${result}…`;
+    result += character;
+  }
+  return result;
+}
+function padDisplayEnd_(text, width) { return `${text}${' '.repeat(Math.max(0, width - displayWidth_(text)))}`; }
+function formatAllocationTable_(event) {
+  const current = event.current_weights || {}, target = event.target_weights || {};
+  const tickers = [...Object.keys(target), ...Object.keys(current).filter(ticker => !Object.prototype.hasOwnProperty.call(target, ticker))];
+  if (!tickers.length) return '-';
+  const names = tickers.map(ticker => truncateDisplay_(event.product_names?.[ticker] || ticker, 20));
+  const nameWidth = Math.min(20, Math.max(8, ...names.map(displayWidth_)));
+  return tickers.map((ticker, index) => {
+    const before = Number(current[ticker] || 0) * 100, after = Number(target[ticker] || 0) * 100, change = after - before;
+    const delta = `${change >= 0 ? '+' : ''}${change.toFixed(1)}%p`;
+    return `${padDisplayEnd_(names[index], nameWidth)}  ${before.toFixed(1).padStart(5)}% → ${after.toFixed(1).padStart(5)}%  ${delta.padStart(6)}`;
+  }).join('\n');
+}
+function telegramHtml_(text) {
+  return String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/\[\[PRE\]\]([\s\S]*?)\[\[\/PRE\]\]/g, '<pre>$1</pre>');
+}
+function formattedMessageFor_(event) {
+  const type = event.type || 'REBALANCE';
+  const summaryTitles = {daily: '[일간 시장 브리핑]', weekly: '[주간 시장 브리핑]', monthly: '[월간 시장 브리핑]'};
+  const titles = {REBALANCE: '[리밸런싱 예정]', PREALERT: '[사전주의 · 매매 없음]', SUMMARY: summaryTitles[event.summary_schedule] || summaryTitles.weekly};
+  const lines = [titles[type] || '[투자 전략 알림]', '', `전략: ${event.strategy_name}`, `시장 기준일: ${event.market_data_at}`];
+  if (event.mapped_products && event.source_strategy_id) lines.push(`기준 전략: ${event.source_strategy_id}`);
+  if (event.schedule_disabled) lines.push('정기 브리핑: none 설정 — 테스트로만 전송');
+  const states = formatConfiguredStates_(event); if (states) lines.push('', '📌 시장 상태', states);
+  const signals = formatSignals_(event); if (signals) lines.push('', '📊 신호', signals);
+  const market = formatConfiguredMarket_(event); if (market) lines.push('', '📈 시장 지표', market);
+  if (event.reason_text || event.reason) lines.push(`판단: ${event.reason_text || event.reason}`);
+  const confirmations = formatConfirmations_(event.confirmations); if (confirmations) lines.push(`확인 진행\n${confirmations}`);
+  lines.push(`목표 괴리: ${(Number(event.target_deviation || 0) * 100).toFixed(1)}%p`);
+  const allocationStatus = type === 'REBALANCE' ? (event.target_changed ? '목표 변경' : '리밸런싱 예정') : '매매 없음';
+  lines.push('', `📦 포트폴리오 비중 · ${allocationStatus}`, '현재(추정) → 목표', `[[PRE]]${formatAllocationTable_(event)}[[/PRE]]`);
+  if (type === 'REBALANCE') lines.push(`실행 예정: 다음 거래일 시가부터 ${event.execution_days || 1}일`);
   if (event.test) lines[0] += ' · 테스트';
   if (event.includes_summary) lines[0] += ' · 정기 요약 포함';
   return lines.filter(line => line !== undefined && line !== null).join('\n');

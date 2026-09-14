@@ -19,6 +19,7 @@ const MAX_PRIVATE_STRATEGY_BYTES = 100_000;
 const NOTIFICATION_TAIL_ROWS = 320;
 const NOTIFICATION_LOOKBACK_DAYS = 500;
 const RECENT_CACHE_ROWS = 10;
+const TICKER_LABEL_CACHE_SECONDS = 60 * 60 * 24 * 30;
 const YAHOO_CHART_HOSTS = ["query1.finance.yahoo.com", "query2.finance.yahoo.com"];
 const YAHOO_HEADERS = {
   Accept: "application/json,text/plain,*/*",
@@ -442,6 +443,7 @@ async function notificationEvaluation(request, env) {
     const baseTicker = krwAdjustedBaseTicker(ticker);
     data[ticker] = buildKrwAdjustedRows(data[baseTicker] || [], data["KRW=X"] || []);
   }
+  const tickerLabels = await cachedTickerLabels(env, tickers);
   const lastDates = body.last_evaluated_dates || {}, evaluations = [];
   for (const definition of selected) {
     const previousSnapshot = snapshots.get(definition.strategy.id);
@@ -460,6 +462,7 @@ async function notificationEvaluation(request, env) {
       strategy_id: definition.strategy.id,
       strategy_name: definition.strategy.name,
       strategy_version: String(definition.strategy.version || ""),
+      product_names: tickerLabels,
     };
     const alerts = notification.alerts.map(alert => ({...alertMetadata, ...alert}));
     const schedule = latestContext?.notification_display?.schedule
@@ -485,6 +488,7 @@ async function notificationEvaluation(request, env) {
       source_strategy_id: latestContext.source_strategy_id || null,
       source_current_weights: latestContext.source_current_weights || null,
       source_target_weights: latestContext.source_target_weights || null,
+      product_names: tickerLabels,
     } : null;
     evaluations.push({
       ...alertMetadata,
@@ -501,6 +505,45 @@ async function notificationEvaluation(request, env) {
     });
   }
   return response({market_data_updated: true, preview, evaluations});
+}
+
+export async function loadTickerLabel(ticker) {
+  const upstreamTicker = ticker === "KRW=X" ? "USDKRW=X" : ticker;
+  let lastStatus = null, lastError = null;
+  for (const host of YAHOO_CHART_HOSTS) {
+    const source = new URL(`https://${host}/v8/finance/chart/${encodeURIComponent(upstreamTicker)}`);
+    source.search = new URLSearchParams({range: "5d", interval: "1d"});
+    try {
+      const upstream = await fetch(source, {
+        headers: YAHOO_HEADERS,
+        cf: {cacheTtl: TICKER_LABEL_CACHE_SECONDS, cacheEverything: true},
+      });
+      if (!upstream.ok) { lastStatus = upstream.status; continue; }
+      const meta = (await upstream.json())?.chart?.result?.[0]?.meta || {};
+      const label = String(meta.shortName || meta.longName || "").trim();
+      return label || null;
+    } catch (error) { lastError = error; }
+  }
+  if (lastStatus !== null) throw new Error(`${ticker}: label upstream returned ${lastStatus}`);
+  throw new Error(`${ticker}: label upstream request failed`, {cause: lastError});
+}
+
+async function cachedTickerLabels(env, tickers) {
+  if (!env.MARKET_DATA) return {};
+  const labels = await Promise.all([...tickers]
+    .filter(ticker => ticker !== "TDF2050_PROXY" && !krwAdjustedBaseTicker(ticker))
+    .map(async ticker => {
+      const key = `ticker-label:${ticker}`;
+      const cached = await env.MARKET_DATA.get(key);
+      if (cached) return [ticker, cached];
+      try {
+        const label = await loadTickerLabel(ticker);
+        if (!label) return null;
+        await env.MARKET_DATA.put(key, label, {expirationTtl: TICKER_LABEL_CACHE_SECONDS});
+        return [ticker, label];
+      } catch { return null; }
+    }));
+  return Object.fromEntries(labels.filter(Boolean));
 }
 
 async function notificationSeed(request, env) {
