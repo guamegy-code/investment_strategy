@@ -3,7 +3,7 @@ import {readFileSync} from "node:fs";
 import test from "node:test";
 import {gzipSync} from "node:zlib";
 
-import worker, {createFallbackTickerLoader, loadPriceRange, loadTicker} from "../src/index.js";
+import worker, {createFallbackTickerLoader, loadPriceRange, loadTicker, loadTickerLabel} from "../src/index.js";
 import {
   mapProductTarget, parseYaml, runStrategy, runStrategyIncremental,
   selectNotificationAlerts, strategySnapshot, strategyTickers,
@@ -461,6 +461,16 @@ test("incremental snapshots inherit states added by a strategy upgrade", () => {
   assert.deepEqual(result.history[0].notificationContext.state_changes.find(
     change => change.name === "structural_bear_mode",
   ), {name: "structural_bear_mode", previous: "FALSE", current: "TRUE"});
+});
+
+test("loadTickerLabel returns the provider's display name", async (context) => {
+  const originalFetch = globalThis.fetch;
+  context.after(() => { globalThis.fetch = originalFetch; });
+  globalThis.fetch = async () => Response.json({chart: {result: [{meta: {longName: "KODEX Nasdaq 100"}}]}});
+
+  const label = await loadTickerLabel("379810.KS");
+
+  assert.equal(label, "KODEX Nasdaq 100");
 });
 
 test("notification context emits selected prealerts and a detailed rebalance", () => {
