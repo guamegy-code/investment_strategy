@@ -365,7 +365,7 @@ function formatAllocationTable_(event) {
   return tickers.map(ticker => {
     const before = Number(current[ticker] || 0) * 100, after = Number(target[ticker] || 0) * 100, change = after - before;
     const delta = `${change >= 0 ? '+' : ''}${change.toFixed(1)}%p`;
-    return `${event.product_names?.[ticker] || ticker}\n현재 ${before.toFixed(1)}% → 목표 ${after.toFixed(1)}% (${delta})`;
+    return `• ${event.product_names?.[ticker] || ticker}\n현재 ${before.toFixed(1)}% → 목표 ${after.toFixed(1)}% (${delta})`;
   }).join('\n\n');
 }
 function formattedMessageFor_(event) {
@@ -377,11 +377,11 @@ function formattedMessageFor_(event) {
   const states = formatConfiguredStates_(event); if (states) lines.push('', '📌 시장 상태', states);
   const signals = formatSignals_(event); if (signals) lines.push('', '📊 신호', signals);
   const market = formatConfiguredMarket_(event); if (market) lines.push('', '📈 시장 지표', market);
-  if (event.reason_text || event.reason) lines.push(`판단: ${event.reason_text || event.reason}`);
+  if (event.reason_text || event.reason) lines.push(`• 판단: ${event.reason_text || event.reason}`);
   const confirmations = formatConfirmations_(event.confirmations); if (confirmations) lines.push(`확인 진행\n${confirmations}`);
   lines.push(`목표 괴리: ${(Number(event.target_deviation || 0) * 100).toFixed(1)}%p`);
   const allocationStatus = type === 'REBALANCE' ? (event.target_changed ? '목표 변경' : '리밸런싱 예정') : '매매 없음';
-  lines.push('', `📦 포트폴리오 비중 · ${allocationStatus}`, '현재 → 목표', formatAllocationTable_(event));
+  lines.push('', `📦 포트폴리오 비중 · ${allocationStatus}`, formatAllocationTable_(event));
   if (type === 'REBALANCE') lines.push(`실행 예정: 다음 거래일 시가부터 ${event.execution_days || 1}일`);
   if (event.test) lines[0] += ' · 테스트';
   if (event.includes_summary) lines[0] += ' · 정기 요약 포함';
