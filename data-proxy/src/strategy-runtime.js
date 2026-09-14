@@ -188,7 +188,7 @@ function notificationPolicy(definition){
   const variables=Object.fromEntries(Object.keys(definition.variables||{}).map(name=>[name,{label:name}]));
   const representative=(Array.isArray(definition.assets?.risk)?definition.assets.risk[0]:definition.assets?.risk)||(definition.assets?.required||[])[0];
   return{
-    weekly:true,states,variables,
+    schedule:'weekly',weekly:true,states,variables,
     market:representative?[
       {ticker:representative,field:'roc1',label:'1일',format:'percent'},
       {ticker:representative,field:'roc5',label:'5일',format:'percent'},
@@ -200,8 +200,10 @@ function notificationPolicy(definition){
 }
 
 function notificationDisplay(policy,stateValues,variables,market){
+  const schedule=policy.schedule??(policy.weekly===false?'none':'weekly');
   return{
-    weekly:policy.weekly!==false,
+    schedule,
+    weekly:schedule==='weekly',
     states:Object.entries(policy.states||{}).filter(([name])=>Object.prototype.hasOwnProperty.call(stateValues,name)).map(([name,item])=>({name,label:item.label,value:stateValues[name]})),
     variables:Object.entries(policy.variables||{}).filter(([name])=>Object.prototype.hasOwnProperty.call(variables,name)).map(([name,item])=>({name,label:item.label,value:variables[name],max:item.max??null,decimals:item.decimals??0})),
     market:(policy.market||[]).map(item=>({ticker:item.ticker,field:item.field,label:item.label,format:item.format||'number',decimals:item.decimals??1,value:finiteNumber(market[item.ticker]?.[String(item.field).toLowerCase()])})).filter(item=>item.value!==null),

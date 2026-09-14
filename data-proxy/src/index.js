@@ -461,9 +461,12 @@ async function notificationEvaluation(request, env) {
       strategy_version: String(definition.strategy.version || ""),
     };
     const alerts = notification.alerts.map(alert => ({...alertMetadata, ...alert}));
-    const weeklySummary = latestContext && latestContext.notification_display?.weekly !== false ? {
+    const schedule = latestContext?.notification_display?.schedule
+      ?? (latestContext?.notification_display?.weekly === false ? "none" : "weekly");
+    const scheduledSummary = latestContext && schedule !== "none" ? {
       ...alertMetadata,
-      type: "WEEKLY",
+      type: "SUMMARY",
+      summary_schedule: schedule,
       market_data_at: marketDataAt,
       state_values: latestContext.state_values || {},
       reason_text: "정기 시장 상황 점검",
@@ -490,7 +493,8 @@ async function notificationEvaluation(request, env) {
       state: history.at(-1)?.state || "",
       state_values: latestContext?.state_values || {},
       alerts,
-      weekly_summary: weeklySummary,
+      scheduled_summary: scheduledSummary,
+      weekly_summary: schedule === "weekly" ? scheduledSummary : null,
     });
   }
   return response({market_data_updated: true, evaluations});

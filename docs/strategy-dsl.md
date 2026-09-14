@@ -68,7 +68,8 @@ execution:
 | 최상위 | `execution` | 리밸런싱 실행 설정 | 아니요 |
 | `execution` | `days` | 분할 실행일수, 기본값 `1` | 아니요 |
 | 최상위 | `notifications` | 알림 표시·즉시 상태·확인·사전주의 규칙 | 아니요 |
-| `notifications` | `weekly` | 주간 시장 브리핑 생성 여부, 기본값 `true` | 아니요 |
+| `notifications` | `schedule` | 정기 시장 브리핑 주기: `none`, `daily`, `weekly`, `monthly`. 기본값 `weekly` | 아니요 |
+| `notifications` | `weekly` | 이전 호환용 주간 브리핑 설정. 새 전략에서는 `schedule` 사용 | 아니요 |
 | `notifications` | `states` | 메시지에 표시하고 상태 전환을 감시할 상태 설정 | 아니요 |
 | `notifications.states.<이름>` | `label` | 상태의 표시 이름 | 예 |
 | `notifications.states.<이름>` | `alerts` | 상태 변경 또는 확인 시작을 알릴 규칙. 생략하면 모든 상태 변경을 알림 | 아니요 |
@@ -415,7 +416,7 @@ products:
 
 ```yaml
 notifications:
-  weekly: true
+  schedule: weekly
   states:
     risk_regime:
       label: 위험 국면
@@ -442,7 +443,11 @@ notifications:
       message: 목표 비중과 현재 비중의 차이가 커졌습니다
 ```
 
-- `weekly`: 주간 시장 브리핑 생성 여부다. 기본값은 `true`다.
+- `schedule`: 상태·시장 지표를 정기적으로 요약해 보내는 주기다. `none`이면 정기 브리핑을
+  보내지 않고, `daily`·`weekly`·`monthly` 중 하나를 고른다. 리밸런싱, 상태 변경, 사전경고처럼
+  조건이 충족될 때 보내는 즉시 알림에는 영향을 주지 않는다. 생략하면 `weekly`다.
+  기존의 `weekly: true|false`도 계속 읽으며 각각 `weekly`와 `none`으로 해석한다. 새 전략에는
+  두 설정을 함께 쓰지 않고 `schedule`만 사용한다.
 - `states.<name>.label`: 메시지에 표시할 상태명이다. `alerts`를 생략하면 해당 상태의
   모든 변화를 `위험 국면: NORMAL → DEFENSIVE`처럼 알린다. `alerts[].from`과
   `alerts[].to`를 작성하면 나열한 전환만 알리고, 선택 항목인 `message`로 이유를 덧붙인다.

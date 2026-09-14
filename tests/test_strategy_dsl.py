@@ -230,6 +230,16 @@ class DeclarativeStrategyTests(unittest.TestCase):
                 }],
             }))
 
+    def test_notification_schedule_accepts_the_supported_periods(self):
+        for schedule in ("none", "daily", "weekly", "monthly"):
+            DeclarativeStrategy(definition(notifications={"schedule": schedule}))
+        with self.assertRaises(StrategyDefinitionError):
+            DeclarativeStrategy(definition(notifications={"schedule": "quarterly"}))
+        with self.assertRaises(StrategyDefinitionError):
+            DeclarativeStrategy(definition(notifications={
+                "schedule": "weekly", "weekly": True,
+            }))
+
     def test_evaluation_records_notification_context_for_research_charts(self):
         strategy = DeclarativeStrategy(definition(
             state={

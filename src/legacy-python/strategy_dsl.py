@@ -698,9 +698,19 @@ def _validate_definition(raw: Any, source: str) -> dict[str, Any]:
         raise StrategyDefinitionError("notifications must be a mapping")
     _reject_unknown(
         notifications,
-        {"weekly", "states", "variables", "market", "prealerts"},
+        {"schedule", "weekly", "states", "variables", "market", "prealerts"},
         "notifications",
     )
+    if "schedule" in notifications and notifications["schedule"] not in {
+        "none", "daily", "weekly", "monthly"
+    }:
+        raise StrategyDefinitionError(
+            "notifications.schedule must be none, daily, weekly, or monthly"
+        )
+    if "schedule" in notifications and "weekly" in notifications:
+        raise StrategyDefinitionError(
+            "use notifications.schedule instead of notifications.weekly"
+        )
     if "weekly" in notifications and not isinstance(notifications["weekly"], bool):
         raise StrategyDefinitionError("notifications.weekly must be true or false")
     for section in ("states", "variables"):

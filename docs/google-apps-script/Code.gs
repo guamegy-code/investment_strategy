@@ -61,20 +61,20 @@ function runNotificationCheck() {
       let alerts = Array.isArray(evaluation.alerts) ? evaluation.alerts.slice() : [];
       if (!alerts.length && evaluation.rebalance_required) alerts.push({...evaluation, type: 'REBALANCE'});
       alerts = alerts.filter(alert => !eventAlreadySent_(eventKey_(alert)));
-      const weekly = isWeeklySummaryDay_() ? evaluation.weekly_summary : null;
-      if (weekly && !eventAlreadySent_(eventKey_(weekly))) {
-        const sameDate = alerts.slice().reverse().find(alert => alert.market_data_at === weekly.market_data_at);
+      const summary = scheduledSummaryDue_(evaluation.scheduled_summary);
+      if (summary && !eventAlreadySent_(eventKey_(summary))) {
+        const sameDate = alerts.slice().reverse().find(alert => alert.market_data_at === summary.market_data_at);
         if (sameDate) {
-          sameDate.includes_weekly = true;
-          sameDate.coalesced_weekly = weekly;
+          sameDate.includes_summary = true;
+          sameDate.coalesced_summary = summary;
         } else {
-          alerts.push(weekly);
+          alerts.push(summary);
         }
       }
       alerts.forEach(alert => {
         sendTelegram_(messageFor_(alert));
         recordEvent_(alert, 'SENT');
-        if (alert.coalesced_weekly) recordEvent_(alert.coalesced_weekly, 'COALESCED');
+        if (alert.coalesced_summary) recordEvent_(alert.coalesced_summary, 'COALESCED');
         sent++;
       });
     });
@@ -129,6 +129,19 @@ function withinNotificationWindow_() {
 function isWeeklySummaryDay_(date) {
   const parts = Utilities.formatDate(date || new Date(), KST, 'yyyy-MM-dd').split('-').map(Number);
   return new Date(Date.UTC(parts[0], parts[1] - 1, parts[2])).getUTCDay() === 6;
+}
+
+function scheduledSummaryDue_(summary) {
+  if (!summary) return null;
+  const schedule = String(summary.summary_schedule || 'weekly');
+  if (schedule === 'daily') return summary;
+  if (schedule === 'weekly' && isWeeklySummaryDay_()) return summary;
+  if (schedule === 'monthly' && isMonthlySummaryDay_()) return summary;
+  return null;
+}
+
+function isMonthlySummaryDay_(date) {
+  return Utilities.formatDate(date || new Date(), KST, 'd') === '1';
 }
 
 function enabledSubscriptions_() {
@@ -258,7 +271,8 @@ function formatConfirmations_(confirmations) {
 }
 function messageFor_(event) {
   const type = event.type || 'REBALANCE';
-  const titles = {REBALANCE: '[리밸런싱 예정]', PREALERT: '[사전주의 · 매매 없음]', WEEKLY: '[주간 시장 브리핑]'};
+  const summaryTitles = {daily: '[일간 시장 브리핑]', weekly: '[주간 시장 브리핑]', monthly: '[월간 시장 브리핑]'};
+  const titles = {REBALANCE: '[리밸런싱 예정]', PREALERT: '[사전주의 · 매매 없음]', SUMMARY: summaryTitles[event.summary_schedule] || summaryTitles.weekly};
   const lines = [titles[type] || '[투자 전략 알림]', '', `전략: ${event.strategy_name}`, `시장 기준일: ${event.market_data_at}`];
   if (event.mapped_products && event.source_strategy_id) lines.push(`기준 전략: ${event.source_strategy_id}`);
   lines.push(`상태: ${formatConfiguredStates_(event) || '-'}`, formatConfiguredMarket_(event));
@@ -284,7 +298,7 @@ function messageFor_(event) {
   } else {
     lines.push('', '현재 비중', formatWeights_(event.current_weights), '목표 비중', formatWeights_(event.target_weights), '현재 행동: 리밸런싱 없음');
   }
-  if (event.includes_weekly) lines[0] += ' · 주간 점검 포함';
+  if (event.includes_summary) lines[0] += ' · 정기 요약 포함';
   return lines.filter(line => line !== undefined && line !== null).join('\n');
 }
 function requiredProperty_(properties, key) { const value = properties.getProperty(key); if (!value) throw new Error(`Script Properties에 ${key}를 설정하세요.`); return value; }

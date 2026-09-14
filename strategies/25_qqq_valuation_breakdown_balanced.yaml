@@ -219,7 +219,7 @@ target:
 
 # 알림 전용 규칙이다. 목표 비중과 매매 판단에는 영향을 주지 않는다.
 notifications:
-  weekly: true
+  schedule: weekly
   states:
     structural_bear_mode:
       label: 구조적 약세
