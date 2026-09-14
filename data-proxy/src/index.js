@@ -382,6 +382,22 @@ function mergeRows(existing, incoming) {
   return addIndicators([...merged.values()].sort((left, right) => left.Date.localeCompare(right.Date)));
 }
 
+export function calculationDefinition(definitions, definition) {
+  const byId = new Map(definitions.map(item => [item?.strategy?.id, item]));
+  const visited = new Set();
+  let current = definition;
+  while (current?.source) {
+    if (visited.has(current.strategy?.id)) throw new Error("circular strategy source");
+    visited.add(current.strategy?.id);
+    current = byId.get(current.source);
+  }
+  return current || definition;
+}
+
+export function usesCompositeValuation(definitions, definition) {
+  return JSON.stringify(calculationDefinition(definitions, definition)).includes("QQQ.valuation_score");
+}
+
 async function refreshNotificationTicker(env, ticker, {lookbackDays = NOTIFICATION_LOOKBACK_DAYS, tailRows = NOTIFICATION_TAIL_ROWS} = {}) {
   if (!env.MARKET_DATA) throw new Error("MARKET_DATA KV binding is not configured");
   const key = `notification-tail:${ticker}`;
@@ -424,7 +440,7 @@ async function notificationEvaluation(request, env) {
   const unseeded = selected.filter(definition => !snapshots.get(definition.strategy.id)).map(definition => definition.strategy.id);
   if (unseeded.length) throw new Error(`notification seed is required: ${unseeded.join(", ")}`);
   const tickers = new Set(selected.flatMap(definition => strategyTickers(definitions, definition)));
-  const hasCompositeValuation = selected.some(definition => JSON.stringify(definition).includes("QQQ.valuation_score"));
+  const hasCompositeValuation = selected.some(definition => usesCompositeValuation(definitions, definition));
   const hasTdfProxy = [...tickers].some(ticker => ticker === "TDF2050_PROXY" || krwAdjustedBaseTicker(ticker) === "TDF2050_PROXY");
   if (hasTdfProxy) for (const ticker of Object.keys(TDF2050_PROXY_COMPONENT_WEIGHTS)) tickers.add(ticker);
   const data = {};
@@ -572,7 +588,7 @@ async function notificationBootstrap(request, env) {
   const selected = ids.map(id => byId.get(id)).filter(Boolean);
   if (selected.length !== ids.length) throw new Error("one or more strategy IDs are unknown");
   const tickers = new Set(selected.flatMap(definition => strategyTickers(definitions, definition)));
-  const hasCompositeValuation = selected.some(definition => JSON.stringify(definition).includes("QQQ.valuation_score"));
+  const hasCompositeValuation = selected.some(definition => usesCompositeValuation(definitions, definition));
   const hasTdfProxy = [...tickers].some(ticker => ticker === "TDF2050_PROXY" || krwAdjustedBaseTicker(ticker) === "TDF2050_PROXY");
   if (hasTdfProxy) for (const ticker of Object.keys(TDF2050_PROXY_COMPONENT_WEIGHTS)) tickers.add(ticker);
   const data = {};
