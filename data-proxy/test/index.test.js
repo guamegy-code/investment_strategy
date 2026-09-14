@@ -3,7 +3,7 @@ import {readFileSync} from "node:fs";
 import test from "node:test";
 import {gzipSync} from "node:zlib";
 
-import worker, {createFallbackTickerLoader, loadPriceRange, loadTicker, loadTickerLabel} from "../src/index.js";
+import worker, {createFallbackTickerLoader, loadPriceRange, loadTicker, loadTickerLabel, usesCompositeValuation} from "../src/index.js";
 import {
   mapProductTarget, parseYaml, runStrategy, runStrategyIncremental,
   selectNotificationAlerts, strategySnapshot, strategyTickers,
@@ -471,6 +471,13 @@ test("loadTickerLabel returns the provider's display name", async (context) => {
   const label = await loadTickerLabel("379810.KS");
 
   assert.equal(label, "KODEX Nasdaq 100");
+});
+
+test("mapped strategies inherit composite valuation history from their source", () => {
+  const source = {strategy: {id: "source"}, variables: {score: "QQQ.valuation_score"}};
+  const mapped = {strategy: {id: "mapped"}, source: "source", products: {QQQ: {"379810.KS": "100%"}}};
+
+  assert.equal(usesCompositeValuation([source, mapped], mapped), true);
 });
 
 test("notification context emits selected prealerts and a detailed rebalance", () => {
