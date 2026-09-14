@@ -20,6 +20,8 @@ const NOTIFICATION_TAIL_ROWS = 320;
 const NOTIFICATION_LOOKBACK_DAYS = 500;
 const RECENT_CACHE_ROWS = 10;
 const TICKER_LABEL_CACHE_SECONDS = 60 * 60 * 24 * 30;
+const COMPOSITE_VALUATION_TICKERS = new Set(["QQQ", "SPY", "BIL"]);
+const COMPOSITE_HISTORY_OPTIONS = {lookbackDays: 2200, tailRows: 1500};
 const YAHOO_CHART_HOSTS = ["query1.finance.yahoo.com", "query2.finance.yahoo.com"];
 const YAHOO_HEADERS = {
   Accept: "application/json,text/plain,*/*",
@@ -398,6 +400,12 @@ export function usesCompositeValuation(definitions, definition) {
   return JSON.stringify(calculationDefinition(definitions, definition)).includes("QQQ.valuation_score");
 }
 
+export function historyOptionsForTicker(ticker, hasCompositeValuation) {
+  return hasCompositeValuation && COMPOSITE_VALUATION_TICKERS.has(ticker)
+    ? COMPOSITE_HISTORY_OPTIONS
+    : {};
+}
+
 async function refreshNotificationTicker(env, ticker, {lookbackDays = NOTIFICATION_LOOKBACK_DAYS, tailRows = NOTIFICATION_TAIL_ROWS} = {}) {
   if (!env.MARKET_DATA) throw new Error("MARKET_DATA KV binding is not configured");
   const key = `notification-tail:${ticker}`;
@@ -444,8 +452,9 @@ async function notificationEvaluation(request, env) {
   const hasTdfProxy = [...tickers].some(ticker => ticker === "TDF2050_PROXY" || krwAdjustedBaseTicker(ticker) === "TDF2050_PROXY");
   if (hasTdfProxy) for (const ticker of Object.keys(TDF2050_PROXY_COMPONENT_WEIGHTS)) tickers.add(ticker);
   const data = {};
-  const historyOptions = hasCompositeValuation ? {lookbackDays: 3650, tailRows: 2300} : {};
-  for (const ticker of tickers) if (ticker !== "TDF2050_PROXY" && !krwAdjustedBaseTicker(ticker)) data[ticker] = await refreshNotificationTicker(env, ticker, historyOptions);
+  for (const ticker of tickers) if (ticker !== "TDF2050_PROXY" && !krwAdjustedBaseTicker(ticker)) {
+    data[ticker] = await refreshNotificationTicker(env, ticker, historyOptionsForTicker(ticker, hasCompositeValuation));
+  }
   if (hasCompositeValuation) addCompositeValuationScore(data);
   if (hasTdfProxy) {
     data.TDF2050_PROXY = buildTdf2050Proxy(data);
@@ -592,8 +601,9 @@ async function notificationBootstrap(request, env) {
   const hasTdfProxy = [...tickers].some(ticker => ticker === "TDF2050_PROXY" || krwAdjustedBaseTicker(ticker) === "TDF2050_PROXY");
   if (hasTdfProxy) for (const ticker of Object.keys(TDF2050_PROXY_COMPONENT_WEIGHTS)) tickers.add(ticker);
   const data = {};
-  const historyOptions = hasCompositeValuation ? {lookbackDays: 3650, tailRows: 2300} : {};
-  for (const ticker of tickers) if (ticker !== "TDF2050_PROXY" && !krwAdjustedBaseTicker(ticker)) data[ticker] = await refreshNotificationTicker(env, ticker, historyOptions);
+  for (const ticker of tickers) if (ticker !== "TDF2050_PROXY" && !krwAdjustedBaseTicker(ticker)) {
+    data[ticker] = await refreshNotificationTicker(env, ticker, historyOptionsForTicker(ticker, hasCompositeValuation));
+  }
   if (hasCompositeValuation) addCompositeValuationScore(data);
   if (hasTdfProxy) data.TDF2050_PROXY = buildTdf2050Proxy(data);
   for (const ticker of [...tickers].filter(krwAdjustedBaseTicker)) {
