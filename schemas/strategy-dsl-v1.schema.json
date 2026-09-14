@@ -106,6 +106,7 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "schedule": {"enum": ["none", "daily", "weekly", "monthly"]},
         "weekly": {"type": "boolean"},
         "states": {
           "type": "object",

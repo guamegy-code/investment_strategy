@@ -224,6 +224,7 @@ test('state alerts distinguish committed changes from confirmation starts',()=>{
   assert.match(source,/Array\.isArray\(item\.to\)\?item\.to:\[item\.to\]/);
 });
 
+
 test('all charts compress non-trading dates with one shared rangebreak list',()=>{
   assert.match(source,/function tradingDayRangebreaks\(traces\)/);
   assert.match(source,/bounds:\['sat','mon'\]/);
