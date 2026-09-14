@@ -411,6 +411,7 @@ async function saveNotificationSnapshot(env, id, snapshot) {
 async function notificationEvaluation(request, env) {
   requireNotificationAuth(request, env);
   const body = await request.json();
+  const preview = body.preview === true;
   const ids = [...new Set(Array.isArray(body.strategy_ids) ? body.strategy_ids.map(String) : [])];
   if (!ids.length || ids.length > 20) throw new Error("strategy_ids must contain 1-20 values");
   const publicDefinitions = await loadDefinitions(env);
@@ -451,7 +452,7 @@ async function notificationEvaluation(request, env) {
     });
     const latestContext = notification.state.latest_context || result.snapshot.notification_context || previousSnapshot.notification_context || null;
     const nextSnapshot = {...result.snapshot, notification: notification.state, notification_context: latestContext};
-    await saveNotificationSnapshot(env, definition.strategy.id, nextSnapshot);
+    if (!preview) await saveNotificationSnapshot(env, definition.strategy.id, nextSnapshot);
     const history = result.history, marketDataAt = nextSnapshot.date || previousSnapshot.date, prior = String(lastDates[definition.strategy.id] || "");
     const events = history.filter(row => row.target && row.date > prior);
     const event = events.at(-1);
@@ -463,10 +464,12 @@ async function notificationEvaluation(request, env) {
     const alerts = notification.alerts.map(alert => ({...alertMetadata, ...alert}));
     const schedule = latestContext?.notification_display?.schedule
       ?? (latestContext?.notification_display?.weekly === false ? "none" : "weekly");
-    const scheduledSummary = latestContext && schedule !== "none" ? {
+    const summarySchedule = schedule === "none" && preview ? "daily" : schedule;
+    const scheduledSummary = latestContext && summarySchedule !== "none" ? {
       ...alertMetadata,
       type: "SUMMARY",
-      summary_schedule: schedule,
+      summary_schedule: summarySchedule,
+      schedule_disabled: schedule === "none",
       market_data_at: marketDataAt,
       state_values: latestContext.state_values || {},
       reason_text: "정기 시장 상황 점검",
@@ -497,7 +500,7 @@ async function notificationEvaluation(request, env) {
       weekly_summary: schedule === "weekly" ? scheduledSummary : null,
     });
   }
-  return response({market_data_updated: true, evaluations});
+  return response({market_data_updated: true, preview, evaluations});
 }
 
 async function notificationSeed(request, env) {
