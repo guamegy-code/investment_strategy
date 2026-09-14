@@ -99,6 +99,29 @@ function sendTestMessage() {
   }
 }
 
+// Sends the current market briefing layout immediately, without changing the
+// Worker-side notification snapshot or waiting for the configured schedule.
+function sendScheduledSummaryTest() {
+  try {
+    const subscriptions = enabledSubscriptions_();
+    if (!subscriptions.length) throw new Error('알림 전략 시트에서 테스트할 전략을 하나 이상 선택하세요.');
+    const evaluations = requestEvaluations_(subscriptions, true);
+    let sent = 0;
+    evaluations.forEach(evaluation => {
+      const summary = evaluation.scheduled_summary;
+      if (!summary) return;
+      sendTelegram_(messageFor_({...summary, test: true}));
+      recordEvent_({...summary, test: true}, 'TEST');
+      sent++;
+    });
+    if (!sent) throw new Error('테스트할 시장 브리핑을 만들지 못했습니다.');
+    logRun_(subscriptions.length, sent, 'SUMMARY_TEST_SUCCESS', '현재 시장 기준의 정기 브리핑 테스트 전송');
+  } catch (error) {
+    logRun_(0, 0, 'SUMMARY_TEST_FAILED', error.message || String(error));
+    throw error;
+  }
+}
+
 function initializeNotificationStates() {
   const subscriptions = enabledSubscriptions_();
   if (!subscriptions.length) throw new Error('알림 전략 시트에서 초기화할 전략을 체크하세요.');
@@ -151,7 +174,7 @@ function enabledSubscriptions_() {
     .filter(item => item.enabled && item.strategyId);
 }
 
-function requestEvaluations_(subscriptions) {
+function requestEvaluations_(subscriptions, preview) {
   const settings = PropertiesService.getScriptProperties();
   const url = requiredProperty_(settings, 'EVALUATION_API_URL');
   const key = requiredProperty_(settings, 'EVALUATION_API_KEY');
@@ -160,7 +183,7 @@ function requestEvaluations_(subscriptions) {
   const response = UrlFetchApp.fetch(url, {
     method: 'post', contentType: 'application/json', muteHttpExceptions: true,
     headers: {Authorization: `Bearer ${key}`},
-    payload: JSON.stringify({strategy_ids: subscriptions.map(item => item.strategyId), last_evaluated_dates: lastDates, private_strategies: privateStrategies}),
+    payload: JSON.stringify({strategy_ids: subscriptions.map(item => item.strategyId), last_evaluated_dates: lastDates, private_strategies: privateStrategies, preview: preview === true}),
   });
   if (response.getResponseCode() !== 200) throw new Error(`평가 API 오류 (${response.getResponseCode()}): ${response.getContentText()}`);
   return JSON.parse(response.getContentText()).evaluations || [];
@@ -275,6 +298,7 @@ function messageFor_(event) {
   const titles = {REBALANCE: '[리밸런싱 예정]', PREALERT: '[사전주의 · 매매 없음]', SUMMARY: summaryTitles[event.summary_schedule] || summaryTitles.weekly};
   const lines = [titles[type] || '[투자 전략 알림]', '', `전략: ${event.strategy_name}`, `시장 기준일: ${event.market_data_at}`];
   if (event.mapped_products && event.source_strategy_id) lines.push(`기준 전략: ${event.source_strategy_id}`);
+  if (event.schedule_disabled) lines.push('정기 브리핑: none 설정 — 테스트로만 전송');
   lines.push(`상태: ${formatConfiguredStates_(event) || '-'}`, formatConfiguredMarket_(event));
   const signals = formatSignals_(event); if (signals) lines.push(`신호: ${signals}`);
   if (event.reason_text || event.reason) lines.push(`판단: ${event.reason_text || event.reason}`);
@@ -298,6 +322,7 @@ function messageFor_(event) {
   } else {
     lines.push('', '현재 비중', formatWeights_(event.current_weights), '목표 비중', formatWeights_(event.target_weights), '현재 행동: 리밸런싱 없음');
   }
+  if (event.test) lines[0] += ' · 테스트';
   if (event.includes_summary) lines[0] += ' · 정기 요약 포함';
   return lines.filter(line => line !== undefined && line !== null).join('\n');
 }

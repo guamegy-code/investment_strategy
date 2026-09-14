@@ -17,7 +17,7 @@ SPREADSHEET_ID=스프레드시트 ID
 열었다면 이 값은 필요하지 않습니다.
 
 3. `setupSpreadsheet()`를 한 번 실행한 뒤 `알림 전략` 시트에 전략 ID를 입력하고 알림을 체크합니다.
-4. `sendTestMessage()`로 Telegram 연결을 확인한 뒤 `installTriggers()`를 한 번 실행합니다.
+4. `sendTestMessage()`로 Telegram 연결을 확인하고, `sendScheduledSummaryTest()`로 현재 시장 기준의 정기 브리핑 모양을 테스트한 뒤 `installTriggers()`를 한 번 실행합니다. 이 테스트는 Worker의 알림 상태를 변경하지 않습니다.
 
 10분 트리거는 KST 07:00~10:00에만 평가 API를 호출합니다. Cloudflare Worker가 새 시장 데이터를 병합하고 전략을 평가하며, 스프레드시트는 발송 이력으로 중복 메시지를 막습니다.
 토요일에는 직전 미국 거래일 기준 주간 브리핑을 보냅니다. 평일에는 실제 리밸런싱 외에

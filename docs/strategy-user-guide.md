@@ -40,7 +40,7 @@ SPREADSHEET_ID=현재 스프레드시트 ID
 `SPREADSHEET_ID`는 스프레드시트 주소에서 `/d/`와 `/edit` 사이의 문자열입니다.
 
 4. `setupSpreadsheet()`를 한 번 실행합니다.
-5. Telegram에서 봇과 대화를 열어 `/start`를 보낸 뒤 `sendTestMessage()`를 실행합니다.
+5. Telegram에서 봇과 대화를 열어 `/start`를 보낸 뒤 `sendTestMessage()`를 실행합니다. 실제 정기 브리핑 형식은 `sendScheduledSummaryTest()`로 별도 확인할 수 있으며, 이 테스트는 알림 상태를 변경하지 않습니다.
 
 ## 3. 전략 등록과 초기화
 
