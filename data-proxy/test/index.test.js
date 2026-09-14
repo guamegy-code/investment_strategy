@@ -3,7 +3,7 @@ import {readFileSync} from "node:fs";
 import test from "node:test";
 import {gzipSync} from "node:zlib";
 
-import worker, {createFallbackTickerLoader, loadPriceRange, loadTicker, loadTickerLabel, usesCompositeValuation} from "../src/index.js";
+import worker, {createFallbackTickerLoader, historyOptionsForTicker, loadPriceRange, loadTicker, loadTickerLabel, usesCompositeValuation} from "../src/index.js";
 import {
   mapProductTarget, parseYaml, runStrategy, runStrategyIncremental,
   selectNotificationAlerts, strategySnapshot, strategyTickers,
@@ -478,6 +478,8 @@ test("mapped strategies inherit composite valuation history from their source", 
   const mapped = {strategy: {id: "mapped"}, source: "source", products: {QQQ: {"379810.KS": "100%"}}};
 
   assert.equal(usesCompositeValuation([source, mapped], mapped), true);
+  assert.equal(historyOptionsForTicker("QQQ", true).lookbackDays, 2200);
+  assert.equal(historyOptionsForTicker("379810.KS", true).lookbackDays, undefined);
 });
 
 test("notification context emits selected prealerts and a detailed rebalance", () => {
