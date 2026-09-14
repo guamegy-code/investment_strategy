@@ -223,12 +223,14 @@ notifications:
   states:
     structural_bear_mode:
       label: 구조적 약세
+      values: {'FALSE': 정상, 'TRUE': 감지}
       alerts:
         - on: changed
           from: 'FALSE'
           to: 'TRUE'
     trend_mode:
       label: 추세
+      values: {BULL: 상승, CAUTION: 주의, BEAR: 하락, RECOVERY: 회복}
       alerts:
         - on: confirmation_started
           to: [BEAR, RECOVERY, BULL]
@@ -241,6 +243,7 @@ notifications:
           message: 반등 조건이 확인됨
     defense_mode:
       label: 밸류에이션
+      values: {NORMAL: 정상, WARNING: 경고, DEFENSE: 방어}
       alerts:
         - on: confirmation_started
           to: [DEFENSE, NORMAL]
@@ -260,8 +263,8 @@ notifications:
           to: NORMAL
           message: 가격 회복 조건이 확인되어 방어 종료
   variables:
-    risk_off_score: {label: 약세, max: 6}
-    recovery_score: {label: 회복, max: 6}
+    risk_off_score: {label: 약세, max: 6, display: bar}
+    recovery_score: {label: 회복, max: 6, display: bar}
   market:
     - {ticker: QQQ, field: roc1, label: 1일, format: percent}
     - {ticker: QQQ, field: roc5, label: 5일, format: percent}

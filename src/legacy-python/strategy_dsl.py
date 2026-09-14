@@ -717,13 +717,29 @@ def _validate_definition(raw: Any, source: str) -> dict[str, Any]:
         configured = _require_mapping(notifications.get(section, {}), f"notifications.{section}")
         for name, item in configured.items():
             item = _require_mapping(item, f"notifications.{section}.{name}")
-            allowed = {"label", "alerts"} if section == "states" else {"label", "max", "decimals"}
+            allowed = (
+                {"label", "alerts", "values"}
+                if section == "states"
+                else {"label", "max", "decimals", "display"}
+            )
             _reject_unknown(item, allowed, f"notifications.{section}.{name}")
             if not str(item.get("label", "")).strip():
                 raise StrategyDefinitionError(f"notifications.{section}.{name}.label is required")
             known = state if section == "states" else definition.get("variables", {})
             if name not in known:
                 raise StrategyDefinitionError(f"notifications.{section}.{name} is not defined")
+            if section == "states" and "values" in item:
+                values = _require_mapping(
+                    item["values"], f"notifications.states.{name}.values"
+                )
+                if not values or any(not str(label).strip() for label in values.values()):
+                    raise StrategyDefinitionError(
+                        f"notifications.states.{name}.values must map state values to labels"
+                    )
+            if section == "variables" and item.get("display", "number") not in {"number", "bar"}:
+                raise StrategyDefinitionError(
+                    f"notifications.variables.{name}.display must be number or bar"
+                )
             if section == "states" and "alerts" in item:
                 alerts = item["alerts"]
                 if not isinstance(alerts, list):

@@ -72,6 +72,7 @@ execution:
 | `notifications` | `weekly` | 이전 호환용 주간 브리핑 설정. 새 전략에서는 `schedule` 사용 | 아니요 |
 | `notifications` | `states` | 메시지에 표시하고 상태 전환을 감시할 상태 설정 | 아니요 |
 | `notifications.states.<이름>` | `label` | 상태의 표시 이름 | 예 |
+| `notifications.states.<이름>` | `values` | 내부 상태값을 메시지용 이름으로 바꾸는 매핑 | 아니요 |
 | `notifications.states.<이름>` | `alerts` | 상태 변경 또는 확인 시작을 알릴 규칙. 생략하면 모든 상태 변경을 알림 | 아니요 |
 | `notifications.states.<이름>.alerts[]` | `on` | 알림 시점. `changed` 또는 `confirmation_started`, 기본값 `changed` | 아니요 |
 | `notifications.states.<이름>.alerts[]` | `from` | 전환 전 상태. 생략하면 모든 출발 상태에 적용 | 아니요 |
@@ -81,6 +82,7 @@ execution:
 | `notifications.variables.<이름>` | `label` | 계산 변수의 표시 이름 | 예 |
 | `notifications.variables.<이름>` | `max` | 점수형 변수의 최대값 | 아니요 |
 | `notifications.variables.<이름>` | `decimals` | 표시할 소수점 자릿수, 기본값 `0` | 아니요 |
+| `notifications.variables.<이름>` | `display` | `number` 또는 최대값 막대가 있는 `bar`, 기본값 `number` | 아니요 |
 | `notifications` | `market` | 메시지에 표시할 시장 지표 목록 | 아니요 |
 | `notifications.market[]` | `ticker` | 지표를 읽을 설정 자산 | 예 |
 | `notifications.market[]` | `field` | 표시할 시장 데이터 필드 | 예 |
@@ -420,6 +422,7 @@ notifications:
   states:
     risk_regime:
       label: 위험 국면
+      values: {NORMAL: 정상, DEFENSIVE: 방어, RECOVERY: 회복}
       alerts:
         - on: confirmation_started
           to: [DEFENSIVE, RECOVERY]
@@ -432,7 +435,7 @@ notifications:
           to: RECOVERY
           message: 회복 조건이 확인되었습니다
   variables:
-    signal_count: {label: 충족 신호, max: 4}
+    signal_count: {label: 충족 신호, max: 4, display: bar}
   market:
     - {ticker: VTI, field: roc1, label: 1일, format: percent}
     - {ticker: VTI, field: drawdown120, label: 120일 고점 대비, format: ratio_percent}
@@ -455,6 +458,9 @@ notifications:
   `위험 국면: NORMAL → DEFENSIVE · 방어 조건이 확인되었습니다`처럼 전환과 설명을 함께
   표시한다. `from`을 생략하면 출발 상태와 관계없이 `to`로 바뀌는 모든 전환에 적용한다.
   구체적인 `from` 규칙과 생략한 규칙이 함께 일치하면 구체적인 규칙을 우선한다.
+- `states.<name>.values`: 내부값을 사람이 읽기 좋은 표시명으로 바꾼다. 예를 들어
+  `BULL: 상승`을 설정하면 메시지에는 `추세: 상승 (BULL)`처럼 표시한다. 생략하면 내부값을
+  그대로 표시한다.
 
 ```yaml
 # 모든 risk_regime 전환을 기본 형식으로 알림
@@ -475,8 +481,10 @@ states:
         to: RECOVERY
         message: 회복 조건이 확인되었습니다
 ```
-- `variables`: 메시지에 표시할 계산 변수다. `max`를 쓰면 `충족 신호 3/4`처럼 표시한다.
-- `market`: 메시지에 표시할 종목 지표다. 계산할 수 없는 초기 구간의 값은 생략한다.
+- `variables`: 메시지에 표시할 계산 변수다. `max`와 `display: bar`를 함께 쓰면
+  `충족 신호: ■■■□□□ 3/4`처럼 표시한다.
+- `market`: 메시지에 표시할 종목 지표다. 계산할 수 없는 초기 구간의 값은 생략하며, 같은
+  종목의 지표는 두 개씩 묶어 별도 블록으로 표시한다.
 - `alerts[].on`: 생략하거나 `changed`이면 상태가 실제로 변경될 때 알린다.
   `confirmation_started`이면 `confirm`이 설정된 목표 상태를 향한 연속 확인이 시작되는
   첫날에 알린다. 이때 `to`에는 하나의 상태값 또는 `[BEAR, RECOVERY]` 같은 상태값 목록을

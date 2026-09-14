@@ -204,8 +204,8 @@ function notificationDisplay(policy,stateValues,variables,market){
   return{
     schedule,
     weekly:schedule==='weekly',
-    states:Object.entries(policy.states||{}).filter(([name])=>Object.prototype.hasOwnProperty.call(stateValues,name)).map(([name,item])=>({name,label:item.label,value:stateValues[name]})),
-    variables:Object.entries(policy.variables||{}).filter(([name])=>Object.prototype.hasOwnProperty.call(variables,name)).map(([name,item])=>({name,label:item.label,value:variables[name],max:item.max??null,decimals:item.decimals??0})),
+    states:Object.entries(policy.states||{}).filter(([name])=>Object.prototype.hasOwnProperty.call(stateValues,name)).map(([name,item])=>({name,label:item.label,value:stateValues[name],...(item.values ? {display_value:item.values[String(stateValues[name])]??String(stateValues[name])} : {})})),
+    variables:Object.entries(policy.variables||{}).filter(([name])=>Object.prototype.hasOwnProperty.call(variables,name)).map(([name,item])=>({name,label:item.label,value:variables[name],max:item.max??null,decimals:item.decimals??0,display:item.display||'number'})),
     market:(policy.market||[]).map(item=>({ticker:item.ticker,field:item.field,label:item.label,format:item.format||'number',decimals:item.decimals??1,value:finiteNumber(market[item.ticker]?.[String(item.field).toLowerCase()])})).filter(item=>item.value!==null),
   };
 }
