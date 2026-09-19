@@ -210,6 +210,17 @@ function notificationDisplay(policy,stateValues,variables,market){
   };
 }
 
+function notificationMarket(policy,market){
+  const summary={};
+  for(const item of policy.market||[]){
+    const ticker=String(item.ticker),field=String(item.field).toLowerCase(),value=finiteNumber(market[ticker]?.[field]);
+    if(value===null)continue;
+    if(!summary[ticker])summary[ticker]={};
+    summary[ticker][field]=value;
+  }
+  return summary;
+}
+
 function requiredConfirmationDays(definition,name,value){
   const rules=definition.state?.[name]?.rules||[];
   return Math.max(1,...rules.filter(rule=>String(rule.set)===String(value)).map(rule=>Number(rule.confirm||1)));
@@ -248,23 +259,12 @@ function installNotificationContext(StrategyClass){
       const previous=previousCandidates[item.name];
       return item.days===1&&(!previous||previous.value!==item.desired);
     });
-    const qqq=market.QQQ||{},spy=market.SPY||{};
-    const marketSummary={
-      qqq:{
-        close:finiteNumber(qqq.close),roc1:finiteNumber(qqq.roc1),roc5:finiteNumber(qqq.roc5),
-        roc20:finiteNumber(qqq.roc20),roc60:finiteNumber(qqq.roc60),drawdown120:finiteNumber(qqq.drawdown120),
-        ema20:finiteNumber(qqq.ema20),ema55:finiteNumber(qqq.ema55),ema200:finiteNumber(qqq.ema200),
-        valuation_score:finiteNumber(qqq.valuation_score),
-      },
-      spy:{close:finiteNumber(spy.close),roc5:finiteNumber(spy.roc5),ema20:finiteNumber(spy.ema20)},
-    };
     const policy=notificationPolicy(this.def);
     const reasons=stateChanges.filter(change=>policy.states?.[change.name]).map(change=>transitionExplanation(change,policy));
     const materialStateChange=stateChanges.some(change=>allocationRelevantStateChange(change,policy));
     if(signal.rebalance&&!materialStateChange){
-      if(this.variables?.structural_bear)reasons.push('구조적 약세 조건이 충족되어 방어 목표 적용');
-      else if(String(signal.reason||'').includes('자동 자산'))reasons.push(String(signal.reason).replace(/^DECLARATIVE_RULE_\d+\s*\|\s*/,''));
-      else reasons.push(`목표 비중 괴리가 실행 기준에 도달 (${(targetDeviation*100).toFixed(1)}%p)`);
+      const declaredReason=String(signal.reason||'').match(/^DECLARATIVE_RULE_\d+\s*\|\s*(.+)$/)?.[1];
+      reasons.push(declaredReason||`목표 비중 괴리가 실행 기준에 도달 (${(targetDeviation*100).toFixed(1)}%p)`);
     }
     const ctx=this.context(market,portfolio,targetWeights);
     const prealerts=(policy.prealerts||[]).map(rule=>({id:String(rule.id),message:String(rule.message),matched:Boolean(evaluate(rule.when,ctx)),reset:Boolean(evaluate(rule.reset_when,ctx))}));
@@ -275,7 +275,7 @@ function installNotificationContext(StrategyClass){
       variables:Object.fromEntries(Object.entries(this.variables||{}).filter(([,value])=>['number','boolean','string'].includes(typeof value))),
       confirmations,
       confirmation_started:confirmationStarted,
-      market:marketSummary,
+      market:notificationMarket(policy,market),
       current_weights:Object.fromEntries(Object.keys(targetWeights).map(ticker=>[ticker,Number(currentWeights[ticker]||0)])),
       previous_target_weights:previousTargetWeights,
       target_weights:targetWeights,
@@ -361,15 +361,11 @@ function allocationRelevantStateChange(change,policy){
   const configured=policy?.states?.[change.name];
   if(configured&&!Object.prototype.hasOwnProperty.call(configured,'alerts'))return true;
   if(configured)return(configured.alerts||[]).some(item=>notificationAlertMatches(item,'changed',change.current)&&(!Object.prototype.hasOwnProperty.call(item,'from')||String(item.from)===String(change.previous)));
-  if(change.name==='defense_mode')return true;
-  if(change.name!=='trend_mode'&&change.name!=='market_mode')return false;
-  return [change.previous,change.current].some(value=>value==='BEAR'||value==='RECOVERY');
+  return false;
 }
 
-function criticalConfirmation(item,stateValues,policy){
-  if(policy?.states)return(policy.states[item.name]?.alerts||[]).some(alert=>notificationAlertMatches(alert,'confirmation_started',item.desired));
-  if(['BEAR','DEFENSE','RECOVERY','NORMAL'].includes(String(item.desired)))return true;
-  return String(item.desired)==='BULL'&&String(stateValues.trend_mode||stateValues.market_mode)==='RECOVERY';
+function criticalConfirmation(item,policy){
+  return(policy?.states?.[item.name]?.alerts||[]).some(alert=>notificationAlertMatches(alert,'confirmation_started',item.desired));
 }
 
 function confirmationExplanation(item,policy){
@@ -388,7 +384,7 @@ export function selectNotificationAlerts(history,notificationState={}){
     if(context.prealerts){for(const rule of context.prealerts){if(rule.reset)armedRules[rule.id]=false;if(rule.matched&&!armedRules[rule.id]){ruleDetails.push(rule.message);armedRules[rule.id]=true;}}}
     else if(notificationState.deviation_armed!==undefined){deviationArmed=Boolean(notificationState.deviation_armed);}
     const relevantChanges=(context.state_changes||[]).filter(change=>allocationRelevantStateChange(change,policy));
-    const confirmationStarts=(context.confirmation_started||[]).filter(item=>criticalConfirmation(item,context.state_values||{},policy));
+    const confirmationStarts=(context.confirmation_started||[]).filter(item=>criticalConfirmation(item,policy));
     const details=[];
     for(const change of relevantChanges)details.push(transitionExplanation(change,policy));
     for(const item of confirmationStarts)details.push(confirmationExplanation(item,policy));

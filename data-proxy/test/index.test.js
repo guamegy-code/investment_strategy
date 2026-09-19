@@ -502,7 +502,7 @@ test("notification context emits selected prealerts and a detailed rebalance", (
   assert.deepEqual(selected.alerts[2].target_weights, {QQQ: .3, BIL: .7});
   assert.deepEqual(selected.alerts[2].previous_target_weights, {QQQ: 1, BIL: 0});
   assert.equal(selected.alerts[2].target_changed, true);
-  assert.equal(selected.alerts[2].market.qqq.close, 80);
+  assert.equal(selected.alerts[2].market.QQQ.close, 80);
 });
 
 test("custom notification DSL supports arbitrary state names and presentation", () => {
@@ -512,7 +512,7 @@ test("custom notification DSL supports arbitrary state names and presentation", 
     weekly: false,
     states: {defense_mode: {label: "내 방어"}},
     variables: {risk_off_score: {label: "내 약세", max: 1}},
-    market: [{ticker: "QQQ", field: "roc1", label: "하루", format: "percent"}],
+    market: [{ticker: "BIL", field: "close", label: "현금성 자산 가격", format: "price"}],
     prealerts: [{id: "drift", when: "target_deviation() >= 5%", reset_when: "target_deviation() < 4%", message: "사용자 정의 괴리 경고"}],
   };
   const seedData = Object.fromEntries(Object.entries(data).map(([ticker, rows]) => [ticker, rows.slice(0, 1)]));
@@ -524,7 +524,9 @@ test("custom notification DSL supports arbitrary state names and presentation", 
   assert.match(selected.alerts[0].reason_text, /내 방어: NORMAL → WARNING/);
   assert.deepEqual(selected.alerts[0].notification_display.states, [{name: "defense_mode", label: "내 방어", value: "WARNING"}]);
   assert.equal(selected.alerts[0].notification_display.weekly, false);
-  assert.equal(selected.alerts[0].notification_display.market[0].label, "하루");
+  assert.equal(selected.alerts[0].notification_display.market[0].ticker, "BIL");
+  assert.equal(selected.alerts[0].notification_display.market[0].label, "현금성 자산 가격");
+  assert.deepEqual(selected.alerts[0].market, {BIL: {close: 100}});
 });
 
 test("mapped product strategy inherits source context and reports product weights", () => {
