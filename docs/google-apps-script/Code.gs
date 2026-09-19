@@ -236,13 +236,13 @@ function eventAlreadySent_(key) {
 
 function recordEvent_(evaluation, result) {
   const sheet = requireSpreadsheet_().getSheetByName(SHEETS.EVENTS);
-  sheet.appendRow([new Date(), eventKey_(evaluation), evaluation.market_data_at, evaluation.strategy_id, evaluation.strategy_name, formatStates_(evaluation.state_values, evaluation.state), evaluation.reason_text || evaluation.reason || '', evaluation.execution_days || '', formatWeights_(evaluation.target_weights), result || 'SENT', evaluation.type || 'REBALANCE', formatMarket_(evaluation.market)]);
+  sheet.appendRow([new Date(), eventKey_(evaluation), evaluation.market_data_at, evaluation.strategy_id, evaluation.strategy_name, formatStatesForSheet_(evaluation), evaluation.reason_text || evaluation.reason || '', evaluation.execution_days || '', formatWeights_(evaluation.target_weights), result || 'SENT', evaluation.type || 'REBALANCE', formatMarketForSheet_(evaluation)]);
 }
 
 function updateSubscription_(evaluation) {
   const sheet = requireSpreadsheet_().getSheetByName(SHEETS.SUBSCRIPTIONS);
   const rows = sheet.getDataRange().getValues();
-  rows.slice(1).forEach((row, index) => { if (String(row[1]) === evaluation.strategy_id) sheet.getRange(index + 2, 4, 1, 2).setValues([[evaluation.market_data_at, formatStates_(evaluation.state_values, evaluation.state) || '정상']]); });
+  rows.slice(1).forEach((row, index) => { if (String(row[1]) === evaluation.strategy_id) sheet.getRange(index + 2, 4, 1, 2).setValues([[evaluation.market_data_at, formatStatesForSheet_(evaluation) || '정상']]); });
 }
 
 function logRun_(strategies, sent, result, detail) {
@@ -251,19 +251,19 @@ function logRun_(strategies, sent, result, detail) {
   Logger.log(`${result}: ${detail}`);
 }
 function formatWeights_(weights) { return Object.entries(weights || {}).map(([ticker, weight]) => `${ticker} ${(Number(weight) * 100).toFixed(1)}%`).join('\n'); }
-function formatWeightsInline_(weights) { return Object.entries(weights || {}).map(([ticker, weight]) => `${ticker} ${(Number(weight) * 100).toFixed(1)}%`).join(' / '); }
-function formatWeightChanges_(event) {
-  const current = event.current_weights || {}, target = event.target_weights || {};
-  return Object.keys(target).map(ticker => {
-    const before = Number(current[ticker] || 0) * 100, after = Number(target[ticker] || 0) * 100, change = after - before;
-    return `${ticker} ${before.toFixed(1)}% → ${after.toFixed(1)}% (${change >= 0 ? '+' : ''}${change.toFixed(1)}%p)`;
-  }).join('\n');
+function stateDisplayItems_(event) {
+  const configured = event.notification_display?.states;
+  if (Array.isArray(configured)) return configured.map(item => ({
+    name: item.name,
+    label: item.label || item.name,
+    value: String(item.value),
+    display: String(item.display_value || item.value),
+  }));
+  return Object.entries(event.state_values || {}).map(([name, value]) => ({name, label: name, value: String(value), display: String(value)}));
 }
-function formatStates_(states, legacy) {
-  const labels = {trend_mode: '추세', market_mode: '추세', defense_mode: '밸류에이션', stage: '하락 단계', valuation_level: '평가 단계'};
-  const order = ['trend_mode', 'market_mode', 'defense_mode', 'stage', 'valuation_level'];
-  const text = order.filter(key => Object.prototype.hasOwnProperty.call(states || {}, key)).map(key => `${labels[key]} ${states[key]}`).join(' / ');
-  return text || legacy || '';
+function formatStatesForSheet_(event) {
+  const text = stateDisplayItems_(event).map(item => `${item.label} ${item.display === item.value ? item.value : `${item.display} (${item.value})`}`).join(' / ');
+  return text || event.state || '';
 }
 function formatConfiguredValue_(item) {
   const value = Number(item.value), digits = item.decimals === undefined ? 1 : Number(item.decimals);
@@ -273,24 +273,22 @@ function formatConfiguredValue_(item) {
   return value.toFixed(digits);
 }
 function formatConfiguredStates_(event) {
-  const items = event.notification_display?.states || [];
-  if (event.notification_display) return items.map(item => {
-    const value = String(item.value), display = String(item.display_value || value);
-    return `• ${item.label}: ${display === value ? value : `${display} (${value})`}`;
-  }).join('\n');
-  const legacy = formatStates_(event.state_values, event.state);
-  return legacy ? `• ${legacy}` : '';
+  return stateDisplayItems_(event).map(item => `• ${item.label}: ${item.display === item.value ? item.value : `${item.display} (${item.value})`}`).join('\n');
 }
-function percent_(value, digits) { return Number.isFinite(Number(value)) ? `${Number(value).toFixed(digits === undefined ? 1 : digits)}%` : '-'; }
-function formatMarket_(market) {
-  const qqq = market?.qqq || {};
-  const parts = [`1일 ${percent_(qqq.roc1)}`, `5일 ${percent_(qqq.roc5)}`, `20일 ${percent_(qqq.roc20)}`];
-  if (Number.isFinite(Number(qqq.drawdown120))) parts.push(`120일 고점 대비 ${percent_(Number(qqq.drawdown120) * 100)}`);
-  return `QQQ ${parts.join(' / ')}`;
+function marketDisplayItems_(event) {
+  const configured = event.notification_display?.market;
+  if (Array.isArray(configured)) return configured;
+  return Object.entries(event.market || {}).flatMap(([ticker, fields]) => Object.entries(fields || {}).filter(([, value]) => Number.isFinite(Number(value))).map(([field, value]) => ({
+    ticker, field, label: field, format: 'number', decimals: 1, value,
+  })));
+}
+function formatMarketForSheet_(event) {
+  const groups = {};
+  marketDisplayItems_(event).forEach(item => { if (!groups[item.ticker]) groups[item.ticker] = []; groups[item.ticker].push(`${item.label} ${formatConfiguredValue_(item)}`); });
+  return Object.entries(groups).map(([ticker, values]) => `${ticker} ${values.join(' / ')}`).join('\n');
 }
 function formatConfiguredMarket_(event) {
-  const items = event.notification_display?.market || [];
-  if (!event.notification_display) return `[[B]]📈 시장 지표 (QQQ)[[/B]]\n• ${formatMarket_(event.market)}`;
+  const items = marketDisplayItems_(event);
   if (!items.length) return '';
   const groups = {};
   items.forEach(item => { if (!groups[item.ticker]) groups[item.ticker] = []; groups[item.ticker].push(`${item.label}: ${formatConfiguredValue_(item)}`); });
@@ -314,50 +312,10 @@ function formatSignals_(event) {
     const suffix = item.max === null || item.max === undefined ? '' : ` ${value}/${item.max}`;
     return `• ${item.label}: ${item.display === 'bar' && Number(item.max) > 0 ? `${signalBar_(item.value, item.max)}${suffix}` : value}`;
   }).join('\n');
-  const variables = event.variables || {}, qqq = event.market?.qqq || {}, parts = [];
-  if (Number.isFinite(Number(variables.risk_off_score))) parts.push(`약세 ${Number(variables.risk_off_score)}/6`);
-  if (Number.isFinite(Number(variables.recovery_score))) parts.push(`회복 ${Number(variables.recovery_score)}/6`);
-  if (Number.isFinite(Number(qqq.valuation_score))) parts.push(`밸류에이션 ${Number(qqq.valuation_score).toFixed(1)}`);
-  return parts.join(' / ');
+  return Object.entries(event.variables || {}).filter(([, value]) => ['number', 'boolean', 'string'].includes(typeof value)).map(([name, value]) => `• ${name}: ${value}`).join('\n');
 }
 function formatConfirmations_(confirmations) {
   return (confirmations || []).map(item => `${item.name} → ${item.desired} ${item.days}/${item.required_days}일`).join('\n');
-}
-function messageFor_(event) {
-  return formattedMessageFor_(event);
-  const type = event.type || 'REBALANCE';
-  const summaryTitles = {daily: '[일간 시장 브리핑]', weekly: '[주간 시장 브리핑]', monthly: '[월간 시장 브리핑]'};
-  const titles = {REBALANCE: '[리밸런싱 예정]', PREALERT: '[사전주의 · 매매 없음]', SUMMARY: summaryTitles[event.summary_schedule] || summaryTitles.weekly};
-  const lines = [titles[type] || '[투자 전략 알림]', '', `전략: ${event.strategy_name}`, `시장 기준일: ${event.market_data_at}`];
-  if (event.mapped_products && event.source_strategy_id) lines.push(`기준 전략: ${event.source_strategy_id}`);
-  if (event.schedule_disabled) lines.push('정기 브리핑: none 설정 — 테스트로만 전송');
-  const states = formatConfiguredStates_(event); if (states) lines.push('', '📌 시장 상태', states);
-  const signals = formatSignals_(event); if (signals) lines.push('', '📊 신호', signals);
-  const market = formatConfiguredMarket_(event); if (market) lines.push('', '📈 시장 지표', market);
-  if (event.reason_text || event.reason) lines.push(`판단: ${event.reason_text || event.reason}`);
-  const confirmations = formatConfirmations_(event.confirmations); if (confirmations) lines.push(`확인 진행\n${confirmations}`);
-  lines.push(`목표 괴리: ${(Number(event.target_deviation || 0) * 100).toFixed(1)}%p`);
-  if (type === 'REBALANCE') {
-    if (event.target_changed && Object.keys(event.previous_target_weights || {}).length) {
-      lines.push(
-        '',
-        '목표 비중',
-        formatWeightsInline_(event.previous_target_weights),
-        `→ ${formatWeightsInline_(event.target_weights)}`,
-        '',
-        '현재 비중',
-        formatWeightsInline_(event.current_weights),
-      );
-    } else {
-      lines.push('', '현재 → 목표 비중', formatWeightChanges_(event));
-    }
-    lines.push(`실행 예정: 다음 거래일 시가부터 ${event.execution_days || 1}일`);
-  } else {
-    lines.push('', '현재 비중', formatWeights_(event.current_weights), '목표 비중', formatWeights_(event.target_weights), '현재 행동: 리밸런싱 없음');
-  }
-  if (event.test) lines[0] += ' · 테스트';
-  if (event.includes_summary) lines[0] += ' · 정기 요약 포함';
-  return lines.filter(line => line !== undefined && line !== null).join('\n');
 }
 function formatAllocationTable_(event) {
   const current = event.current_weights || {}, target = event.target_weights || {};
@@ -374,7 +332,7 @@ function telegramHtml_(text) {
     .replace(/\[\[B\]\]([\s\S]*?)\[\[\/B\]\]/g, '<b>$1</b>')
     .replace(/\[\[C\]\]([\s\S]*?)\[\[\/C\]\]/g, '<code>$1</code>');
 }
-function formattedMessageFor_(event) {
+function messageFor_(event) {
   const type = event.type || 'REBALANCE';
   const summaryTitles = {daily: '[일간 시장 브리핑]', weekly: '[주간 시장 브리핑]', monthly: '[월간 시장 브리핑]'};
   const titles = {REBALANCE: '[리밸런싱 예정]', PREALERT: '[사전주의 · 매매 없음]', SUMMARY: summaryTitles[event.summary_schedule] || summaryTitles.weekly};
