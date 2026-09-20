@@ -2,6 +2,12 @@
 const SHEETS = {SUBSCRIPTIONS: '알림 전략', PERSONAL: '개인 전략', EVENTS: '알림 이력', LOG: '실행 로그'};
 const LEGACY_PRIVATE_SHEET = '비공개 전략';
 const KST = 'Asia/Seoul';
+const KOREAN_HOLIDAY_CALENDAR_ID = 'ko.south_korea#holiday@group.v.calendar.google.com';
+const NOTIFICATION_WINDOW_START_MINUTE = 8 * 60;
+const NOTIFICATION_WINDOW_END_MINUTE = 9 * 60;
+let koreanHolidayCalendarCache_ = null;
+const koreanHolidayCache_ = {};
+let customKrxClosedDatesCache_ = null;
 
 function spreadsheet_() {
   const active = SpreadsheetApp.getActiveSpreadsheet();
@@ -35,6 +41,7 @@ function setupSpreadsheet() {
 }
 
 function installTriggers() {
+  ensureKoreanHolidayCalendar_();
   ScriptApp.getProjectTriggers()
     .filter(trigger => trigger.getHandlerFunction() === 'runNotificationCheck')
     .forEach(trigger => ScriptApp.deleteTrigger(trigger));
@@ -45,8 +52,13 @@ function runNotificationCheck() {
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(1000)) return;
   try {
-    if (!withinNotificationWindow_()) {
+    const now = new Date();
+    if (!withinNotificationWindow_(now)) {
       logRun_(0, 0, 'SKIPPED_OUTSIDE_WINDOW', '설정된 알림 시간대 밖입니다.');
+      return;
+    }
+    if (!isKrxTradingDay_(now)) {
+      logRun_(0, 0, 'SKIPPED_KRX_CLOSED', '한국거래소 휴장일이므로 시장 평가를 다음 거래일로 미룹니다.');
       return;
     }
     const subscriptions = enabledSubscriptions_();
@@ -61,7 +73,7 @@ function runNotificationCheck() {
       let alerts = Array.isArray(evaluation.alerts) ? evaluation.alerts.slice() : [];
       if (!alerts.length && evaluation.rebalance_required) alerts.push({...evaluation, type: 'REBALANCE'});
       alerts = alerts.filter(alert => !eventAlreadySent_(eventKey_(alert)));
-      const summary = scheduledSummaryDue_(evaluation.scheduled_summary);
+      const summary = scheduledSummaryDue_(evaluation.scheduled_summary, now);
       if (summary && !eventAlreadySent_(eventKey_(summary))) {
         const sameDate = alerts.slice().reverse().find(alert => alert.market_data_at === summary.market_data_at);
         if (sameDate) {
@@ -72,9 +84,10 @@ function runNotificationCheck() {
         }
       }
       alerts.forEach(alert => {
-        sendTelegram_(messageFor_(alert));
-        recordEvent_(alert, 'SENT');
-        if (alert.coalesced_summary) recordEvent_(alert.coalesced_summary, 'COALESCED');
+        const datedAlert = {...alert, execution_market_date: kstDateKey_(now)};
+        sendTelegram_(messageFor_(datedAlert));
+        recordEvent_(datedAlert, 'SENT');
+        if (datedAlert.coalesced_summary) recordEvent_(datedAlert.coalesced_summary, 'COALESCED');
         sent++;
       });
     });
@@ -155,27 +168,122 @@ function initializeNotificationStates() {
   if (failed.length) throw new Error(`일부 전략 초기화에 실패했습니다. ${failed.join(' | ')}`);
 }
 
-function withinNotificationWindow_() {
-  const hour = Number(Utilities.formatDate(new Date(), KST, 'H'));
-  return hour >= 7 && hour < 10;
+function withinNotificationWindow_(date) {
+  const parts = Utilities.formatDate(date || new Date(), KST, 'H,m').split(',').map(Number);
+  const minute = parts[0] * 60 + parts[1];
+  return minute >= NOTIFICATION_WINDOW_START_MINUTE && minute < NOTIFICATION_WINDOW_END_MINUTE;
 }
 
 function isWeeklySummaryDay_(date) {
-  const parts = Utilities.formatDate(date || new Date(), KST, 'yyyy-MM-dd').split('-').map(Number);
-  return new Date(Date.UTC(parts[0], parts[1] - 1, parts[2])).getUTCDay() === 6;
+  return isFirstKrxTradingDayOfWeek_(date);
 }
 
-function scheduledSummaryDue_(summary) {
+function scheduledSummaryDue_(summary, date) {
   if (!summary) return null;
   const schedule = String(summary.summary_schedule || 'weekly');
   if (schedule === 'daily') return summary;
-  if (schedule === 'weekly' && isWeeklySummaryDay_()) return summary;
-  if (schedule === 'monthly' && isMonthlySummaryDay_()) return summary;
+  if (schedule === 'weekly' && isWeeklySummaryDay_(date)) return summary;
+  if (schedule === 'monthly' && isMonthlySummaryDay_(date)) return summary;
   return null;
 }
 
 function isMonthlySummaryDay_(date) {
-  return Utilities.formatDate(date || new Date(), KST, 'd') === '1';
+  return isFirstKrxTradingDayOfMonth_(date);
+}
+
+function kstDateKey_(date) {
+  return Utilities.formatDate(date || new Date(), KST, 'yyyy-MM-dd');
+}
+
+function kstNoon_(dateOrKey) {
+  const key = typeof dateOrKey === 'string' ? dateOrKey : kstDateKey_(dateOrKey);
+  return new Date(`${key}T12:00:00+09:00`);
+}
+
+function addKstDays_(dateOrKey, days) {
+  const date = kstNoon_(dateOrKey);
+  date.setUTCDate(date.getUTCDate() + days);
+  return kstDateKey_(date);
+}
+
+function kstWeekday_(dateOrKey) {
+  return kstNoon_(dateOrKey).getUTCDay();
+}
+
+function customKrxClosedDates_() {
+  if (customKrxClosedDatesCache_) return customKrxClosedDatesCache_;
+  const raw = PropertiesService.getScriptProperties().getProperty('KRX_CLOSED_DATES') || '';
+  customKrxClosedDatesCache_ = new Set(raw.split(/[\s,;]+/).map(value => value.trim()).filter(value => /^\d{4}-\d{2}-\d{2}$/.test(value)));
+  return customKrxClosedDatesCache_;
+}
+
+function ensureKoreanHolidayCalendar_() {
+  if (koreanHolidayCalendarCache_) return koreanHolidayCalendarCache_;
+  koreanHolidayCalendarCache_ = CalendarApp.getCalendarById(KOREAN_HOLIDAY_CALENDAR_ID)
+    || CalendarApp.subscribeToCalendar(KOREAN_HOLIDAY_CALENDAR_ID, {hidden: true, selected: false});
+  if (!koreanHolidayCalendarCache_) throw new Error('대한민국 공휴일 캘린더를 사용할 수 없습니다.');
+  return koreanHolidayCalendarCache_;
+}
+
+function isKoreanPublicHoliday_(dateOrKey) {
+  const key = typeof dateOrKey === 'string' ? dateOrKey : kstDateKey_(dateOrKey);
+  if (Object.prototype.hasOwnProperty.call(koreanHolidayCache_, key)) return koreanHolidayCache_[key];
+  const scriptCache = CacheService.getScriptCache();
+  const cacheKey = `korean-public-holiday:${key}`;
+  const cached = scriptCache.get(cacheKey);
+  if (cached !== null) {
+    koreanHolidayCache_[key] = cached === '1';
+    return koreanHolidayCache_[key];
+  }
+  const start = new Date(`${key}T00:00:00+09:00`);
+  const end = new Date(`${addKstDays_(key, 1)}T00:00:00+09:00`);
+  const holiday = ensureKoreanHolidayCalendar_().getEvents(start, end).length > 0;
+  scriptCache.put(cacheKey, holiday ? '1' : '0', 21600);
+  koreanHolidayCache_[key] = holiday;
+  return holiday;
+}
+
+function isKrxBaseBusinessDay_(dateOrKey) {
+  const key = typeof dateOrKey === 'string' ? dateOrKey : kstDateKey_(dateOrKey);
+  const weekday = kstWeekday_(key);
+  if (weekday === 0 || weekday === 6) return false;
+  if (key.slice(5) === '05-01') return false;
+  if (customKrxClosedDates_().has(key)) return false;
+  return !isKoreanPublicHoliday_(key);
+}
+
+function isKrxYearEndClosure_(dateOrKey) {
+  const key = typeof dateOrKey === 'string' ? dateOrKey : kstDateKey_(dateOrKey);
+  const year = key.slice(0, 4);
+  if (key.slice(5, 7) !== '12') return false;
+  let lastBusinessDay = `${year}-12-31`;
+  while (!isKrxBaseBusinessDay_(lastBusinessDay)) lastBusinessDay = addKstDays_(lastBusinessDay, -1);
+  return key === lastBusinessDay;
+}
+
+function isKrxTradingDay_(dateOrKey) {
+  const key = typeof dateOrKey === 'string' ? dateOrKey : kstDateKey_(dateOrKey);
+  return isKrxBaseBusinessDay_(key) && !isKrxYearEndClosure_(key);
+}
+
+function isFirstKrxTradingDayOfWeek_(date) {
+  const key = kstDateKey_(date);
+  if (!isKrxTradingDay_(key)) return false;
+  const weekday = kstWeekday_(key);
+  for (let offset = 1; offset < weekday; offset++) {
+    if (isKrxTradingDay_(addKstDays_(key, -offset))) return false;
+  }
+  return true;
+}
+
+function isFirstKrxTradingDayOfMonth_(date) {
+  const key = kstDateKey_(date);
+  if (!isKrxTradingDay_(key)) return false;
+  const day = Number(key.slice(8, 10));
+  for (let offset = 1; offset < day; offset++) {
+    if (isKrxTradingDay_(addKstDays_(key, -offset))) return false;
+  }
+  return true;
 }
 
 function enabledSubscriptions_() {
@@ -336,7 +444,8 @@ function messageFor_(event) {
   const type = event.type || 'REBALANCE';
   const summaryTitles = {daily: '[일간 시장 브리핑]', weekly: '[주간 시장 브리핑]', monthly: '[월간 시장 브리핑]'};
   const titles = {REBALANCE: '[리밸런싱 예정]', PREALERT: '[사전주의 · 매매 없음]', SUMMARY: summaryTitles[event.summary_schedule] || summaryTitles.weekly};
-  const lines = [titles[type] || '[투자 전략 알림]', '', `[[B]]${event.strategy_name}[[/B]]`, `시장 기준일: ${event.market_data_at}`];
+  const marketDateLabel = event.mapped_products ? '미국 신호 기준일' : '시장 기준일';
+  const lines = [titles[type] || '[투자 전략 알림]', '', `[[B]]${event.strategy_name}[[/B]]`, `${marketDateLabel}: ${event.market_data_at}`];
   if (event.schedule_disabled) lines.push('정기 브리핑: none 설정 — 테스트로만 전송');
   const states = formatConfiguredStates_(event); if (states) lines.push('', '[[B]]📌 시장 상태[[/B]]', states);
   const signals = formatSignals_(event); if (signals) lines.push('', '[[B]]📊 신호[[/B]]', signals);
@@ -346,7 +455,12 @@ function messageFor_(event) {
   lines.push(`• 목표 괴리: [[C]]${(Number(event.target_deviation || 0) * 100).toFixed(1)}%p[[/C]]`);
   const allocationStatus = type === 'REBALANCE' ? (event.target_changed ? '목표 변경' : '리밸런싱 예정') : '매매 없음';
   lines.push('', `[[B]]📦 포트폴리오 비중 (${allocationStatus})[[/B]]`, formatAllocationTable_(event));
-  if (type === 'REBALANCE') lines.push(`[[B]]실행 예정[[/B]]: 다음 거래일 시가부터 ${event.execution_days || 1}일`);
+  if (type === 'REBALANCE' && event.mapped_products) {
+    lines.push(`[[B]]한국 실행 예정일[[/B]]: ${event.execution_market_date || kstDateKey_()}`);
+    lines.push(`[[B]]실행 예정[[/B]]: 한국장 시가부터 ${event.execution_days || 1}일`);
+  } else if (type === 'REBALANCE') {
+    lines.push(`[[B]]실행 예정[[/B]]: 다음 거래일 시가부터 ${event.execution_days || 1}일`);
+  }
   if (event.test) lines[0] += ' · 테스트';
   if (event.includes_summary) lines[0] += ' · 정기 요약 포함';
   return lines.filter(line => line !== undefined && line !== null).join('\n');
