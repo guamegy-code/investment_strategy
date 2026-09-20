@@ -61,11 +61,16 @@ Apps Script 왼쪽의 **프로젝트 설정 → 스크립트 속성**에서 다�
 독립형 Apps Script를 사용해야 하는 경우에만 스프레드시트 URL의 `/d/`와 `/edit` 사이 문자열을
 `SPREADSHEET_ID`로 추가합니다.
 
+한국거래소가 임시 휴장을 공지한 경우에는 선택 속성 `KRX_CLOSED_DATES`에 날짜를
+`2026-11-13,2027-01-04`처럼 쉼표로 구분해 추가할 수 있습니다. 토·일요일, 대한민국 공휴일,
+근로자의 날과 연말 폐장일은 자동으로 제외하므로 평소에는 이 속성이 필요하지 않습니다.
+
 ## 4. 알림용 시트 만들기
 
 Apps Script 상단의 함수 선택 목록에서 `setupSpreadsheet`를 선택하고 **실행**을 누릅니다.
 처음 실행할 때 Google 권한 확인 화면이 나오면 현재 스프레드시트 수정, 외부 API 호출과 트리거
-생성에 필요한 권한을 검토한 뒤 허용합니다.
+생성에 필요한 권한을 검토한 뒤 허용합니다. `installTriggers()`를 실행할 때는 대한민국 공휴일을
+판별하기 위한 Google Calendar 권한도 한 번 요청합니다. 스크립트는 공개 공휴일 캘린더만 읽습니다.
 
 실행이 끝나면 스프레드시트에 다음 탭이 생깁니다.
 
@@ -130,9 +135,12 @@ Apps Script 상단의 함수 선택 목록에서 `setupSpreadsheet`를 선택하
 - `initializeNotificationStates()`가 오류 없이 끝났다.
 - Apps Script 왼쪽의 **트리거** 화면에 `runNotificationCheck`가 하나 있다.
 
-트리거는 10분마다 실행되지만 실제 평가 API 호출은 KST 07:00~10:00에만 합니다. 알림을 잠시
-끄려면 `알림 전략`의 체크를 해제합니다. 자동 실행 자체를 중단하려면 Apps Script의 **트리거**
-화면에서 `runNotificationCheck` 트리거를 삭제합니다.
+트리거는 10분마다 실행되지만 실제 평가 API 호출은 KRX 거래일 KST 08:00~09:00에만 합니다.
+미국장 종가 신호는 이 시간에 갱신되어 한국장 개장 전에 전달됩니다. 주말·공휴일에는 Worker의
+전략 상태도 전진시키지 않고 다음 KRX 거래일 아침으로 미룹니다. 주간·월간 브리핑 역시 각각
+그 주와 그 달의 첫 KRX 거래일에 발송합니다. 알림을 잠시 끄려면 `알림 전략`의 체크를 해제합니다.
+자동 실행 자체를 중단하려면 Apps Script의 **트리거** 화면에서 `runNotificationCheck` 트리거를
+삭제합니다.
 
 ## 알림 종류와 기록
 
@@ -148,7 +156,7 @@ Apps Script 상단의 함수 선택 목록에서 `setupSpreadsheet`를 선택하
 1. Apps Script 편집기의 기존 코드를 새 `Code.gs` 전체로 교체하고 저장합니다.
 2. `setupSpreadsheet()`를 실행해 새 열이 필요하면 추가합니다. 기존 기록은 유지됩니다.
 3. `sendTestMessage()`로 연결을 확인합니다.
-4. 트리거 변경 안내가 있었다면 `installTriggers()`를 다시 실행합니다.
+4. `installTriggers()`를 다시 실행해 공휴일 캘린더 권한과 최신 트리거를 적용합니다.
 
 스크립트 속성은 코드를 교체해도 유지됩니다. 전략 계산 규칙도 함께 바뀌었다면
 `initializeNotificationStates()`를 다시 실행합니다.
@@ -162,6 +170,7 @@ Apps Script 상단의 함수 선택 목록에서 `setupSpreadsheet`를 선택하
 | 선택한 전략이 없다는 오류 | `알림 전략` 탭의 체크박스와 전략 ID 확인 |
 | 개인 전략 오류 | A열 ID가 YAML의 `strategy.id`와 같은지, B열에 YAML 전체가 있는지 확인 |
 | 정기 실행이 안 됨 | Apps Script **트리거** 화면에 `runNotificationCheck`가 하나 있는지 확인 |
+| 공휴일 캘린더 오류 | `installTriggers()`를 직접 실행해 Google Calendar 권한을 다시 허용 |
 | 그 밖의 오류 | `실행 로그`의 상세 내용과 Apps Script **실행** 화면의 오류를 운영자에게 전달 |
 
 API 키, 봇 토큰, 개인 전략 YAML은 오류 화면을 전달할 때도 가려야 합니다.

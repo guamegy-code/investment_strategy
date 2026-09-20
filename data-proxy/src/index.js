@@ -524,6 +524,7 @@ async function notificationEvaluation(request, env) {
       reason: event?.reason || null,
       state: history.at(-1)?.state || "",
       state_values: latestContext?.state_values || {},
+      mapped_products: Boolean(latestContext?.mapped_products),
       alerts,
       scheduled_summary: scheduledSummary,
       weekly_summary: schedule === "weekly" ? scheduledSummary : null,
