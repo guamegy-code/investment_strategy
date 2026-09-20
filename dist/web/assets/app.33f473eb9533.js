@@ -203,12 +203,16 @@ function browserNotificationEvents(history){
           );
         if(!alert)continue;
       }else if(!configured&&change.name!=='defense_mode'&&!(['trend_mode','market_mode'].includes(change.name)&&[change.previous,change.current].some(value=>['BEAR','RECOVERY'].includes(String(value)))))continue;
-      const transition=`${configured?.label||change.name}: ${change.previous} → ${change.current}`;
+      const valueLabel=value=>configured?.values?.[value]??configured?.values?.[String(value)]??value;
+      const transition=`${configured?.label||change.name}: ${valueLabel(change.previous)} → ${valueLabel(change.current)}`;
       const formatWeights=weights=>Object.entries(weights||{}).map(([ticker,weight])=>`${ticker} ${(Number(weight)*100).toFixed(1)}%`).join(' / ');
       const targetChange=context.target_changed&&context.rebalance_required&&Object.keys(context.previous_target_weights||{}).length
         ? `<br>목표 비중<br>${formatWeights(context.previous_target_weights)}<br>→ ${formatWeights(context.target_weights)}<br>현재 비중<br>${formatWeights(context.current_weights)}<br>실행 예정: 다음 거래일 시가부터 ${context.execution_days||1}일`
         : '';
-      result.stateChanges.push({row,text:`${alert?.message?`${transition}<br>${alert.message}`:transition}${targetChange}`});
+      result.stateChanges.push({
+        row,name:change.name,previous:change.previous,current:change.current,
+        text:`${alert?.message?`${transition}<br>${alert.message}`:transition}${targetChange}`
+      });
     }
     for(const rule of context.prealerts||[]){
       if(rule.reset)armed.delete(rule.id);
@@ -286,7 +290,7 @@ async function setupDashboard(){const enabled=definitions.filter(def=>def.strate
 function setupIndicatorControls(){const tickers=$('indicator-ticker'),type=$('indicator-type'),strategy=$('indicator-strategy'),fields=$('indicator-fields'),matrix=$('indicator-matrix'),tabs=$('indicator-panel-tabs'),summary=$('indicator-selection-summary'),data=marketData,labels={price:'가격 · 추세',oscillator:'오실레이터',risk:'리스크',Close:'종가',EMA20:'EMA 20',EMA55:'EMA 55',EMA200:'EMA 200',MA20:'이동평균 20',MA55:'이동평균 55',RSI14:'RSI 14',MACD:'MACD',MACD_SIGNAL:'MACD 신호',DRAWDOWN120:'120일 낙폭',VOL60:'60일 변동성',ATR60:'ATR 60'},escapeHtml=value=>String(value).replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));tickers.innerHTML=Object.keys(data).map(ticker=>`<option value="${ticker}">${ticker}</option>`).join('');fields.innerHTML=['Close','EMA20','EMA55'].map(field=>`<option value="${field}" selected>${field}</option>`).join('');if(!indicatorSelection.size)for(const field of ['Close','EMA20','EMA55'])indicatorSelection.add(`QQQ|${field}`);const enabled=definitions.filter(def=>def.strategy.enabled!==false);strategy.innerHTML='<option value="">전략 표시 안 함</option>'+enabled.map(def=>`<option value="${escapeHtml(def.strategy.id)}">${escapeHtml(def.strategy.name)}</option>`).join('');if(enabled.length)strategy.value=enabled[0].strategy.id;const dates=Object.values(data).flat().map(row=>row.Date).sort();$('indicator-start-date').value=dates[0]||'';$('indicator-end-date').value=dates.at(-1)||'';const refreshSummary=()=>{const pairs=[...indicatorSelection];summary.innerHTML=pairs.length?pairs.map(key=>{const [ticker,field]=key.split('|');return `<span class="research-indicator-selection-badge">${ticker} · ${labels[field]||field}</span>`;}).join(''):'<span class="research-indicator-selection-empty">선택된 조합 없음</span>';};const drawMatrix=()=>{const panel=type.value,available=Object.keys(data),rows=indicatorFields(panel);tabs.innerHTML=['price','oscillator','risk'].map(value=>`<button type="button" class="btn btn-sm ${value===panel?'btn-primary':'btn-ghost-secondary'}" data-panel="${value}">${labels[value]}</button>`).join('');matrix.innerHTML=`<div class="research-indicator-matrix-scroll"><div class="research-indicator-matrix-table" style="--indicator-ticker-count:${available.length}"><div class="research-indicator-matrix-header"><div class="research-indicator-matrix-corner">지표 / 종목</div>${available.map(ticker=>`<button type="button" class="research-indicator-column-toggle" data-ticker="${ticker}">${ticker}</button>`).join('')}</div>${rows.map(field=>`<div class="research-indicator-matrix-row"><button type="button" class="research-indicator-row-toggle" data-field="${field}">${labels[field]||field}</button>${available.map(ticker=>`<label><input class="indicator-matrix-cell" type="checkbox" value="${ticker}|${field}" ${indicatorSelection.has(`${ticker}|${field}`)?'checked':''}></label>`).join('')}</div>`).join('')}</div></div>`;tabs.querySelectorAll('button').forEach(button=>button.onclick=()=>{type.value=button.dataset.panel;drawMatrix();renderIndicators();});matrix.querySelectorAll('.indicator-matrix-cell').forEach(input=>input.onchange=()=>{input.checked?indicatorSelection.add(input.value):indicatorSelection.delete(input.value);refreshSummary();renderIndicators();});matrix.querySelectorAll('.research-indicator-column-toggle').forEach(button=>button.onclick=()=>{const cells=[...matrix.querySelectorAll(`.indicator-matrix-cell[value^="${button.dataset.ticker}|"]`)],checked=cells.some(input=>input.checked);cells.forEach(input=>{input.checked=!checked;input.checked?indicatorSelection.add(input.value):indicatorSelection.delete(input.value);});refreshSummary();renderIndicators();});matrix.querySelectorAll('.research-indicator-row-toggle').forEach(button=>button.onclick=()=>{const cells=[...matrix.querySelectorAll(`.indicator-matrix-cell[value$="|${button.dataset.field}"]`)],checked=cells.some(input=>input.checked);cells.forEach(input=>{input.checked=!checked;input.checked?indicatorSelection.add(input.value):indicatorSelection.delete(input.value);});refreshSummary();renderIndicators();});};strategy.onchange=renderIndicators;$('indicator-start-date').onchange=renderIndicators;$('indicator-end-date').onchange=renderIndicators;$('indicator-overlays').onchange=renderIndicators;refreshSummary();drawMatrix();}
 const baseSetupDashboard=setupDashboard;
 setupDashboard=async()=>{await baseSetupDashboard();setupIndicatorControls();};
-function localizeIndicatorView(){const cards=document.querySelectorAll('#indicators-view .research-card'),labels=document.querySelectorAll('#indicators-view .form-label');cards[0]?.querySelector('.card-title')&&(cards[0].querySelector('.card-title').textContent='지표 연구');cards[0]?.querySelector('.research-card-description')&&(cards[0].querySelector('.research-card-description').textContent='종목과 지표를 조합해 시장 구간을 분석합니다.');cards[1]?.querySelector('.card-title')&&(cards[1].querySelector('.card-title').textContent='표시 지표');cards[1]?.querySelector('.research-card-description')&&(cards[1].querySelector('.research-card-description').textContent='선택된 종목과 지표 조합');if(labels[0])labels[0].textContent='분석 기간';if(labels[1])labels[1].textContent='전략 표시';if(labels[2])labels[2].textContent='전략 이벤트';const editor=$('indicator-editor');editor?.querySelector('summary span:nth-child(2)')&&(editor.querySelector('summary span:nth-child(2)').textContent='종목 · 지표 편집');const events=$('indicator-overlays');if(events){const eventLabels=events.querySelectorAll('label');if(eventLabels[0])eventLabels[0].lastChild.textContent='상태 구간';if(eventLabels[1])eventLabels[1].lastChild.textContent='리밸런싱';}}
+function localizeIndicatorView(){const cards=document.querySelectorAll('#indicators-view .research-card'),labels=document.querySelectorAll('#indicators-view .form-label');cards[0]?.querySelector('.card-title')&&(cards[0].querySelector('.card-title').textContent='지표 연구');cards[0]?.querySelector('.research-card-description')&&(cards[0].querySelector('.research-card-description').textContent='종목과 지표를 조합해 시장 구간을 분석합니다.');cards[1]?.querySelector('.card-title')&&(cards[1].querySelector('.card-title').textContent='표시 지표');cards[1]?.querySelector('.research-card-description')&&(cards[1].querySelector('.research-card-description').textContent='선택된 종목과 지표 조합');if(labels[0])labels[0].textContent='분석 기간';if(labels[1])labels[1].textContent='전략 표시';if(labels[2])labels[2].textContent='전략 이벤트';const editor=$('indicator-editor');editor?.querySelector('summary span:nth-child(2)')&&(editor.querySelector('summary span:nth-child(2)').textContent='종목 · 지표 편집');const events=$('indicator-overlays');if(events){const eventLabels=events.querySelectorAll('label');if(eventLabels[0])eventLabels[0].lastChild.textContent='상태 구간';if(eventLabels[1])eventLabels[1].lastChild.textContent='리밸런싱';if(eventLabels[2])eventLabels[2].lastChild.textContent='기타 알림';}}
 const parityStyle=document.createElement('style');parityStyle.textContent='.offline-date-range{width:300px;gap:8px}.offline-date-range input,#start-date,#end-date,#indicator-start-date,#indicator-end-date{min-width:0;padding:7px 8px;font-size:16px!important;text-align:center}.research-kpi-card{position:relative;overflow:hidden}.research-kpi-icon{position:absolute;top:16px;right:16px;width:34px;height:34px;display:grid;place-items:center;border-radius:10px;font-size:18px;font-weight:700}.research-kpi-positive{color:#2fb344;background:rgba(47,179,68,.12)}.research-kpi-negative{color:#d63939;background:rgba(214,57,68,.12)}.research-kpi-primary{color:#206bc4;background:rgba(32,107,196,.12)}.research-kpi-cyan{color:#0ca8c0;background:rgba(12,168,192,.12)}.win11-date-picker{position:fixed;z-index:3000;width:320px;padding:12px;border:1px solid #d7dce4;border-radius:12px;background:#fff;box-shadow:0 18px 42px rgba(24,36,51,.2);color:#182433}.win11-date-picker[hidden]{display:none}.win11-date-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}.win11-date-title{min-width:0;border:0;background:transparent;color:#182433;font:700 15px inherit;cursor:pointer}.win11-date-nav{width:32px;height:32px;border:0;border-radius:7px;background:transparent;color:#182433;font-size:21px;line-height:1;cursor:pointer}.win11-date-nav:hover,.win11-date-nav:focus-visible,.win11-date-title:hover,.win11-date-title:focus-visible{background:#eef3fa;outline:none}.win11-date-weekdays,.win11-date-days{display:grid;grid-template-columns:repeat(7,1fr);gap:2px}.win11-date-weekdays{margin-bottom:4px;color:#65758b;font-size:12px;text-align:center}.win11-date-day{height:36px;border:0;border-radius:7px;background:transparent;color:#182433;font:inherit;cursor:pointer}.win11-date-day:hover,.win11-date-day:focus-visible,.win11-date-choice:hover,.win11-date-choice:focus-visible{background:#e9f2ff;outline:none}.win11-date-day.is-outside{color:#97a3b4}.win11-date-day.is-today{box-shadow:inset 0 0 0 1px #206bc4}.win11-date-day.is-selected{background:#206bc4;color:#fff;box-shadow:none}.win11-date-choices{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}.win11-date-choice{min-height:48px;border:0;border-radius:8px;background:transparent;color:#182433;font:600 14px inherit;cursor:pointer}.win11-date-choice.is-selected{background:#206bc4;color:#fff}.win11-date-picker.is-dark{background:#202b3a;border-color:#36465a;color:#f2f6fb}.win11-date-picker.is-dark .win11-date-title,.win11-date-picker.is-dark .win11-date-nav,.win11-date-picker.is-dark .win11-date-day,.win11-date-picker.is-dark .win11-date-choice{color:#f2f6fb}.win11-date-picker.is-dark .win11-date-weekdays,.win11-date-picker.is-dark .win11-date-day.is-outside{color:#aeb9c7}.win11-date-picker.is-dark .win11-date-nav:hover,.win11-date-picker.is-dark .win11-date-nav:focus-visible,.win11-date-picker.is-dark .win11-date-title:hover,.win11-date-picker.is-dark .win11-date-title:focus-visible,.win11-date-picker.is-dark .win11-date-day:hover,.win11-date-picker.is-dark .win11-date-day:focus-visible,.win11-date-picker.is-dark .win11-date-choice:hover,.win11-date-picker.is-dark .win11-date-choice:focus-visible{background:#30425a}@media(max-width:520px){.win11-date-picker{width:calc(100vw - 24px)}}';document.head.append(parityStyle);
 const baseIndicatorRenderer=renderIndicators;
 renderIndicators=async()=>{await baseIndicatorRenderer();const plot=$('indicator-plot');if(!plot?.data)return;const palette=['#2962FF','#089981','#FF9800','#9C27B0','#F23645','#00BCD4'];Plotly.restyle(plot,{'line.color':plot.data.map((_,index)=>palette[index%palette.length])});const layout=chartLayout('지표 연구',{slider:true,selector:true,indicator:true});layout.yaxis.tickformat=undefined;layout.yaxis.title={text:$('indicator-type').value==='price'?'기준=100':'지표 값'};Plotly.relayout(plot,layout);};
@@ -501,7 +505,7 @@ setupDashboard=async function(){await importReadyDashboardSetup();$('import').on
 const statefulIndicatorControls=setupIndicatorControls;
 setupIndicatorControls=function(){const state=loadUiState(),type=$('indicator-type');if(state.indicatorType&&[...type.options].some(option=>option.value===state.indicatorType))type.value=state.indicatorType;statefulIndicatorControls();const strategy=$('indicator-strategy');if(Object.hasOwn(state,'indicatorStrategy')&&[...strategy.options].some(option=>option.value===state.indicatorStrategy))strategy.value=state.indicatorStrategy;if(state.indicatorStart)$('indicator-start-date').value=state.indicatorStart;if(state.indicatorEnd)$('indicator-end-date').value=state.indicatorEnd;if(Array.isArray(state.indicatorOverlays))for(const input of $('indicator-overlays').querySelectorAll('input'))input.checked=state.indicatorOverlays.includes(input.value);strategy.onchange=async()=>{saveUiState();await renderIndicators();};for(const input of [$('indicator-start-date'),$('indicator-end-date'),$('indicator-overlays')])input.addEventListener('change',saveUiState,true);$('indicator-panel-tabs').addEventListener('click',()=>setTimeout(saveUiState));$('indicator-matrix').addEventListener('change',()=>setTimeout(saveUiState));};
 const viewRestoringDashboardSetup=setupDashboard;
-setupDashboard=async function(){const restoreIndicators=loadUiState().activeView==='indicators';if(restoreIndicators){$('analysis-view').classList.add('offline-hidden');$('indicators-view').classList.remove('offline-hidden');$('analysis-tab').classList.remove('active');$('indicators-tab').classList.add('active');}await viewRestoringDashboardSetup();const analysisTab=$('analysis-tab'),indicatorsTab=$('indicators-tab'),showAnalysis=analysisTab.onclick,showIndicators=indicatorsTab.onclick;analysisTab.onclick=()=>{showAnalysis();saveUiState('analysis');};indicatorsTab.onclick=async()=>{await showIndicators();saveUiState('indicators');};if(restoreIndicators)await indicatorsTab.onclick();};
+setupDashboard=async function(){const restoreIndicators=loadUiState().activeView==='indicators';if(restoreIndicators){$('analysis-view').classList.add('offline-hidden');$('indicators-view').classList.remove('offline-hidden');$('analysis-tab').classList.remove('active');$('indicators-tab').classList.add('active');}await viewRestoringDashboardSetup();const analysisTab=$('analysis-tab'),indicatorsTab=$('indicators-tab'),showAnalysis=analysisTab.onclick,showIndicators=indicatorsTab.onclick;analysisTab.onclick=()=>{showAnalysis();saveUiState('analysis');};indicatorsTab.onclick=async()=>{await showIndicators();saveUiState('indicators');};if(restoreIndicators&&loadUiState().activeView==='indicators')await indicatorsTab.onclick();};
 const productDisplayNames={'379810.KS':'KODEX 미국나스닥100','426030.KS':'TIME 미국나스닥100액티브','0015B0.KS':'KoAct 미국나스닥성장기업액티브','434060.KS':'KODEX TDF2050액티브 적격','488770.KS':'KODEX 머니마켓액티브','069500.KS':'KODEX 200 (069500.KS)','114100.KS':'KODEX 국고채 3년 (114100.KS)','148070.KS':'KOSEF 국고채 10년 (148070.KS)'};
 function productDetailAssets(def,tickers){const displayTickers=tickers.filter(ticker=>!Object.values(FX_TICKER_BY_SUFFIX).includes(ticker)),source=def.source?definitions.find(item=>item.strategy.id===def.source):def,required=source?.assets?.required||[],products=def.products||{},items=[],byTicker=new Map(),claimed=new Set(),hiddenAssets=new Set();for(const asset of required){const entries=Object.entries(products[asset]||((displayTickers.includes(asset))?{[asset]:1}:{})).filter(([ticker])=>displayTickers.includes(ticker)),mapped=entries.map(([ticker])=>ticker);if(mapped.some(ticker=>ticker!==asset))hiddenAssets.add(asset);for(const [ticker,share] of entries){const item=byTicker.get(ticker)||{ticker,mappings:[]};if(!byTicker.has(ticker)){byTicker.set(ticker,item);items.push(item);}item.mappings.push({asset,share});claimed.add(ticker);}}for(const ticker of displayTickers)if(!claimed.has(ticker)&&!hiddenAssets.has(ticker))items.push({ticker,mappings:[{asset:ticker,share:1}]});return items;}
 function productDetailLabel(item){const name=productDisplayNames[item.ticker]||item.ticker,mappings=item.mappings||[];if(mappings.length===1&&mappings[0].asset===item.ticker&&Math.abs(pct(mappings[0].share)-1)<1e-8)return name;return `${name} (${mappings.map(({asset,share})=>`${asset}${Math.abs(pct(share)-1)<1e-8?'':` ${percentText(pct(share)*100)}`}`).join(' · ')})`;}
@@ -1659,6 +1663,30 @@ function installIndicatorTabFastPath(){
 }
 installIndicatorTabFastPath();
 
+// The restored indicator view is visible before the asynchronous dashboard
+// bootstrap has finished.  Keep the analysis tab usable during that window and
+// persist only the view choice so partially loaded controls cannot overwrite
+// the rest of the saved UI state.
+function installAnalysisTabFastPath(){
+  const tab=$('analysis-tab');
+  if(!tab||tab.dataset.fastAnalysisTabBound)return;
+  tab.dataset.fastAnalysisTabBound='1';
+  tab.addEventListener('click',event=>{
+    $('analysis-view').classList.remove('offline-hidden');
+    $('indicators-view').classList.add('offline-hidden');
+    tab.classList.add('active');
+    $('indicators-tab').classList.remove('active');
+    try{
+      localStorage.setItem(uiStateKey,JSON.stringify({...loadUiState(),activeView:'analysis'}));
+    }catch{}
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    requestAnimationFrame(()=>['performance-plot','drawdown-plot','detail-plot']
+      .forEach(id=>$(id)?.data&&Plotly.Plots.resize($(id))));
+  },true);
+}
+installAnalysisTabFastPath();
+
 window.addEventListener('pagehide',()=>saveUiState());
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden')saveUiState();});
 
@@ -1766,11 +1794,11 @@ function installIndicatorNotificationControl(){
   const overlays=$('indicator-overlays');
   if(overlays&&!overlays.querySelector('input[value="notifications"]')){
     const label=document.createElement('label');
-    label.innerHTML='<input type="checkbox" value="notifications">알림 표시';
+    label.innerHTML='<input type="checkbox" value="notifications">기타 알림';
     overlays.append(label);
   }
   const notificationInput=overlays?.querySelector('input[value="notifications"]');
-  if(notificationInput?.closest('label')?.lastChild)notificationInput.closest('label').lastChild.textContent='알림 표시';
+  if(notificationInput?.closest('label')?.lastChild)notificationInput.closest('label').lastChild.textContent='기타 알림';
   const fx=$('indicator-remove-fx');
   if(fx){
     const label=fx.closest('label');
@@ -2033,12 +2061,18 @@ renderIndicators=async function(){
     }
   }
   const contextual=browserNotificationEvents(history);
+  const warningEntries=contextual.stateChanges.filter(item=>
+    item.name==='defense_mode'&&String(item.current)==='WARNING');
+  const dipEntries=contextual.stateChanges.filter(item=>
+    item.name==='stage'&&Number(item.previous)===0&&Number(item.current)===1);
   stableIndicatorEvents={
     base:Number(history.find(visible)?.value||1),
     rebalances:history.filter(row=>row.target&&visible(row)),
     stateChanges:contextual.stateChanges.length
       ? contextual.stateChanges.filter(item=>visible(item.row))
       : transitions,
+    warningEntries:warningEntries.filter(item=>visible(item.row)),
+    dipEntries:dipEntries.filter(item=>visible(item.row)),
     prealerts:contextual.prealerts.filter(item=>visible(item.row)),
   };
   indicatorNotificationTooltipByDate=new Map();
@@ -2102,13 +2136,31 @@ Plotly.react=function(target,traces,layout,...args){
       hoverinfo:'skip',meta:{excludeTooltip:true,excludeFromYAutoscale:true,panel:'price'},
     });
     if(overlays.includes('rebalances')){
+      const eventDate=item=>String(item.row?.date||item.date||'').slice(0,10);
+      const rebalanceByDate=new Map(events.rebalances.map(item=>[eventDate(item),item]));
+      for(const item of [...(events.warningEntries||[]),...(events.dipEntries||[])]){
+        const date=eventDate(item);
+        if(date&&!rebalanceByDate.has(date))rebalanceByDate.set(date,item);
+      }
+      const rebalanceItems=[...rebalanceByDate.values()]
+        .sort((left,right)=>eventDate(left).localeCompare(eventDate(right)));
       const existing=traces.find(trace=>trace.name===labels.rebalances);
-      if(existing){existing.showlegend=true;existing.marker={...existing.marker,size:9};}
-      else append(labels.rebalances,events.rebalances,'diamond','#F23645',9);
+      if(existing){
+        existing.x=rebalanceItems.map(item=>item.row?.date||item.date);
+        existing.y=rebalanceItems.map(item=>strategyValueAt(eventDate(item)));
+        existing.text=rebalanceItems.map(item=>item.text||labels.rebalances);
+        existing.showlegend=true;
+        existing.marker={...existing.marker,symbol:'diamond',size:9,color:'#F23645'};
+      }else append(labels.rebalances,rebalanceItems,'diamond','#F23645',9);
     }
     if(overlays.includes('notifications')){
+      const milestoneItems=new Set([
+        ...(events.warningEntries||[]),
+        ...(events.dipEntries||[]),
+      ]);
       const items=[
-        ...events.stateChanges.map(item=>({...item,notificationKind:'state'})),
+        ...events.stateChanges.filter(item=>!milestoneItems.has(item))
+          .map(item=>({...item,notificationKind:'state'})),
         ...events.prealerts.map(item=>({...item,notificationKind:'prealert'})),
       ].sort((left,right)=>String(left.row?.date||left.date).localeCompare(String(right.row?.date||right.date)));
       if(items.length)traces.push({
@@ -2271,9 +2323,9 @@ async function ensureInitialIndicatorNotificationContext(){
   const source=definition?.source
     ? definitions.find(item=>item?.strategy?.id===definition.source)||definition
     : definition;
-  const notificationsEnabled=[...($('indicator-overlays')?.querySelectorAll('input:checked')||[])]
-    .some(input=>input.value==='notifications');
-  if(!selected||!definition||!source?.notifications||!notificationsEnabled)return;
+  const eventOverlayEnabled=[...($('indicator-overlays')?.querySelectorAll('input:checked')||[])]
+    .some(input=>input.value==='notifications'||input.value==='rebalances');
+  if(!selected||!definition||!source?.notifications||!eventOverlayEnabled)return;
   await ensureIndicatorStrategyHistory(selected);
   const history=dashboardResults.get(selected)?.[1]||[];
   if(history.some(row=>row.notificationContext))return;
