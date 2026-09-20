@@ -1,0 +1,17 @@
+strategy:
+  id: band-7030-tdf-valuation-warning-dip-buyer-kodex-koact
+  name: "[퇴직] QQQ/TDF Valuation Warning Dip Buyer"
+  version: 1
+  dsl_version: 1
+  enabled: true
+
+source: band-7030-tdf-valuation-warning-dip-buyer
+
+products:
+  QQQ:
+    379810.KS: 50%  # KODEX 미국나스닥100
+    0015B0.KS: 50%  # KoAct 미국나스닥성장기업액티브
+  TDF2050_PROXY:
+    434060.KS: 100%  # KODEX TDF2050액티브 적격
+  BIL:
+    488770.KS: 100%  # KODEX 머니마켓액티브

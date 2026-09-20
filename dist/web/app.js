@@ -571,6 +571,7 @@ async function updateDetailFxView(){
     renderDetail();
   }catch(error){
     toggle.checked=false;
+    saveUiState();
     $('status').textContent=`달러 기준 성과를 계산하지 못했습니다: ${error.message}`;
   }finally{toggle.disabled=false;}
 }
@@ -984,6 +985,7 @@ setupDashboard=async function(){
   if(fxToggle){
     fxToggle.onchange=()=>{saveUiState();void updateDetailFxView();};
     $('detail-strategy')?.addEventListener('change',()=>{if(fxToggle.checked)void updateDetailFxView();});
+    if(fxToggle.checked)await updateDetailFxView();
   }
 };
 localizeDashboard();
