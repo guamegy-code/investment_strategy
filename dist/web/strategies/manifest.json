@@ -1,7 +1,7 @@
 {
   "version": 1,
   "hidden_strategy_ids": [],
-  "enabled_bundle": "enabled.eb5f1dc62e9e.json",
+  "enabled_bundle": "enabled.4359b2ffb067.json",
   "results": {
     "profit-band-tdf2050": "../results/profit-band-tdf2050.260199001a21.json.gz",
     "buy-3dip-bil": "../results/buy-3dip-bil.c0599d5e2522.json.gz",
@@ -209,6 +209,18 @@
     {
       "id": "band-7030-tdf-valuation-defense-kodex-koact",
       "path": "26P_band_7030_tdf_valuation_defense_kodex_koact.yaml",
+      "version": 1,
+      "enabled": true
+    },
+    {
+      "id": "buy-3dip-bil-valuation-hybrid-80-98-99-100",
+      "path": "27_buy_3dip_valuation_defense_80_98_99_100.yaml",
+      "version": 1,
+      "enabled": true
+    },
+    {
+      "id": "buy-3dip-bil-valuation-hybrid-active",
+      "path": "27P_buy_3dip_80_98_99_100_active.yaml",
       "version": 1,
       "enabled": true
     }

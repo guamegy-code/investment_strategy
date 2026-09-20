@@ -51,6 +51,7 @@
 | `14_profit_band_tdf2050_gate_spy_tdf100_no_bnd.yaml` | `profit-band-tdf2050-gate-spy-tdf100-no-bnd` | 예 | 13에서 BND를 빼고 TDF/BIL만 사용하는 전용 단순형 |
 | `15_band_7030_tdf_state_bil.yaml` | `band-7030-tdf-state-bil` | 예 | 70/30 밴드에 사전 BEAR 현금화와 상태별 TDF/BIL 배분을 결합한 방어형 |
 | `16_state_conditioned_cross_asset_rotation.yaml` | `state-conditioned-cross-asset-rotation` | 예 | Strategy 15의 QQQ/TDF 비중을 보존하고 BIL 슬리브만 자동 교차자산으로 대체 |
+| `27_buy_3dip_valuation_defense_80_98_99_100.yaml` | `buy-3dip-bil-valuation-hybrid-80-98-99-100` | 예 | 3단계 매수·회복 규칙에 밸류에이션 방어와 80/98/99/100 비중을 결합한 개인연금 전략 |
 | `23_qqq_structural_defense_balanced.yaml` | `qqq-structural-defense-balanced` | 예 | 개인연금용 QQQ 100%와 4상태 추세 방어를 결합한 23B |
 | `24_qqq_valuation_breakdown_defense.yaml` | `qqq-valuation-breakdown-defense` | 예 | 합성 밸류에이션 고점 붕괴를 주 방어 신호로 쓰고 23번 추세 상한을 결합한 전략 |
 | `25_qqq_valuation_breakdown_balanced.yaml` | `qqq-valuation-breakdown-balanced` | 예 | 월간 밸류에이션 급락과 빠른 가격 확인을 결합한 개인연금 균형형 |
@@ -71,6 +72,7 @@
 | `06P_profit_band_time_tdf2050.yaml` | `time-tdf2050-profit-band` | `profit-band-tdf2050` | 예 |
 | `08P_band_7030_nasdaq_tdf2050.yaml` | `nasdaq-tdf2050-7030` | `band-7030-tdf` | 아니요 |
 | `19P_buy_3dip_buyer_tdf.yaml` | `buy-3dip-tdf` | `buy-3dip-bil` | 아니요 |
+| `27P_buy_3dip_80_98_99_100_active.yaml` | `buy-3dip-bil-valuation-hybrid-active` | `buy-3dip-bil-valuation-hybrid-80-98-99-100` | 예 |
 | `25P_qqq_valuation_breakdown_balanced_kodex_koact.yaml` | `qqq-valuation-breakdown-balanced-kodex-koact` | `qqq-valuation-breakdown-balanced` | 예 |
 | `26P_band_7030_tdf_valuation_defense_kodex_koact.yaml` | `band-7030-tdf-valuation-defense-kodex-koact` | `band-7030-tdf-valuation-defense` | 예 |
 
