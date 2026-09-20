@@ -1,0 +1,196 @@
+# Experimental hybrid: strategy 21 entries/recovery + strategy 25 defense and rebalance bands.
+# Signals at close; orders at next open. Keep dip state and price peak during defense.
+# Defense takes priority over dip purchases; 80/98/99/100% applies outside defense caps.
+strategy:
+  id: buy-3dip-bil-valuation-hybrid-80-98-99-100
+  name: "[개인] Buy 3 Dip Delayed + Defense 80-98-99-100 [BIL]"
+  version: 1
+  dsl_version: 1
+  enabled: true
+assets:
+  required:
+  - QQQ
+  - BIL
+  risk:
+  - QQQ
+  observations:
+  - SPY
+parameters:
+  drop_b: -0.1
+  drop_c: -0.2
+  drop_d: -0.325
+  recovery_stage_1: 0.075
+  recovery_stage_2: -0.085
+  recovery_stage_3: -0.175
+  valuation_arm_score: 65
+  valuation_breakdown_points: 25
+state:
+  stage:
+    initial: 0
+    rules:
+    - when: >-
+        state.stage == 3 and state.peak_price > 0 and QQQ.close >= state.peak_price * (1 + parameters.recovery_stage_3)
+      set: 2
+    - when: >-
+        state.stage == 2 and state.peak_price > 0 and QQQ.close <= state.peak_price * (1 + parameters.drop_d)
+      set: 3
+    - when: >-
+        state.stage == 2 and state.peak_price > 0 and QQQ.close >= state.peak_price * (1 + parameters.recovery_stage_2)
+      set: 1
+    - when: >-
+        state.stage == 1 and state.peak_price > 0 and QQQ.close <= state.peak_price * (1 + parameters.drop_c)
+      set: 2
+    - when: >-
+        state.stage == 1 and state.peak_price > 0 and QQQ.close >= state.peak_price * (1 + parameters.recovery_stage_1)
+      set: 0
+    - when: >-
+        state.stage == 0 and state.peak_price > 0 and QQQ.close <= state.peak_price * (1 + parameters.drop_b)
+      set: 1
+  peak_price:
+    initial: 0
+    rules:
+    - when: state.peak_price == 0
+      set: =QQQ.close
+    - when: changed(state.stage) and state.stage == 0
+      set: =QQQ.close
+    - when: state.stage == 0 and QQQ.close > state.peak_price
+      set: =QQQ.close
+  defense_mode:
+    initial: NORMAL
+    rules:
+    - when: >-
+        state.defense_mode == 'NORMAL' and state.valuation_peak >= parameters.valuation_arm_score and QQQ.valuation_score
+        <= state.valuation_peak - parameters.valuation_breakdown_points and variables.risk_off_score >= 6
+      set: DEFENSE
+    - when: >-
+        state.defense_mode == 'NORMAL' and state.valuation_peak >= parameters.valuation_arm_score and QQQ.valuation_score
+        <= state.valuation_peak - parameters.valuation_breakdown_points
+      set: WARNING
+    - when: >-
+        state.defense_mode == 'WARNING' and QQQ.valuation_score >= state.valuation_peak
+      set: NORMAL
+    - when: >-
+        state.defense_mode == 'WARNING' and variables.risk_off_score >= 4
+      set: DEFENSE
+      confirm: 6
+    - when: >-
+        state.defense_mode == 'DEFENSE' and variables.recovery_score >= 4 and QQQ.close > QQQ.ema20
+      set: NORMAL
+      confirm: 2
+  valuation_peak:
+    initial: 0
+    rules:
+    - when: state.valuation_peak == 0
+      set: =QQQ.valuation_score
+    - when: changed(state.defense_mode) and state.defense_mode == 'NORMAL'
+      set: =QQQ.valuation_score
+    - when: >-
+        state.defense_mode == 'NORMAL' and QQQ.valuation_score > state.valuation_peak
+      set: =QQQ.valuation_score
+  trend_mode:
+    initial: UNINITIALIZED
+    rules:
+    - when: state.trend_mode == 'UNINITIALIZED' and variables.structural_bear
+      set: BEAR
+    - when: state.trend_mode == 'UNINITIALIZED' and variables.risk_off_score >= 5
+      set: CAUTION
+    - when: state.trend_mode == 'UNINITIALIZED'
+      set: BULL
+    - when: state.trend_mode == 'BULL' and variables.structural_bear
+      set: BEAR
+      confirm: 10
+    - when: >-
+        state.trend_mode == 'BULL' and QQQ.close < QQQ.ema20 and variables.risk_off_score >= 3 and SPY.close
+        < SPY.ema20 and SPY.roc5 <= -1
+      set: CAUTION
+      confirm: 1
+    - when: state.trend_mode == 'CAUTION' and variables.structural_bear
+      set: BEAR
+      confirm: 10
+    - when: state.trend_mode == 'CAUTION' and variables.recovery_score >= 4
+      set: BULL
+      confirm: 3
+    - when: state.trend_mode == 'BEAR' and variables.recovery_score >= 3
+      set: RECOVERY
+      confirm: 3
+    - when: state.trend_mode == 'RECOVERY' and variables.structural_bear
+      set: BEAR
+      confirm: 10
+    - when: >-
+        state.trend_mode == 'RECOVERY' and variables.recovery_score >= 4 and variables.bull_reentry_allowed
+      set: BULL
+      confirm: 3
+    - when: state.trend_mode == 'RECOVERY' and variables.risk_off_score >= 5
+      set: CAUTION
+      confirm: 3
+  structural_bear_mode:
+    initial: 'FALSE'
+    rules:
+    - when: >-
+        state.structural_bear_mode == 'FALSE' and variables.structural_bear
+      set: 'TRUE'
+    - when: >-
+        state.structural_bear_mode == 'TRUE' and not variables.structural_bear
+      set: 'FALSE'
+target:
+- when: state.trend_mode == 'BEAR'
+  weights:
+    QQQ: 0%
+    BIL: 100%
+- when: state.defense_mode == 'DEFENSE'
+  weights:
+    QQQ: 30%
+    BIL: 70%
+- when: state.structural_bear_mode == 'TRUE'
+  weights:
+    QQQ: 50%
+    BIL: 50%
+- when: state.trend_mode == 'RECOVERY' and state.stage >= 1
+  weights:
+    QQQ: 80.0%
+    BIL: 20.0%
+- when: state.stage == 3
+  weights:
+    QQQ: 100%
+    BIL: 0%
+- when: state.stage == 2
+  weights:
+    QQQ: 99%
+    BIL: 1%
+- when: state.stage == 1
+  weights:
+    QQQ: 98%
+    BIL: 2%
+- weights:
+    QQQ: 80%
+    BIL: 20%
+rebalance:
+- check: daily
+  when: >-
+    target_deviation() >= 7.5% or weight_deviation('QQQ') <= -4%
+execution:
+  days: 1
+variables:
+  risk_off_score: >-
+    count(
+      QQQ.close < QQQ.ema20,
+      QQQ.close < QQQ.ema55,
+      QQQ.ema20 < QQQ.ema55,
+      QQQ.roc5 < 0,
+      QQQ.roc20 < 0,
+      QQQ.ema20_slope5 < 0
+    )
+  recovery_score: >-
+    count(
+      QQQ.close > QQQ.ema20,
+      QQQ.close > QQQ.ema55,
+      QQQ.ema20 > QQQ.ema55,
+      QQQ.roc5 > 0,
+      QQQ.roc20 > 0,
+      QQQ.ema20_slope5 > 0
+    )
+  structural_bear: >-
+    variables.risk_off_score >= 5 and QQQ.close < QQQ.ema20 and QQQ.ema20 < QQQ.ema55 and QQQ.ema55 < QQQ.ema200
+    and QQQ.roc60 < 0 and QQQ.ema200_slope20 < 0
+  bull_reentry_allowed: >-
+    QQQ.close > QQQ.ema55 and QQQ.roc60 > 0
