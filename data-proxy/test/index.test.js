@@ -398,6 +398,25 @@ test("strategy 26 Korean-commented YAML preserves retirement defense priority", 
   );
 });
 
+test("strategy 28 YAML preserves warning buffer and dip-buy priority", () => {
+  const source = readFileSync(
+    new URL("../../strategies/28_qqq_valuation_warning_dip_buyer.yaml", import.meta.url),
+    "utf8",
+  );
+  const definition = parseYaml(source);
+
+  assert.equal(definition.strategy.id, "qqq-valuation-warning-dip-buyer");
+  assert.equal(definition.strategy.enabled, true);
+  assert.equal(definition.strategy.version, 2);
+  assert.equal(definition.parameters.drop_b, -0.10);
+  assert.deepEqual(definition.target[1].weights, {QQQ: "30%", BIL: "70%"});
+  assert.deepEqual(definition.target[4].weights, {QQQ: "100%", BIL: "0%"});
+  assert.deepEqual(definition.target[5].weights, {QQQ: "100%", BIL: "0%"});
+  assert.deepEqual(definition.target[6].weights, {QQQ: "100%", BIL: "0%"});
+  assert.deepEqual(definition.target[7].weights, {QQQ: "70%", BIL: "30%"});
+  assert.deepEqual(strategyTickers([definition], definition), ["QQQ", "BIL", "SPY"]);
+});
+
 function notificationFixture() {
   const source = {
     strategy: {id: "notification-source", name: "Notification source", version: 1},
