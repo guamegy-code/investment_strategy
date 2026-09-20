@@ -285,12 +285,13 @@ function renderAnalysis(){const entries=[...dashboardResults.values()],performan
 async function runDashboard(){try{$('status').textContent='선택한 전략을 실행하고 있습니다…';const selected=selectedDefinitions();if(!selected.length)throw Error('전략을 하나 이상 선택하세요.');const cached=await loadPrecomputedResults(),settled=await Promise.allSettled(selected.map(async def=>{const saved=cached[def.strategy.id]||[];if(saved.some(row=>row.target))return [def,saved];const calculated=await run(def),eventsByDate=new Map(calculated.filter(row=>row.target).map(row=>[row.date,row]));return [def,saved.length?saved.map(row=>({...row,...(eventsByDate.get(row.date)||{})})):calculated];})),completed=settled.filter(result=>result.status==='fulfilled').map(result=>result.value),failed=settled.filter(result=>result.status==='rejected');if(!completed.length)throw failed[0].reason;dashboardResults=new Map(completed.map(entry=>[entry[0].strategy.id,entry]));renderAnalysis();$('status').textContent=failed.length?`${completed.length}개 전략 완료 · ${failed.length}개 실패: ${failed.map(item=>item.reason.message).join(' | ')}`:`${completed.length}개 전략 실행을 완료했습니다.`; }catch(error){$('status').textContent=`오류: ${error.message}`;console.error(error);}}
 function indicatorFields(type){return type==='oscillator'?['RSI14','MACD','MACD_SIGNAL']:type==='risk'?['DRAWDOWN120','VOL60','ATR60']:['Close','EMA20','EMA55','EMA200','MA20','MA55'];}
 var indicatorSelection=new Set();
+var indicatorCustomTickers=new Set();
 async function renderIndicators(){try{const data=await loadData(),type=$('indicator-type').value,start=$('indicator-start-date').value,end=$('indicator-end-date').value,pairs=[...indicatorSelection].map(key=>key.split('|')).filter(([,field])=>indicatorFields(type).includes(field)),palette=['#206bc4','#2fb344','#f59f00','#ae3ec9','#d63939','#17a2b8'],traces=[];for(const [index,[ticker,name]] of pairs.entries()){const rows=(data[ticker]||[]).filter(row=>(!start||row.Date>=start)&&(!end||row.Date<=end)),values=rows.map(row=>Number(row[name]??row[name.toLowerCase()]));traces.push({x:rows.map(row=>row.Date),y:values,name:`${ticker} · ${name}`,line:{width:.9},hoverinfo:'none'});}const layout=chartLayout(`지표 연구 · ${type}`,{slider:true,selector:true,detail:true});if(type==='price'){layout.yaxis.tickformat=undefined;layout.yaxis.title={text:'기준=100'};const selectedStrategy=$('indicator-strategy').value,cached=await loadPrecomputedResults(),history=(cached[selectedStrategy]||[]).filter(row=>(!start||row.date>=start)&&(!end||row.date<=end));if(history.length){const base=history[0].value,weightText=row=>Object.entries(row.weights||{}).filter(([,weight])=>weight>0.001).map(([ticker,weight])=>`${ticker} ${(weight*100).toFixed(1)}%`).join('<br>');traces.push({x:history.map(row=>row.date),y:history.map(row=>row.value/base-1),name:'전략 누적 수익률',yaxis:'y2',line:{color:'#182433',width:1},customdata:history.map(weightText),hoverinfo:'none'});const assets=Object.keys(history[0].weights||{}),events=history.filter((row,index)=>index>0&&assets.some(asset=>Math.abs((row.weights[asset]||0)-(history[index-1].weights[asset]||0))>=0.02));if(events.length&&[...$('indicator-overlays').querySelectorAll('input:checked')].some(input=>input.value==='rebalances'))traces.push({x:events.map(row=>row.date),y:events.map(row=>row.value/base-1),name:'리밸런싱',yaxis:'y2',mode:'markers',marker:{symbol:'diamond',size:8,color:'#d63939'},customdata:events.map(weightText),hoverinfo:'skip'});layout.yaxis2={title:'전략 수익률',overlaying:'y',side:'right',tickformat:'.0%',showgrid:false};}}Plotly.react('indicator-plot',traces,layout,{responsive:true,displaylogo:false});bindChartTooltip('indicator-plot','indicator');}catch(error){$('status').textContent=`오류: ${error.message}`;}}
 async function setupDashboard(){const enabled=definitions.filter(def=>def.strategy.enabled!==false);$('strategy-count').textContent=`${enabled.length}개 전략`;$('strategy-list').innerHTML=enabled.map(def=>`<label><input type="checkbox" value="${def.strategy.id}" checked>${def.strategy.name}</label>`).join('');const data=await loadData(),cached=await loadPrecomputedResults(),dates=Object.values(cached).flatMap(history=>history.map(row=>row.date));$('start-date').value=dates.length?dates.sort()[0]:Object.values(data)[0][0].Date;$('end-date').value=dates.length?dates.sort().at(-1):Object.values(data)[0].at(-1).Date;$('indicator-ticker').innerHTML=Object.keys(data).map(ticker=>`<option>${ticker}</option>`).join('');if(data.QQQ)$('indicator-ticker').value='QQQ';$('detail-strategy').onchange=renderDetail;$('start-date').onchange=renderAnalysis;$('end-date').onchange=renderAnalysis;$('analysis-tab').onclick=()=>{$('analysis-view').classList.remove('offline-hidden');$('indicators-view').classList.add('offline-hidden');$('analysis-tab').classList.add('active');$('indicators-tab').classList.remove('active');};$('indicators-tab').onclick=()=>{$('analysis-view').classList.add('offline-hidden');$('indicators-view').classList.remove('offline-hidden');$('analysis-tab').classList.remove('active');$('indicators-tab').classList.add('active');renderIndicators();};$('import').onchange=async event=>{try{const def=parseYaml(await event.target.files[0].text());definitions=definitions.filter(item=>item.strategy.id!==def.strategy.id);definitions.push(def);await setupDashboard();$('status').textContent='YAML 전략을 불러왔습니다. 목록에서 선택하면 자동으로 준비됩니다.';}catch(error){$('status').textContent=`YAML 오류: ${error.message}`;}};runDashboard();}
 function setupIndicatorControls(){const tickers=$('indicator-ticker'),type=$('indicator-type'),strategy=$('indicator-strategy'),fields=$('indicator-fields'),matrix=$('indicator-matrix'),tabs=$('indicator-panel-tabs'),summary=$('indicator-selection-summary'),data=marketData,labels={price:'가격 · 추세',oscillator:'오실레이터',risk:'리스크',Close:'종가',EMA20:'EMA 20',EMA55:'EMA 55',EMA200:'EMA 200',MA20:'이동평균 20',MA55:'이동평균 55',RSI14:'RSI 14',MACD:'MACD',MACD_SIGNAL:'MACD 신호',DRAWDOWN120:'120일 낙폭',VOL60:'60일 변동성',ATR60:'ATR 60'},escapeHtml=value=>String(value).replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));tickers.innerHTML=Object.keys(data).map(ticker=>`<option value="${ticker}">${ticker}</option>`).join('');fields.innerHTML=['Close','EMA20','EMA55'].map(field=>`<option value="${field}" selected>${field}</option>`).join('');if(!indicatorSelection.size)for(const field of ['Close','EMA20','EMA55'])indicatorSelection.add(`QQQ|${field}`);const enabled=definitions.filter(def=>def.strategy.enabled!==false);strategy.innerHTML='<option value="">전략 표시 안 함</option>'+enabled.map(def=>`<option value="${escapeHtml(def.strategy.id)}">${escapeHtml(def.strategy.name)}</option>`).join('');if(enabled.length)strategy.value=enabled[0].strategy.id;const dates=Object.values(data).flat().map(row=>row.Date).sort();$('indicator-start-date').value=dates[0]||'';$('indicator-end-date').value=dates.at(-1)||'';const refreshSummary=()=>{const pairs=[...indicatorSelection];summary.innerHTML=pairs.length?pairs.map(key=>{const [ticker,field]=key.split('|');return `<span class="research-indicator-selection-badge">${ticker} · ${labels[field]||field}</span>`;}).join(''):'<span class="research-indicator-selection-empty">선택된 조합 없음</span>';};const drawMatrix=()=>{const panel=type.value,available=Object.keys(data),rows=indicatorFields(panel);tabs.innerHTML=['price','oscillator','risk'].map(value=>`<button type="button" class="btn btn-sm ${value===panel?'btn-primary':'btn-ghost-secondary'}" data-panel="${value}">${labels[value]}</button>`).join('');matrix.innerHTML=`<div class="research-indicator-matrix-scroll"><div class="research-indicator-matrix-table" style="--indicator-ticker-count:${available.length}"><div class="research-indicator-matrix-header"><div class="research-indicator-matrix-corner">지표 / 종목</div>${available.map(ticker=>`<button type="button" class="research-indicator-column-toggle" data-ticker="${ticker}">${ticker}</button>`).join('')}</div>${rows.map(field=>`<div class="research-indicator-matrix-row"><button type="button" class="research-indicator-row-toggle" data-field="${field}">${labels[field]||field}</button>${available.map(ticker=>`<label><input class="indicator-matrix-cell" type="checkbox" value="${ticker}|${field}" ${indicatorSelection.has(`${ticker}|${field}`)?'checked':''}></label>`).join('')}</div>`).join('')}</div></div>`;tabs.querySelectorAll('button').forEach(button=>button.onclick=()=>{type.value=button.dataset.panel;drawMatrix();renderIndicators();});matrix.querySelectorAll('.indicator-matrix-cell').forEach(input=>input.onchange=()=>{input.checked?indicatorSelection.add(input.value):indicatorSelection.delete(input.value);refreshSummary();renderIndicators();});matrix.querySelectorAll('.research-indicator-column-toggle').forEach(button=>button.onclick=()=>{const cells=[...matrix.querySelectorAll(`.indicator-matrix-cell[value^="${button.dataset.ticker}|"]`)],checked=cells.some(input=>input.checked);cells.forEach(input=>{input.checked=!checked;input.checked?indicatorSelection.add(input.value):indicatorSelection.delete(input.value);});refreshSummary();renderIndicators();});matrix.querySelectorAll('.research-indicator-row-toggle').forEach(button=>button.onclick=()=>{const cells=[...matrix.querySelectorAll(`.indicator-matrix-cell[value$="|${button.dataset.field}"]`)],checked=cells.some(input=>input.checked);cells.forEach(input=>{input.checked=!checked;input.checked?indicatorSelection.add(input.value):indicatorSelection.delete(input.value);});refreshSummary();renderIndicators();});};strategy.onchange=renderIndicators;$('indicator-start-date').onchange=renderIndicators;$('indicator-end-date').onchange=renderIndicators;$('indicator-overlays').onchange=renderIndicators;refreshSummary();drawMatrix();}
 const baseSetupDashboard=setupDashboard;
 setupDashboard=async()=>{await baseSetupDashboard();setupIndicatorControls();};
-function localizeIndicatorView(){const cards=document.querySelectorAll('#indicators-view .research-card'),labels=document.querySelectorAll('#indicators-view .form-label');cards[0]?.querySelector('.card-title')&&(cards[0].querySelector('.card-title').textContent='지표 연구');cards[0]?.querySelector('.research-card-description')&&(cards[0].querySelector('.research-card-description').textContent='종목과 지표를 조합해 시장 구간을 분석합니다.');cards[1]?.querySelector('.card-title')&&(cards[1].querySelector('.card-title').textContent='표시 지표');cards[1]?.querySelector('.research-card-description')&&(cards[1].querySelector('.research-card-description').textContent='선택된 종목과 지표 조합');if(labels[0])labels[0].textContent='분석 기간';if(labels[1])labels[1].textContent='전략 표시';if(labels[2])labels[2].textContent='전략 이벤트';const editor=$('indicator-editor');editor?.querySelector('summary span:nth-child(2)')&&(editor.querySelector('summary span:nth-child(2)').textContent='종목 · 지표 편집');const events=$('indicator-overlays');if(events){const eventLabels=events.querySelectorAll('label');if(eventLabels[0])eventLabels[0].lastChild.textContent='상태 구간';if(eventLabels[1])eventLabels[1].lastChild.textContent='리밸런싱';if(eventLabels[2])eventLabels[2].lastChild.textContent='기타 알림';}}
+function localizeIndicatorView(){const cards=document.querySelectorAll('#indicators-view .research-card'),labels=document.querySelectorAll('#indicators-view .form-label');cards[0]?.querySelector('.card-title')&&(cards[0].querySelector('.card-title').textContent='지표 연구');cards[0]?.querySelector('.research-card-description')&&(cards[0].querySelector('.research-card-description').textContent='종목과 지표를 조합해 시장 구간을 분석합니다.');cards[1]?.querySelector('.card-title')&&(cards[1].querySelector('.card-title').textContent='표시 지표');cards[1]?.querySelector('.research-card-description')&&(cards[1].querySelector('.research-card-description').textContent='선택된 종목과 지표 조합');if(labels[0])labels[0].textContent='분석 기간';if(labels[1])labels[1].textContent='전략 표시';const editor=$('indicator-editor');editor?.querySelector('summary span:nth-child(2)')&&(editor.querySelector('summary span:nth-child(2)').textContent='종목 · 지표 편집');const events=$('indicator-overlays');if(events){const eventLabels=events.querySelectorAll('label');if(eventLabels[0])eventLabels[0].lastChild.textContent='상태 구간';if(eventLabels[1])eventLabels[1].lastChild.textContent='리밸런싱';if(eventLabels[2])eventLabels[2].lastChild.textContent='기타 알림';}}
 const parityStyle=document.createElement('style');parityStyle.textContent='.offline-date-range{width:300px;gap:8px}.offline-date-range input,#start-date,#end-date,#indicator-start-date,#indicator-end-date{min-width:0;padding:7px 8px;font-size:16px!important;text-align:center}.research-kpi-card{position:relative;overflow:hidden}.research-kpi-icon{position:absolute;top:16px;right:16px;width:34px;height:34px;display:grid;place-items:center;border-radius:10px;font-size:18px;font-weight:700}.research-kpi-positive{color:#2fb344;background:rgba(47,179,68,.12)}.research-kpi-negative{color:#d63939;background:rgba(214,57,68,.12)}.research-kpi-primary{color:#206bc4;background:rgba(32,107,196,.12)}.research-kpi-cyan{color:#0ca8c0;background:rgba(12,168,192,.12)}.win11-date-picker{position:fixed;z-index:3000;width:320px;padding:12px;border:1px solid #d7dce4;border-radius:12px;background:#fff;box-shadow:0 18px 42px rgba(24,36,51,.2);color:#182433}.win11-date-picker[hidden]{display:none}.win11-date-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}.win11-date-title{min-width:0;border:0;background:transparent;color:#182433;font:700 15px inherit;cursor:pointer}.win11-date-nav{width:32px;height:32px;border:0;border-radius:7px;background:transparent;color:#182433;font-size:21px;line-height:1;cursor:pointer}.win11-date-nav:hover,.win11-date-nav:focus-visible,.win11-date-title:hover,.win11-date-title:focus-visible{background:#eef3fa;outline:none}.win11-date-weekdays,.win11-date-days{display:grid;grid-template-columns:repeat(7,1fr);gap:2px}.win11-date-weekdays{margin-bottom:4px;color:#65758b;font-size:12px;text-align:center}.win11-date-day{height:36px;border:0;border-radius:7px;background:transparent;color:#182433;font:inherit;cursor:pointer}.win11-date-day:hover,.win11-date-day:focus-visible,.win11-date-choice:hover,.win11-date-choice:focus-visible{background:#e9f2ff;outline:none}.win11-date-day.is-outside{color:#97a3b4}.win11-date-day.is-today{box-shadow:inset 0 0 0 1px #206bc4}.win11-date-day.is-selected{background:#206bc4;color:#fff;box-shadow:none}.win11-date-choices{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}.win11-date-choice{min-height:48px;border:0;border-radius:8px;background:transparent;color:#182433;font:600 14px inherit;cursor:pointer}.win11-date-choice.is-selected{background:#206bc4;color:#fff}.win11-date-picker.is-dark{background:#202b3a;border-color:#36465a;color:#f2f6fb}.win11-date-picker.is-dark .win11-date-title,.win11-date-picker.is-dark .win11-date-nav,.win11-date-picker.is-dark .win11-date-day,.win11-date-picker.is-dark .win11-date-choice{color:#f2f6fb}.win11-date-picker.is-dark .win11-date-weekdays,.win11-date-picker.is-dark .win11-date-day.is-outside{color:#aeb9c7}.win11-date-picker.is-dark .win11-date-nav:hover,.win11-date-picker.is-dark .win11-date-nav:focus-visible,.win11-date-picker.is-dark .win11-date-title:hover,.win11-date-picker.is-dark .win11-date-title:focus-visible,.win11-date-picker.is-dark .win11-date-day:hover,.win11-date-picker.is-dark .win11-date-day:focus-visible,.win11-date-picker.is-dark .win11-date-choice:hover,.win11-date-picker.is-dark .win11-date-choice:focus-visible{background:#30425a}@media(max-width:520px){.win11-date-picker{width:calc(100vw - 24px)}}';document.head.append(parityStyle);
 const baseIndicatorRenderer=renderIndicators;
 renderIndicators=async()=>{await baseIndicatorRenderer();const plot=$('indicator-plot');if(!plot?.data)return;const palette=['#2962FF','#089981','#FF9800','#9C27B0','#F23645','#00BCD4'];Plotly.restyle(plot,{'line.color':plot.data.map((_,index)=>palette[index%palette.length])});const layout=chartLayout('지표 연구',{slider:true,selector:true,indicator:true});layout.yaxis.tickformat=undefined;layout.yaxis.title={text:$('indicator-type').value==='price'?'기준=100':'지표 값'};Plotly.relayout(plot,layout);};
@@ -457,7 +458,7 @@ function migrateStrategyDefinition(definition){
   return {...definition,strategy,...(definition.source?{source:migrateStrategyId(definition.source)}:{})};
 }
 function loadUiState(){try{const state=JSON.parse(localStorage.getItem(uiStateKey)||'{}')||{};for(const key of ['strategyIds','knownStrategyIds','indicatorSelection'])if(Array.isArray(state[key]))state[key]=state[key].map(migrateStrategyId);for(const key of ['detailStrategy','indicatorStrategy'])if(state[key])state[key]=migrateStrategyId(state[key]);return state;}catch{return {};}}
-function saveUiState(activeView){try{activeView=typeof activeView==='string'?activeView:null;const previous=loadUiState(),strategyInputs=[...$('strategy-list').querySelectorAll('input[type="checkbox"]')],state={...previous,strategyIds:strategyInputs.length?strategyInputs.filter(input=>input.checked).map(input=>input.value):previous.strategyIds,knownStrategyIds:definitions.filter(def=>def.strategy.enabled!==false).map(def=>def.strategy.id),analysisStart:$('start-date').value||previous.analysisStart,analysisEnd:$('end-date').value||previous.analysisEnd,detailStrategy:$('detail-strategy').value||previous.detailStrategy,detailRemoveFx:Boolean($('detail-remove-fx')?.checked),indicatorSelection:[...indicatorSelection],indicatorType:indicatorControlsInitialized?$('indicator-type').value:previous.indicatorType,indicatorStrategy:indicatorControlsInitialized?$('indicator-strategy').value:previous.indicatorStrategy,indicatorStart:$('indicator-start-date')?.value||previous.indicatorStart,indicatorEnd:$('indicator-end-date')?.value||previous.indicatorEnd,indicatorOverlays:[...($('indicator-overlays')?.querySelectorAll('input:checked')||[])].map(input=>input.value),indicatorCandles:[...($('indicator-candles')?.querySelectorAll('input:checked')||[])].map(input=>input.value).filter(Boolean),indicatorRemoveFx:Boolean($('indicator-remove-fx')?.checked),indicatorHiddenTraceNames:[...indicatorHiddenTraceNames].filter(name=>name!=='알림'),activeView:activeView||($('indicators-view').classList.contains('offline-hidden')?'analysis':'indicators')};localStorage.setItem(uiStateKey,JSON.stringify(state));}catch{}}
+function saveUiState(activeView){try{activeView=typeof activeView==='string'?activeView:null;const previous=loadUiState(),strategyInputs=[...$('strategy-list').querySelectorAll('input[type="checkbox"]')],state={...previous,strategyIds:strategyInputs.length?strategyInputs.filter(input=>input.checked).map(input=>input.value):previous.strategyIds,knownStrategyIds:definitions.filter(def=>def.strategy.enabled!==false).map(def=>def.strategy.id),analysisStart:$('start-date').value||previous.analysisStart,analysisEnd:$('end-date').value||previous.analysisEnd,detailStrategy:$('detail-strategy').value||previous.detailStrategy,detailRemoveFx:Boolean($('detail-remove-fx')?.checked),indicatorSelection:[...indicatorSelection],indicatorCustomTickers:[...indicatorCustomTickers],indicatorType:indicatorControlsInitialized?$('indicator-type').value:previous.indicatorType,indicatorStrategy:indicatorControlsInitialized?$('indicator-strategy').value:previous.indicatorStrategy,indicatorStart:$('indicator-start-date')?.value||previous.indicatorStart,indicatorEnd:$('indicator-end-date')?.value||previous.indicatorEnd,indicatorOverlays:[...($('indicator-overlays')?.querySelectorAll('input:checked')||[])].map(input=>input.value),indicatorCandles:[...($('indicator-candles')?.querySelectorAll('input:checked')||[])].map(input=>input.value).filter(Boolean),indicatorRemoveFx:Boolean($('indicator-remove-fx')?.checked),indicatorHiddenTraceNames:[...indicatorHiddenTraceNames].filter(name=>name!=='알림'),activeView:activeView||($('indicators-view').classList.contains('offline-hidden')?'analysis':'indicators')};localStorage.setItem(uiStateKey,JSON.stringify(state));}catch{}}
 const savedUiState=loadUiState();
 let indicatorHiddenTraceNames=new Set((Array.isArray(savedUiState.indicatorHiddenTraceNames)?savedUiState.indicatorHiddenTraceNames:[]).filter(name=>name!=='알림'));
 function applyImmediateUiState(state){
@@ -479,6 +480,7 @@ function applyImmediateUiState(state){
 }
 applyImmediateUiState(savedUiState);
 if(Array.isArray(savedUiState.indicatorSelection))indicatorSelection=new Set(savedUiState.indicatorSelection);
+if(Array.isArray(savedUiState.indicatorCustomTickers))indicatorCustomTickers=new Set(savedUiState.indicatorCustomTickers);
 if(Array.isArray(savedUiState.importedDefinitions)){const importedDefinitions=savedUiState.importedDefinitions.map(migrateStrategyDefinition),importedIds=new Set(importedDefinitions.map(def=>def?.strategy?.id).filter(Boolean));definitions=[...definitions.filter(def=>!importedIds.has(def.strategy.id)),...importedDefinitions];}
 setupDashboard=async function(){
   const inputs=[...$('strategy-list').querySelectorAll('input[type="checkbox"]')],currentState=loadUiState(),hasSavedStrategyIds=Array.isArray(currentState.strategyIds);
@@ -909,11 +911,44 @@ function indicatorTickerData(data){
   if(!visible.size&&data.QQQ)visible.add('QQQ');
   return Object.fromEntries([...visible].sort().map(ticker=>[ticker,data[ticker]||[]]));
 }
+function decorateCustomIndicatorColumns(){
+  const matrix=$('indicator-matrix');
+  if(!matrix)return;
+  for(const ticker of indicatorCustomTickers){
+    const button=[...matrix.querySelectorAll('.research-indicator-column-toggle[data-ticker]')]
+      .find(item=>item.dataset.ticker===ticker);
+    if(!button||button.parentElement?.classList.contains('research-indicator-column-header'))continue;
+    const wrapper=document.createElement('div'),remove=document.createElement('button');
+    wrapper.className='research-indicator-column-header';
+    remove.type='button';
+    remove.className='research-indicator-column-remove';
+    remove.dataset.ticker=ticker;
+    remove.setAttribute('aria-label',`${indicatorDisplayTicker(ticker)} 종목 삭제`);
+    remove.title='종목 삭제';
+    remove.textContent='×';
+    button.before(wrapper);
+    wrapper.append(button,remove);
+  }
+}
+function bindCustomIndicatorColumnRemoval(){
+  const matrix=$('indicator-matrix');
+  if(!matrix||matrix.dataset.customTickerRemovalBound)return;
+  matrix.dataset.customTickerRemovalBound='1';
+  matrix.addEventListener('click',event=>{
+    const button=event.target.closest('.research-indicator-column-remove');
+    if(!button)return;
+    event.preventDefault();
+    event.stopPropagation();
+    void removeIndicatorComparisonTicker(button.dataset.ticker);
+  });
+  const observer=new MutationObserver(()=>decorateCustomIndicatorColumns());
+  observer.observe(matrix,{childList:true,subtree:true});
+}
 const unfilteredIndicatorSetup=setupIndicatorControls;
 setupIndicatorControls=function(){
   const allMarketData=marketData;
   marketData=indicatorTickerData(allMarketData);
-  try{unfilteredIndicatorSetup();}
+  try{unfilteredIndicatorSetup();bindCustomIndicatorColumnRemoval();decorateCustomIndicatorColumns();}
   finally{marketData=allMarketData;}
 };
 async function clearBrowserCache(){
@@ -2345,3 +2380,71 @@ renderIndicators=async function(){
   await ensureInitialIndicatorNotificationContext();
   return notificationConsistentInitialIndicatorRenderer();
 };
+
+function normalizeComparisonTicker(value){return String(value||'').trim().toUpperCase();}
+function comparisonTickerError(ticker){
+  if(!ticker)return '상품코드를 입력해 주세요.';
+  if(!DATA_PROXY_TICKER_PATTERN.test(ticker))return '영문 대문자, 숫자, ., -, _, ^, =, :만 사용할 수 있습니다.';
+  if(isKrwAdjustedTicker(ticker)||ticker==='TDF2050_PROXY')return '직접 입력할 수 없는 내부 상품코드입니다.';
+  return '';
+}
+function setIndicatorCompareMessage(message,kind=''){
+  const help=$('indicator-compare-help');
+  if(!help)return;
+  help.textContent=message;
+  help.classList.toggle('is-error',kind==='error');
+  help.classList.toggle('is-success',kind==='success');
+}
+async function addIndicatorComparisonTicker(value){
+  const ticker=normalizeComparisonTicker(value),error=comparisonTickerError(ticker);
+  if(error)throw Error(error);
+  const data=await loadData(),start=$('indicator-start-date')?.value||'2010-01-01';
+  const alreadyVisible=Object.hasOwn(indicatorTickerData(data),ticker);
+  await loadCachedTickerData(data,[ticker]);
+  await fetchProxyTickerData(data,[ticker],start);
+  if(!(data[ticker]||[]).length)throw Error(`시세를 찾을 수 없습니다: ${ticker}`);
+  if(!alreadyVisible)indicatorCustomTickers.add(ticker);
+  indicatorSelection.add(`${ticker}|Close`);
+  lastIndicatorRenderKey='';
+  saveUiState();
+  refreshIndicatorTickerCatalog(data);
+  await renderIndicators();
+  return ticker;
+}
+async function removeIndicatorComparisonTicker(ticker){
+  ticker=normalizeComparisonTicker(ticker);
+  if(!indicatorCustomTickers.has(ticker))return;
+  indicatorCustomTickers.delete(ticker);
+  for(const key of [...indicatorSelection])if(key.startsWith(`${ticker}|`))indicatorSelection.delete(key);
+  indicatorHiddenTraceNames.delete(`${ticker} · 종가`);
+  lastIndicatorRenderKey='';
+  saveUiState();
+  const data=await loadData();
+  refreshIndicatorTickerCatalog(data);
+  setIndicatorCompareMessage(`${ticker} 종목 컬럼을 삭제했습니다.`,'success');
+  await renderIndicators();
+}
+function bindIndicatorComparisonInput(){
+  const form=$('indicator-compare-form'),input=$('indicator-compare-ticker'),button=$('indicator-compare-add');
+  if(!form||!input||!button||form.dataset.bound)return;
+  form.dataset.bound='1';
+  form.addEventListener('submit',async event=>{
+    event.preventDefault();
+    button.disabled=true;
+    input.disabled=true;
+    setIndicatorCompareMessage('시세를 불러오는 중입니다…');
+    try{
+      const ticker=await addIndicatorComparisonTicker(input.value);
+      input.value='';
+      setIndicatorCompareMessage(`${ticker}를 새 종목 컬럼으로 추가했습니다.`,'success');
+    }catch(error){
+      setIndicatorCompareMessage(error instanceof Error?error.message:String(error),'error');
+      input.select();
+    }finally{
+      button.disabled=false;
+      input.disabled=false;
+      input.focus();
+    }
+  });
+}
+bindIndicatorComparisonInput();

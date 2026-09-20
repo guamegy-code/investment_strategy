@@ -174,6 +174,27 @@ test('restored indicator strategy reloads its overlay history when needed',()=>{
   assert.match(source,/await ensureIndicatorStrategyHistory\(String\(\$\('indicator-strategy'\)\?\.value\|\|''\)\)/);
 });
 
+test('indicator editor accepts a product code and adds a new ticker column',()=>{
+  assert.match(template,/id="indicator-compare-form"/);
+  assert.match(template,/id="indicator-compare-ticker"/);
+  assert.match(template,/<details id="indicator-editor"[\s\S]*?id="indicator-compare-form"[\s\S]*?id="indicator-matrix"/);
+  assert.match(template,/컬럼 추가/);
+  assert.match(source,/function normalizeComparisonTicker\(value\)/);
+  assert.match(source,/await fetchProxyTickerData\(data,\[ticker\],start\)/);
+  assert.match(source,/indicatorSelection\.add\(`\$\{ticker\}\|Close`\)/);
+  assert.match(source,/refreshIndicatorTickerCatalog\(data\)/);
+  assert.match(source,/await renderIndicators\(\)/);
+});
+
+test('custom indicator columns expose a persisted remove button',()=>{
+  assert.match(source,/indicatorCustomTickers:\[\.\.\.indicatorCustomTickers\]/);
+  assert.match(source,/function decorateCustomIndicatorColumns\(\)/);
+  assert.match(source,/remove\.className='research-indicator-column-remove'/);
+  assert.match(source,/function removeIndicatorComparisonTicker\(ticker\)/);
+  assert.match(source,/if\(key\.startsWith\(`\$\{ticker\}\|`\)\)indicatorSelection\.delete\(key\)/);
+  assert.match(source,/refreshIndicatorTickerCatalog\(data\)/);
+});
+
 test('saved UI controls are restored before asynchronous dashboard loading',()=>{
   assert.match(source,/function applyImmediateUiState\(state\)/);
   assert.match(source,/applyImmediateUiState\(savedUiState\)/);
