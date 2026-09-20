@@ -1,7 +1,7 @@
 {
   "version": 1,
   "hidden_strategy_ids": [],
-  "enabled_bundle": "enabled.4359b2ffb067.json",
+  "enabled_bundle": "enabled.9ab1b42b34e7.json",
   "results": {
     "profit-band-tdf2050": "../results/profit-band-tdf2050.260199001a21.json.gz",
     "buy-3dip-bil": "../results/buy-3dip-bil.c0599d5e2522.json.gz",
@@ -222,6 +222,12 @@
       "id": "buy-3dip-bil-valuation-hybrid-active",
       "path": "27P_buy_3dip_80_98_99_100_active.yaml",
       "version": 1,
+      "enabled": true
+    },
+    {
+      "id": "qqq-valuation-warning-dip-buyer",
+      "path": "28_qqq_valuation_warning_dip_buyer.yaml",
+      "version": 2,
       "enabled": true
     }
   ]

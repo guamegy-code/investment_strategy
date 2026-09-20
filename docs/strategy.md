@@ -51,13 +51,14 @@
 | `14_profit_band_tdf2050_gate_spy_tdf100_no_bnd.yaml` | `profit-band-tdf2050-gate-spy-tdf100-no-bnd` | 예 | 13에서 BND를 빼고 TDF/BIL만 사용하는 전용 단순형 |
 | `15_band_7030_tdf_state_bil.yaml` | `band-7030-tdf-state-bil` | 예 | 70/30 밴드에 사전 BEAR 현금화와 상태별 TDF/BIL 배분을 결합한 방어형 |
 | `16_state_conditioned_cross_asset_rotation.yaml` | `state-conditioned-cross-asset-rotation` | 예 | Strategy 15의 QQQ/TDF 비중을 보존하고 BIL 슬리브만 자동 교차자산으로 대체 |
-| `27_buy_3dip_valuation_defense_80_98_99_100.yaml` | `buy-3dip-bil-valuation-hybrid-80-98-99-100` | 예 | 3단계 매수·회복 규칙에 밸류에이션 방어와 80/98/99/100 비중을 결합한 개인연금 전략 |
 | `23_qqq_structural_defense_balanced.yaml` | `qqq-structural-defense-balanced` | 예 | 개인연금용 QQQ 100%와 4상태 추세 방어를 결합한 23B |
 | `24_qqq_valuation_breakdown_defense.yaml` | `qqq-valuation-breakdown-defense` | 예 | 합성 밸류에이션 고점 붕괴를 주 방어 신호로 쓰고 23번 추세 상한을 결합한 전략 |
 | `25_qqq_valuation_breakdown_balanced.yaml` | `qqq-valuation-breakdown-balanced` | 예 | 월간 밸류에이션 급락과 빠른 가격 확인을 결합한 개인연금 균형형 |
 | `25P_qqq_valuation_breakdown_balanced_kodex_koact.yaml` | `qqq-valuation-breakdown-balanced-kodex-koact` | 예 | 25의 QQQ를 KODEX·KoAct에 반반, BIL을 KODEX 머니마켓에 매핑 |
 | `26_band_7030_tdf_valuation_defense.yaml` | `band-7030-tdf-valuation-defense` | 예 | 15번 퇴직연금 70/30 구조에 25번 밸류에이션 방어를 결합한 전략 |
 | `26P_band_7030_tdf_valuation_defense_kodex_koact.yaml` | `band-7030-tdf-valuation-defense-kodex-koact` | 예 | 26의 QQQ를 KODEX·KoAct에 반반, TDF·BIL을 국내 상품에 매핑 |
+| `27_buy_3dip_valuation_defense_80_98_99_100.yaml` | `buy-3dip-bil-valuation-hybrid-80-98-99-100` | 예 | 3단계 매수·회복 규칙에 밸류에이션 방어와 80/98/99/100 비중을 결합한 개인연금 전략 |
+| `28_qqq_valuation_warning_dip_buyer.yaml` | `qqq-valuation-warning-dip-buyer` | 예 | WARNING에서 QQQ 70%로 방어하고 고점 대비 -10%에서 QQQ 100%로 즉시 복귀하는 전략 |
 
 다음 파일들은 독립 규칙이 아니라 `source` 전략의 신호·상태·리밸런싱·알림 규칙을 그대로 사용해 실제
 상품만 바꾸는 매핑입니다. 자세한 매핑은 [국내 상품 매핑](#국내-상품-매핑)에 있습니다.
@@ -307,6 +308,17 @@ BEAR 확정 전 `structural_bear` 신호만으로 BIL 100%로 이동하던 예�
 
 후보 배분, 구간별 성과, 롤링 및 비용 민감도와 표본 한계는
 [26번 퇴직연금 밸류에이션 방어 검증](research/strategy26-retirement-valuation-defense.md)에 기록합니다.
+
+### 28 — QQQ Valuation Warning Dip Buyer
+
+`28_qqq_valuation_warning_dip_buyer.yaml`은 25번의 평상시 QQQ 100% 구조를 유지하면서
+밸류에이션 `WARNING`에서만 QQQ를 70%로 줄여 BIL 완충 자금을 만듭니다.
+
+- 고점 대비 -10% 하락에서 BIL 30%를 전부 투입해 QQQ 100%로 복귀합니다.
+- -20%, -32.5% 단계는 추가 하락과 회복 경로를 추적하지만 QQQ 목표는 100%로 유지합니다.
+- DEFENSE·구조적 약세·RECOVERY·BEAR 목표는 하락 매수보다 우선합니다.
+- 전체 표본에서는 25번보다 CAGR이 0.030%p 높고 MDD가 0.833%p 개선됐습니다.
+- 세부 검증은 [28번 밸류에이션 WARNING 하락 매수 검증](research/strategy28-warning-dip-buyer.md)에 기록합니다.
 
 ## VXUS 수익 밴드 계열
 

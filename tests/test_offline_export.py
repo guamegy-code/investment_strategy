@@ -650,6 +650,30 @@ class OfflineExportTests(unittest.TestCase):
             }])
             self.assertTrue(definition["strategy"]["enabled"])
 
+    def test_strategy_28_is_enabled_in_the_performance_analysis_manifest(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            strategy_dir = root / "strategies"
+            strategy_dir.mkdir()
+            source = PROJECT_ROOT / "strategies" / "28_qqq_valuation_warning_dip_buyer.yaml"
+            shutil.copy2(source, strategy_dir / source.name)
+
+            export_static_site(root / "site", strategy_dir=strategy_dir)
+            manifest = json.loads((root / "site" / "strategies" / "manifest.json").read_text(
+                encoding="utf-8"
+            ))
+            definition = yaml.safe_load((root / "site" / "strategies" / source.name).read_text(
+                encoding="utf-8"
+            ))
+
+            self.assertEqual(manifest["strategies"], [{
+                "id": "qqq-valuation-warning-dip-buyer",
+                "path": source.name,
+                "version": 2,
+                "enabled": True,
+            }])
+            self.assertTrue(definition["strategy"]["enabled"])
+
     def test_export_can_write_market_data_as_a_sidecar_file(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)
