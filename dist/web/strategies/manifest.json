@@ -1,7 +1,7 @@
 {
   "version": 1,
   "hidden_strategy_ids": [],
-  "enabled_bundle": "enabled.9ab1b42b34e7.json",
+  "enabled_bundle": "enabled.0b95678967d1.json",
   "results": {
     "profit-band-tdf2050": "../results/profit-band-tdf2050.260199001a21.json.gz",
     "buy-3dip-bil": "../results/buy-3dip-bil.c0599d5e2522.json.gz",
@@ -228,6 +228,24 @@
       "id": "qqq-valuation-warning-dip-buyer",
       "path": "28_qqq_valuation_warning_dip_buyer.yaml",
       "version": 2,
+      "enabled": true
+    },
+    {
+      "id": "qqq-valuation-warning-dip-buyer-kodex-koact",
+      "path": "28P_qqq_valuation_warning_dip_buyer_kodex_koact.yaml",
+      "version": 1,
+      "enabled": true
+    },
+    {
+      "id": "band-7030-tdf-valuation-warning-dip-buyer",
+      "path": "29_band_7030_tdf_valuation_warning_dip_buyer.yaml",
+      "version": 1,
+      "enabled": true
+    },
+    {
+      "id": "band-7030-tdf-valuation-warning-dip-buyer-kodex-koact",
+      "path": "29P_band_7030_tdf_valuation_warning_dip_buyer_kodex_koact.yaml",
+      "version": 1,
       "enabled": true
     }
   ]

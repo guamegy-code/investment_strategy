@@ -50,6 +50,31 @@ class Strategy2526ProductMappingTests(unittest.TestCase):
         self.assertNotIn("notifications", mapped.definition)
         self.assertIn("notifications", mapped.source_strategy.definition)
 
+    def test_strategy_28_product_mapping_matches_strategy_25_products(self):
+        mapped = self.strategies[
+            "dsl:qqq-valuation-warning-dip-buyer-kodex-koact"
+        ]
+
+        self.assertIsInstance(mapped, ProductMappedStrategy)
+        self.assertEqual(mapped.source_strategy_id, "qqq-valuation-warning-dip-buyer")
+        self.assertEqual(mapped.products, self.strategies[
+            "dsl:qqq-valuation-breakdown-balanced-kodex-koact"
+        ].products)
+
+    def test_strategy_29_product_mapping_matches_strategy_26_products(self):
+        mapped = self.strategies[
+            "dsl:band-7030-tdf-valuation-warning-dip-buyer-kodex-koact"
+        ]
+
+        self.assertIsInstance(mapped, ProductMappedStrategy)
+        self.assertEqual(
+            mapped.source_strategy_id,
+            "band-7030-tdf-valuation-warning-dip-buyer",
+        )
+        self.assertEqual(mapped.products, self.strategies[
+            "dsl:band-7030-tdf-valuation-defense-kodex-koact"
+        ].products)
+
 
 if __name__ == "__main__":
     unittest.main()

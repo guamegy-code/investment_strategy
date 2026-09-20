@@ -1,0 +1,303 @@
+strategy:
+  id: band-7030-tdf-valuation-warning-dip-buyer
+  name: 70/30 TDF Valuation Warning Dip Buyer (29) [BIL]
+  version: 1
+  dsl_version: 1
+  enabled: true
+
+# 26번의 퇴직연금 70/30 구조와 방어 우선순위를 유지하면서 28번의 WARNING 완충자금과
+# 하락 재투입 규칙을 결합한다. 평상시는 QQQ 70%·TDF2050 30%다.
+# 밸류에이션 WARNING에서는 QQQ를 50%로 낮추고 BIL 20%를 확보한다.
+# 추적 고점 대비 -10%가 되면 BIL을 전부 투입해 정상 70/30 비중으로 복귀한다.
+# -20%/-32.5% 단계는 추가 하락과 회복 경로 추적용이며 목표는 계속 70/30이다.
+# BEAR·구조적 약세·DEFENSE·RECOVERY는 하락 재투입보다 항상 우선한다.
+assets:
+  required: [QQQ, TDF2050_PROXY, BIL]
+  observations: [SPY]
+  risk: [QQQ]
+
+parameters:
+  drop_b: -0.10
+  drop_c: -0.20
+  drop_d: -0.325
+  recovery_stage_1: 0.075
+  recovery_stage_2: -0.085
+  recovery_stage_3: -0.175
+  valuation_arm_score: 65
+  valuation_breakdown_points: 25
+
+variables:
+  risk_off_score: >
+    count(
+      QQQ.close < QQQ.ema20,
+      QQQ.close < QQQ.ema55,
+      QQQ.ema20 < QQQ.ema55,
+      QQQ.roc5 < 0,
+      QQQ.roc20 < 0,
+      QQQ.ema20_slope5 < 0
+    )
+  recovery_score: >
+    count(
+      QQQ.close > QQQ.ema20,
+      QQQ.close > QQQ.ema55,
+      QQQ.ema20 > QQQ.ema55,
+      QQQ.roc5 > 0,
+      QQQ.roc20 > 0,
+      QQQ.ema20_slope5 > 0
+    )
+  structural_bear: >
+    variables.risk_off_score >= 5
+    and QQQ.close < QQQ.ema20
+    and QQQ.ema20 < QQQ.ema55
+    and QQQ.ema55 < QQQ.ema200
+    and QQQ.roc60 < 0
+    and QQQ.ema200_slope20 < 0
+  bull_reentry_allowed: >
+    QQQ.close > QQQ.ema55
+    and QQQ.roc60 > 0
+
+state:
+  # 하락 단계는 추적 고점 대비 -10%/-20%/-32.5%를 기록한다.
+  stage:
+    initial: 0
+    rules:
+      - when: >
+          state.stage == 3
+          and state.peak_price > 0
+          and QQQ.close >= state.peak_price * (1 + parameters.recovery_stage_3)
+        set: 2
+      - when: >
+          state.stage == 2
+          and state.peak_price > 0
+          and QQQ.close <= state.peak_price * (1 + parameters.drop_d)
+        set: 3
+      - when: >
+          state.stage == 2
+          and state.peak_price > 0
+          and QQQ.close >= state.peak_price * (1 + parameters.recovery_stage_2)
+        set: 1
+      - when: >
+          state.stage == 1
+          and state.peak_price > 0
+          and QQQ.close <= state.peak_price * (1 + parameters.drop_c)
+        set: 2
+      - when: >
+          state.stage == 1
+          and state.peak_price > 0
+          and QQQ.close >= state.peak_price * (1 + parameters.recovery_stage_1)
+        set: 0
+      - when: >
+          state.stage == 0
+          and state.peak_price > 0
+          and QQQ.close <= state.peak_price * (1 + parameters.drop_b)
+        set: 1
+
+  peak_price:
+    initial: 0
+    rules:
+      - when: state.peak_price == 0
+        set: "=QQQ.close"
+      - when: changed(state.stage) and state.stage == 0
+        set: "=QQQ.close"
+      - when: state.stage == 0 and QQQ.close > state.peak_price
+        set: "=QQQ.close"
+
+  defense_mode:
+    initial: NORMAL
+    rules:
+      - when: >
+          state.defense_mode == 'NORMAL'
+          and state.valuation_peak >= parameters.valuation_arm_score
+          and QQQ.valuation_score <= state.valuation_peak - parameters.valuation_breakdown_points
+          and variables.risk_off_score >= 6
+        set: DEFENSE
+      - when: >
+          state.defense_mode == 'NORMAL'
+          and state.valuation_peak >= parameters.valuation_arm_score
+          and QQQ.valuation_score <= state.valuation_peak - parameters.valuation_breakdown_points
+        set: WARNING
+      - when: >
+          state.defense_mode == 'WARNING'
+          and QQQ.valuation_score >= state.valuation_peak
+        set: NORMAL
+      - when: >
+          state.defense_mode == 'WARNING'
+          and variables.risk_off_score >= 4
+        set: DEFENSE
+        confirm: 6
+      - when: >
+          state.defense_mode == 'DEFENSE'
+          and variables.recovery_score >= 4
+          and QQQ.close > QQQ.ema20
+        set: NORMAL
+        confirm: 2
+
+  valuation_peak:
+    initial: 0
+    rules:
+      - when: state.valuation_peak == 0
+        set: "=QQQ.valuation_score"
+      - when: changed(state.defense_mode) and state.defense_mode == 'NORMAL'
+        set: "=QQQ.valuation_score"
+      - when: >
+          state.defense_mode == 'NORMAL'
+          and QQQ.valuation_score > state.valuation_peak
+        set: "=QQQ.valuation_score"
+
+  trend_mode:
+    initial: UNINITIALIZED
+    rules:
+      - when: state.trend_mode == 'UNINITIALIZED' and variables.structural_bear
+        set: BEAR
+      - when: state.trend_mode == 'UNINITIALIZED' and variables.risk_off_score >= 5
+        set: CAUTION
+      - when: state.trend_mode == 'UNINITIALIZED'
+        set: BULL
+      - when: state.trend_mode == 'BULL' and variables.structural_bear
+        set: BEAR
+        confirm: 10
+      - when: >
+          state.trend_mode == 'BULL'
+          and QQQ.close < QQQ.ema20
+          and variables.risk_off_score >= 3
+          and SPY.close < SPY.ema20
+          and SPY.roc5 <= -1
+        set: CAUTION
+        confirm: 1
+      - when: state.trend_mode == 'CAUTION' and variables.structural_bear
+        set: BEAR
+        confirm: 10
+      - when: state.trend_mode == 'CAUTION' and variables.recovery_score >= 4
+        set: BULL
+        confirm: 3
+      - when: state.trend_mode == 'BEAR' and variables.recovery_score >= 3
+        set: RECOVERY
+        confirm: 3
+      - when: state.trend_mode == 'RECOVERY' and variables.structural_bear
+        set: BEAR
+        confirm: 10
+      - when: >
+          state.trend_mode == 'RECOVERY'
+          and variables.recovery_score >= 4
+          and variables.bull_reentry_allowed
+        set: BULL
+        confirm: 3
+      - when: state.trend_mode == 'RECOVERY' and variables.risk_off_score >= 5
+        set: CAUTION
+        confirm: 3
+
+  structural_bear_mode:
+    initial: 'FALSE'
+    rules:
+      - when: >
+          state.structural_bear_mode == 'FALSE'
+          and variables.structural_bear
+        set: 'TRUE'
+      - when: >
+          state.structural_bear_mode == 'TRUE'
+          and not variables.structural_bear
+        set: 'FALSE'
+
+target:
+  # 위에서부터 먼저 일치하는 목표가 적용된다.
+  - when: state.trend_mode == 'BEAR'
+    weights: {QQQ: 0%, TDF2050_PROXY: 20%, BIL: 80%}
+  - when: >
+      state.trend_mode != 'BEAR'
+      and state.structural_bear_mode == 'TRUE'
+    weights: {QQQ: 0%, TDF2050_PROXY: 0%, BIL: 100%}
+  - when: state.defense_mode == 'DEFENSE'
+    weights: {QQQ: 30%, TDF2050_PROXY: 0%, BIL: 70%}
+  - when: state.trend_mode == 'RECOVERY'
+    weights: {QQQ: 60%, TDF2050_PROXY: 30%, BIL: 10%}
+  # -10% 진입 후에는 추가 하락 단계가 바뀌어도 정상 70/30을 유지한다.
+  - when: state.stage == 3
+    weights: {QQQ: 70%, TDF2050_PROXY: 30%, BIL: 0%}
+  - when: state.stage == 2
+    weights: {QQQ: 70%, TDF2050_PROXY: 30%, BIL: 0%}
+  - when: state.stage == 1
+    weights: {QQQ: 70%, TDF2050_PROXY: 30%, BIL: 0%}
+  # 하락 단계가 아니면 WARNING에서 QQQ 20%를 BIL로 옮긴다.
+  - when: state.defense_mode == 'WARNING'
+    weights: {QQQ: 50%, TDF2050_PROXY: 30%, BIL: 20%}
+  - weights: {QQQ: 70%, TDF2050_PROXY: 30%, BIL: 0%}
+
+notifications:
+  schedule: weekly
+  states:
+    stage:
+      label: 하락 매수 단계
+      values: {0: 대기, 1: 1단계, 2: 2단계, 3: 3단계}
+      alerts:
+        - on: changed
+          to: [1, 2, 3]
+    structural_bear_mode:
+      label: 구조적 약세
+      values: {'FALSE': 정상, 'TRUE': 감지}
+      alerts:
+        - on: changed
+          from: 'FALSE'
+          to: 'TRUE'
+    trend_mode:
+      label: 추세
+      values: {BULL: 상승, CAUTION: 주의, BEAR: 하락, RECOVERY: 회복}
+      alerts:
+        - on: confirmation_started
+          to: [BEAR, RECOVERY, BULL]
+        - on: changed
+          to: BEAR
+          message: 장기 하락 추세가 확인됨
+        - on: changed
+          from: BEAR
+          to: RECOVERY
+          message: 반등 조건이 확인됨
+    defense_mode:
+      label: 밸류에이션
+      values: {NORMAL: 정상, WARNING: 경고, DEFENSE: 방어}
+      alerts:
+        - on: confirmation_started
+          to: [DEFENSE, NORMAL]
+        - on: changed
+          from: NORMAL
+          to: WARNING
+          message: 밸류에이션 급락을 감지해 QQQ 20%를 BIL로 대기
+        - on: changed
+          to: DEFENSE
+          message: 밸류에이션 급락과 가격 약세가 확인되어 방어 진입
+        - on: changed
+          from: WARNING
+          to: NORMAL
+          message: 밸류에이션 점수가 회복되어 경고 해제
+        - on: changed
+          from: DEFENSE
+          to: NORMAL
+          message: 가격 회복 조건이 확인되어 방어 종료
+  variables:
+    risk_off_score: {label: 약세, max: 6, display: bar}
+    recovery_score: {label: 회복, max: 6, display: bar}
+  market:
+    - {ticker: QQQ, field: roc1, label: 1일, format: percent}
+    - {ticker: QQQ, field: roc5, label: 5일, format: percent}
+    - {ticker: QQQ, field: roc20, label: 20일, format: percent}
+    - {ticker: QQQ, field: drawdown120, label: 120일 고점 대비, format: ratio_percent}
+    - {ticker: QQQ, field: valuation_score, label: 밸류에이션, format: number}
+  prealerts:
+    - id: qqq-underweight
+      when: weight_deviation('QQQ') <= -3%
+      reset_when: weight_deviation('QQQ') > -2%
+      message: QQQ 비중이 목표보다 3.0%p 이상 낮음 (매수 기준 -4.0%p)
+    - id: target-deviation
+      when: >
+        target_deviation() >= 5%
+        and target_deviation() < 7.5%
+      reset_when: target_deviation() < 4%
+      message: 목표 비중 괴리가 실행 기준에 접근 (5.0%p 이상 / 실행 7.5%p)
+
+rebalance:
+  - check: daily
+    when: >
+      target_deviation() >= 7.5%
+      or weight_deviation('QQQ') <= -4%
+
+execution:
+  days: 1

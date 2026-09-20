@@ -393,6 +393,8 @@ class OfflineExportTests(unittest.TestCase):
             self.assertIn("tab.dataset.fastAnalysisTabBound='1'", document)
             self.assertIn("activeView:'analysis'", document)
             self.assertIn("restoreIndicators&&loadUiState().activeView==='indicators'", document)
+            self.assertIn("if(fxToggle.checked)await updateDetailFxView()", document)
+            self.assertIn("toggle.checked=false;\n    saveUiState();", document)
             self.assertIn(".research-indicator-fx-toggle input,", document)
             self.assertIn("width: 36px !important", document)
             self.assertIn("research-indicator-strategy-fx-row", document)
