@@ -505,7 +505,7 @@ setupDashboard=async function(){await importReadyDashboardSetup();$('import').on
 const statefulIndicatorControls=setupIndicatorControls;
 setupIndicatorControls=function(){const state=loadUiState(),type=$('indicator-type');if(state.indicatorType&&[...type.options].some(option=>option.value===state.indicatorType))type.value=state.indicatorType;statefulIndicatorControls();const strategy=$('indicator-strategy');if(Object.hasOwn(state,'indicatorStrategy')&&[...strategy.options].some(option=>option.value===state.indicatorStrategy))strategy.value=state.indicatorStrategy;if(state.indicatorStart)$('indicator-start-date').value=state.indicatorStart;if(state.indicatorEnd)$('indicator-end-date').value=state.indicatorEnd;if(Array.isArray(state.indicatorOverlays))for(const input of $('indicator-overlays').querySelectorAll('input'))input.checked=state.indicatorOverlays.includes(input.value);strategy.onchange=async()=>{saveUiState();await renderIndicators();};for(const input of [$('indicator-start-date'),$('indicator-end-date'),$('indicator-overlays')])input.addEventListener('change',saveUiState,true);$('indicator-panel-tabs').addEventListener('click',()=>setTimeout(saveUiState));$('indicator-matrix').addEventListener('change',()=>setTimeout(saveUiState));};
 const viewRestoringDashboardSetup=setupDashboard;
-setupDashboard=async function(){const restoreIndicators=loadUiState().activeView==='indicators';if(restoreIndicators){$('analysis-view').classList.add('offline-hidden');$('indicators-view').classList.remove('offline-hidden');$('analysis-tab').classList.remove('active');$('indicators-tab').classList.add('active');}await viewRestoringDashboardSetup();const analysisTab=$('analysis-tab'),indicatorsTab=$('indicators-tab'),showAnalysis=analysisTab.onclick,showIndicators=indicatorsTab.onclick;analysisTab.onclick=()=>{showAnalysis();saveUiState('analysis');};indicatorsTab.onclick=async()=>{await showIndicators();saveUiState('indicators');};if(restoreIndicators)await indicatorsTab.onclick();};
+setupDashboard=async function(){const restoreIndicators=loadUiState().activeView==='indicators';if(restoreIndicators){$('analysis-view').classList.add('offline-hidden');$('indicators-view').classList.remove('offline-hidden');$('analysis-tab').classList.remove('active');$('indicators-tab').classList.add('active');}await viewRestoringDashboardSetup();const analysisTab=$('analysis-tab'),indicatorsTab=$('indicators-tab'),showAnalysis=analysisTab.onclick,showIndicators=indicatorsTab.onclick;analysisTab.onclick=()=>{showAnalysis();saveUiState('analysis');};indicatorsTab.onclick=async()=>{await showIndicators();saveUiState('indicators');};if(restoreIndicators&&loadUiState().activeView==='indicators')await indicatorsTab.onclick();};
 const productDisplayNames={'379810.KS':'KODEX 미국나스닥100','426030.KS':'TIME 미국나스닥100액티브','0015B0.KS':'KoAct 미국나스닥성장기업액티브','434060.KS':'KODEX TDF2050액티브 적격','488770.KS':'KODEX 머니마켓액티브','069500.KS':'KODEX 200 (069500.KS)','114100.KS':'KODEX 국고채 3년 (114100.KS)','148070.KS':'KOSEF 국고채 10년 (148070.KS)'};
 function productDetailAssets(def,tickers){const displayTickers=tickers.filter(ticker=>!Object.values(FX_TICKER_BY_SUFFIX).includes(ticker)),source=def.source?definitions.find(item=>item.strategy.id===def.source):def,required=source?.assets?.required||[],products=def.products||{},items=[],byTicker=new Map(),claimed=new Set(),hiddenAssets=new Set();for(const asset of required){const entries=Object.entries(products[asset]||((displayTickers.includes(asset))?{[asset]:1}:{})).filter(([ticker])=>displayTickers.includes(ticker)),mapped=entries.map(([ticker])=>ticker);if(mapped.some(ticker=>ticker!==asset))hiddenAssets.add(asset);for(const [ticker,share] of entries){const item=byTicker.get(ticker)||{ticker,mappings:[]};if(!byTicker.has(ticker)){byTicker.set(ticker,item);items.push(item);}item.mappings.push({asset,share});claimed.add(ticker);}}for(const ticker of displayTickers)if(!claimed.has(ticker)&&!hiddenAssets.has(ticker))items.push({ticker,mappings:[{asset:ticker,share:1}]});return items;}
 function productDetailLabel(item){const name=productDisplayNames[item.ticker]||item.ticker,mappings=item.mappings||[];if(mappings.length===1&&mappings[0].asset===item.ticker&&Math.abs(pct(mappings[0].share)-1)<1e-8)return name;return `${name} (${mappings.map(({asset,share})=>`${asset}${Math.abs(pct(share)-1)<1e-8?'':` ${percentText(pct(share)*100)}`}`).join(' · ')})`;}
@@ -1662,6 +1662,30 @@ function installIndicatorTabFastPath(){
   },true);
 }
 installIndicatorTabFastPath();
+
+// The restored indicator view is visible before the asynchronous dashboard
+// bootstrap has finished.  Keep the analysis tab usable during that window and
+// persist only the view choice so partially loaded controls cannot overwrite
+// the rest of the saved UI state.
+function installAnalysisTabFastPath(){
+  const tab=$('analysis-tab');
+  if(!tab||tab.dataset.fastAnalysisTabBound)return;
+  tab.dataset.fastAnalysisTabBound='1';
+  tab.addEventListener('click',event=>{
+    $('analysis-view').classList.remove('offline-hidden');
+    $('indicators-view').classList.add('offline-hidden');
+    tab.classList.add('active');
+    $('indicators-tab').classList.remove('active');
+    try{
+      localStorage.setItem(uiStateKey,JSON.stringify({...loadUiState(),activeView:'analysis'}));
+    }catch{}
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    requestAnimationFrame(()=>['performance-plot','drawdown-plot','detail-plot']
+      .forEach(id=>$(id)?.data&&Plotly.Plots.resize($(id))));
+  },true);
+}
+installAnalysisTabFastPath();
 
 window.addEventListener('pagehide',()=>saveUiState());
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden')saveUiState();});
