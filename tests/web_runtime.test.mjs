@@ -200,7 +200,7 @@ test('only Korean product codes replace codes with product names in the indicato
   assert.match(source,/fetchProxyTickerData\(data,\[ticker\],start,isIndicatorProductCode\(ticker\)\)/);
   assert.match(source,/payload\.labels\|\|\{\}/);
   assert.match(source,/function isIndicatorProductCode\(ticker\)/);
-  assert.match(source,/\\d\{6\}\\\.\(\?:KS\|KQ\)/);
+  assert.match(source,/\[0-9A-Z\]\{6\}\\\.\(\?:KS\|KQ\)/);
   assert.match(source,/return isIndicatorProductCode\(ticker\)\?\(indicatorTickerLabels\[ticker\]\|\|productDisplayNames\[ticker\]\|\|ticker\):ticker/);
   assert.match(source,/delete indicatorTickerLabels\[ticker\]/);
 });

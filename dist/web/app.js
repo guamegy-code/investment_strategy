@@ -1130,7 +1130,7 @@ bootstrapDashboard().catch(error=>{$('status').textContent=`오류: ${error.mess
 
 // Keep product-backed instruments readable throughout indicator research while
 // retaining the ticker as the stable value used by selection and calculation.
-function isIndicatorProductCode(ticker){return /^\d{6}\.(?:KS|KQ)$/i.test(ticker);}
+function isIndicatorProductCode(ticker){return /^[0-9A-Z]{6}\.(?:KS|KQ)$/i.test(ticker);}
 function indicatorDisplayTicker(ticker){
   return isIndicatorProductCode(ticker)?(indicatorTickerLabels[ticker]||productDisplayNames[ticker]||ticker):ticker;
 }
