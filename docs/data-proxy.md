@@ -14,9 +14,12 @@
 
 Worker는 다음 엔드포인트를 제공합니다.
 
-- `GET /prices`: 일별 OHLCV 데이터를 정규화해 반환합니다. 12시간 엣지 캐시를 적용하고,
+- `GET /prices`: 일별 OHLCV 데이터를 정규화해 반환합니다. 시장별 완료 거래일을 캐시 키에 포함해
+  같은 거래일에는 최대 12시간 재사용하고, 새 장이 끝나면 즉시 새 캐시로 전환합니다.
   잘못된 종목 코드와 지나치게 큰 요청 범위를 거부합니다.
 - `POST /notification-evaluations`: Google Apps Script가 사용하는 인증된 평가 API입니다.
+- `POST /portfolio-valuations`: 최신 ETF 종가로 자산가치와 현재 비중만 다시 계산합니다.
+  `signal_as_of`의 전략 상태와 리밸런싱 판단은 전진시키지 않습니다.
 - `POST /notification-bootstrap`: 처음 구독하거나 계산 규칙이 바뀐 전략의 알림 상태를
   초기화합니다.
 

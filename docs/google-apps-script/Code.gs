@@ -308,6 +308,32 @@ function requestEvaluations_(subscriptions, preview) {
   return JSON.parse(response.getContentText()).evaluations || [];
 }
 
+// Run this on demand after the Korean market close. It refreshes portfolio
+// values only; the Worker does not advance strategy state or create alerts.
+function refreshPortfolioValuations() {
+  const subscriptions = enabledSubscriptions_();
+  if (!subscriptions.length) throw new Error('No enabled notification strategies.');
+  const settings = PropertiesService.getScriptProperties();
+  const url = requiredProperty_(settings, 'EVALUATION_API_URL')
+    .replace(/\/notification-evaluations$/, '/portfolio-valuations');
+  const key = requiredProperty_(settings, 'EVALUATION_API_KEY');
+  const response = UrlFetchApp.fetch(url, {
+    method: 'post', contentType: 'application/json', muteHttpExceptions: true,
+    headers: {Authorization: `Bearer ${key}`},
+    payload: JSON.stringify({
+      strategy_ids: subscriptions.map(item => item.strategyId),
+      private_strategies: privateStrategies_(subscriptions),
+    }),
+  });
+  if (response.getResponseCode() !== 200) {
+    throw new Error(`Portfolio valuation API error (${response.getResponseCode()}): ${response.getContentText()}`);
+  }
+  const payload = JSON.parse(response.getContentText());
+  logRun_(subscriptions.length, 0, 'VALUATION_REFRESHED',
+    (payload.valuations || []).map(item => `${item.strategy_id}: ${item.valuation_as_of}`).join(', '));
+  return payload.valuations || [];
+}
+
 function privateStrategies_(subscriptions) {
   const sheet = requireSpreadsheet_().getSheetByName(SHEETS.PERSONAL);
   if (!sheet || sheet.getLastRow() < 2) return [];
