@@ -3,7 +3,7 @@
 # Defense takes priority over dip purchases; 80/98/99/100% applies outside defense caps.
 strategy:
   id: buy-3dip-bil-valuation-hybrid-80-98-99-100
-  name: "[개인] Buy 3 Dip Delayed + Defense 80-98-99-100 [BIL]"
+  name: "Buy 3 Dip Delayed + Defense 80-98-99-100 (27) [BIL]"
   version: 1
   dsl_version: 1
   enabled: true

@@ -1,6 +1,6 @@
 strategy:
   id: buy-3dip-bil-valuation-hybrid-active
-  name: "[개인] TIME_ACTIVE 3dip Hybrid"
+  name: "[개인] TIME_ACTIVE 3dip Hybrid (27)"
   version: 1
   dsl_version: 1
   enabled: true
