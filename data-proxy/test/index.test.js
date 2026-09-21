@@ -3,7 +3,11 @@ import {readFileSync} from "node:fs";
 import test from "node:test";
 import {gzipSync} from "node:zlib";
 
-import worker, {createFallbackTickerLoader, historyOptionsForTicker, loadPriceRange, loadTicker, loadTickerLabel, usesCompositeValuation} from "../src/index.js";
+import worker, {
+  createFallbackTickerLoader, expectedCompletedSession, historyOptionsForTicker,
+  loadPriceRange, loadTicker, loadTickerLabel, refreshNotificationTicker,
+  usesCompositeValuation, valuePortfolioSnapshot,
+} from "../src/index.js";
 import {
   mapProductTarget, parseYaml, runStrategy, runStrategyIncremental,
   selectNotificationAlerts, strategySnapshot, strategyTickers,
@@ -255,7 +259,111 @@ test("price cache ignores runtime versions and ticker order", async (context) =>
 
   assert.equal(new URL(matchedUrl).searchParams.get("tickers"), "BIL,SPY");
   assert.equal(new URL(matchedUrl).searchParams.has("runtime"), false);
+  assert.match(new URL(matchedUrl).searchParams.get("_session"), /^BIL:\d{4}-\d{2}-\d{2},SPY:\d{4}-\d{2}-\d{2}$/);
   assert.equal(result.headers.get("Server-Timing"), 'edge-cache;desc="HIT"');
+});
+
+test("market sessions roll over only after each market close", () => {
+  assert.equal(expectedCompletedSession("379810.KS", Date.parse("2026-09-21T16:09:00+09:00")), "2026-09-18");
+  assert.equal(expectedCompletedSession("379810.KS", Date.parse("2026-09-21T16:10:00+09:00")), "2026-09-21");
+  assert.equal(expectedCompletedSession("QQQ", Date.parse("2026-09-21T16:14:00-04:00")), "2026-09-18");
+  assert.equal(expectedCompletedSession("QQQ", Date.parse("2026-09-21T16:15:00-04:00")), "2026-09-21");
+});
+
+test("notification price refresh reuses a completed-session KV cache", async (context) => {
+  const originalFetch = globalThis.fetch;
+  let fetches = 0;
+  context.after(() => { globalThis.fetch = originalFetch; });
+  globalThis.fetch = async () => {
+    fetches += 1;
+    return Response.json({chart: {result: [{
+      timestamp: [Math.floor(Date.parse("2026-09-21T00:00:00Z") / 1000)],
+      indicators: {quote: [{open: [100], high: [101], low: [99], close: [100], volume: [1]}]},
+    }]}});
+  };
+  const store = new Map();
+  const env = {MARKET_DATA: {
+    get: async key => store.get(key) || null,
+    put: async (key, value) => { store.set(key, value); },
+  }};
+  const options = {lookbackDays: 5, tailRows: 1, now: Date.parse("2026-09-21T16:20:00+09:00")};
+
+  const first = await refreshNotificationTicker(env, "379810.KS", options);
+  const second = await refreshNotificationTicker(env, "379810.KS", options);
+
+  assert.equal(first.freshness.rows_changed, true);
+  assert.equal(second.freshness.upstream_checked, false);
+  assert.equal(second.freshness.status, "fresh");
+  assert.equal(fetches, 1);
+});
+
+test("portfolio valuation changes weights without advancing the signal snapshot", () => {
+  const snapshot = {
+    date: "2026-09-18",
+    prices: {"A.KS": 100, "B.KS": 100},
+    portfolio: {cash: 0, positions: {"A.KS": .006, "B.KS": .004}},
+    notification_context: {target_weights: {"A.KS": .6, "B.KS": .4}},
+  };
+  const valuation = valuePortfolioSnapshot(snapshot, {
+    "A.KS": [{Date: "2026-09-21", Close: 120}],
+    "B.KS": [{Date: "2026-09-21", Close: 100}],
+  });
+
+  assert.equal(valuation.signal_as_of, "2026-09-18");
+  assert.equal(valuation.valuation_as_of, "2026-09-21");
+  assert.ok(valuation.current_weights["A.KS"] > .64);
+  assert.ok(valuation.target_deviation > .04);
+  assert.equal(snapshot.date, "2026-09-18");
+});
+
+test("portfolio valuation endpoint stores a separate no-cache valuation", async (context) => {
+  const originalFetch = globalThis.fetch;
+  context.after(() => { globalThis.fetch = originalFetch; });
+  const snapshot = {
+    date: "2026-09-18",
+    prices: {"A.KS": 100},
+    portfolio: {cash: 0, positions: {"A.KS": .01}},
+    runtime: {state: {}},
+    notification_context: {target_weights: {"A.KS": 1}},
+  };
+  const store = new Map([
+    ["notification-state:mapped", JSON.stringify(snapshot)],
+    ["ticker-label:A.KS", "Korean ETF A"],
+  ]);
+  globalThis.fetch = async (url) => {
+    const value = String(url);
+    if (value.endsWith("manifest.json")) return Response.json({strategies: [{path: "mapped.yaml"}]});
+    if (value.endsWith("mapped.yaml")) return new Response([
+      "strategy:", "  id: mapped", "  name: Mapped", "  version: 1",
+      "assets:", "  required: [A.KS]", "target:", "  - weights: {A.KS: 100%}",
+    ].join("\n"));
+    return Response.json({chart: {result: [{
+      timestamp: [Math.floor(Date.parse("2026-09-21T00:00:00Z") / 1000)],
+      indicators: {quote: [{open: [110], high: [110], low: [110], close: [110], volume: [1]}]},
+    }]}});
+  };
+  const env = {
+    NOTIFICATION_API_KEY: "secret",
+    STRATEGY_MANIFEST_URL: "https://site.test/manifest.json",
+    MARKET_DATA: {
+      get: async key => store.get(key) || null,
+      put: async (key, value) => { store.set(key, value); },
+    },
+  };
+  const response = await worker.fetch(new Request("https://worker.test/portfolio-valuations", {
+    method: "POST",
+    headers: {Authorization: "Bearer secret", "Content-Type": "application/json"},
+    body: JSON.stringify({strategy_ids: ["mapped"]}),
+  }), env, {});
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("Cache-Control"), "no-store");
+  assert.equal(payload.decision_advanced, false);
+  assert.equal(payload.valuations[0].signal_as_of, "2026-09-18");
+  assert.equal(payload.valuations[0].valuation_as_of, "2026-09-21");
+  assert.equal(JSON.parse(store.get("notification-state:mapped")).date, "2026-09-18");
+  assert.equal(JSON.parse(store.get("portfolio-valuation:mapped")).valuation_as_of, "2026-09-21");
 });
 
 test("mapped risk products keep their current mix while risk stays above 70%", () => {
@@ -490,6 +598,23 @@ test("loadTickerLabel returns the provider's display name", async (context) => {
   const label = await loadTickerLabel("379810.KS");
 
   assert.equal(label, "KODEX Nasdaq 100");
+});
+
+test("prices can include Yahoo display labels when requested", async (context) => {
+  const originalFetch = globalThis.fetch;
+  context.after(() => { globalThis.fetch = originalFetch; });
+  globalThis.fetch = async () => Response.json({chart: {result: [{
+    timestamp: [1704067200],
+    indicators: {quote: [{open: [100], high: [101], low: [99], close: [100], volume: [1]}]},
+    meta: {shortName: "SPDR Gold Shares"},
+  }]}});
+
+  const marketData = {get: async () => null, put: async () => {}};
+  const result = await worker.fetch(new Request("https://example.test/prices?tickers=GLD&start=2024-01-01&end=2024-01-02&include_labels=1"), {MARKET_DATA: marketData}, {});
+  const payload = await result.json();
+
+  assert.equal(result.status, 200);
+  assert.equal(payload.labels.GLD, "SPDR Gold Shares");
 });
 
 test("mapped strategies inherit composite valuation history from their source", () => {

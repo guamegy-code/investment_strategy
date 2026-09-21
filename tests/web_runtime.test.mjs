@@ -180,7 +180,7 @@ test('indicator editor accepts a product code and adds a new ticker column',()=>
   assert.match(template,/<details id="indicator-editor"[\s\S]*?id="indicator-compare-form"[\s\S]*?id="indicator-matrix"/);
   assert.match(template,/컬럼 추가/);
   assert.match(source,/function normalizeComparisonTicker\(value\)/);
-  assert.match(source,/await fetchProxyTickerData\(data,\[ticker\],start\)/);
+  assert.match(source,/await fetchProxyTickerData\(data,\[ticker\],start,isIndicatorProductCode\(ticker\)\)/);
   assert.match(source,/indicatorSelection\.add\(`\$\{ticker\}\|Close`\)/);
   assert.match(source,/refreshIndicatorTickerCatalog\(data\)/);
   assert.match(source,/await renderIndicators\(\)/);
@@ -195,9 +195,20 @@ test('custom indicator columns expose a persisted remove button',()=>{
   assert.match(source,/refreshIndicatorTickerCatalog\(data\)/);
 });
 
+test('only Korean product codes replace codes with product names in the indicator UI',()=>{
+  assert.match(source,/indicatorTickerLabels:\{\.\.\.indicatorTickerLabels\}/);
+  assert.match(source,/fetchProxyTickerData\(data,\[ticker\],start,isIndicatorProductCode\(ticker\)\)/);
+  assert.match(source,/payload\.labels\|\|\{\}/);
+  assert.match(source,/function isIndicatorProductCode\(ticker\)/);
+  assert.match(source,/\\d\{6\}\\\.\(\?:KS\|KQ\)/);
+  assert.match(source,/return isIndicatorProductCode\(ticker\)\?\(indicatorTickerLabels\[ticker\]\|\|productDisplayNames\[ticker\]\|\|ticker\):ticker/);
+  assert.match(source,/delete indicatorTickerLabels\[ticker\]/);
+});
+
 test('saved UI controls are restored before asynchronous dashboard loading',()=>{
   assert.match(source,/function applyImmediateUiState\(state\)/);
   assert.match(source,/applyImmediateUiState\(savedUiState\)/);
+  assert.match(source,/delete document\.documentElement\.dataset\.savedView/);
   assert.match(source,/document\.documentElement\.classList\.add\('research-ui-state-ready'\)/);
   assert.match(source,/indicatorOverlays:\[\.\.\.\(\$\('indicator-overlays'\)\?\.querySelectorAll\('input:checked'\)\|\|\[\]\)\]/);
   assert.match(source,/detailRemoveFx:Boolean\(\$\('detail-remove-fx'\)\?\.checked\)/);
