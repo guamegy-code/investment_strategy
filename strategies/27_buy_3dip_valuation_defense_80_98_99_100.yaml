@@ -194,3 +194,75 @@ variables:
     and QQQ.roc60 < 0 and QQQ.ema200_slope20 < 0
   bull_reentry_allowed: >-
     QQQ.close > QQQ.ema55 and QQQ.roc60 > 0
+
+# 알림 전용 규칙이다. 목표 비중과 매매 판단에는 영향을 주지 않는다.
+notifications:
+  schedule: weekly
+
+  states:
+    structural_bear_mode:
+      label: 구조적 약세
+      values: {'FALSE': 정상, 'TRUE': 감지}
+      alerts:
+      - on: changed
+        from: 'FALSE'
+        to: 'TRUE'
+
+    trend_mode:
+      label: 추세
+      values: {BULL: 상승, CAUTION: 주의, BEAR: 하락, RECOVERY: 회복}
+      alerts:
+      - on: confirmation_started
+        to: [BEAR, RECOVERY, BULL]
+      - on: changed
+        to: BEAR
+        message: 장기 하락 추세가 확인됨
+      - on: changed
+        from: BEAR
+        to: RECOVERY
+        message: 반등 조건이 확인됨
+
+    defense_mode:
+      label: 밸류에이션
+      values: {NORMAL: 정상, WARNING: 경고, DEFENSE: 방어}
+      alerts:
+      - on: confirmation_started
+        to: [DEFENSE, NORMAL]
+      - on: changed
+        from: NORMAL
+        to: WARNING
+        message: 밸류에이션 급락을 감지해 가격 약세를 추가 확인 중
+      - on: changed
+        to: DEFENSE
+        message: 밸류에이션 급락과 가격 약세가 확인되어 방어 진입
+      - on: changed
+        from: WARNING
+        to: NORMAL
+        message: 밸류에이션 점수가 회복되어 경고 해제
+      - on: changed
+        from: DEFENSE
+        to: NORMAL
+        message: 가격 회복 조건이 확인되어 방어 종료
+
+  variables:
+    risk_off_score: {label: 약세, max: 6, display: bar}
+    recovery_score: {label: 회복, max: 6, display: bar}
+
+  market:
+  - {ticker: QQQ, field: roc1, label: 1일, format: percent}
+  - {ticker: QQQ, field: roc5, label: 5일, format: percent}
+  - {ticker: QQQ, field: roc20, label: 20일, format: percent}
+  - {ticker: QQQ, field: drawdown120, label: 120일 고점 대비, format: ratio_percent}
+  - {ticker: QQQ, field: valuation_score, label: 밸류에이션, format: number}
+
+  prealerts:
+  - id: qqq-underweight
+    when: weight_deviation('QQQ') <= -3%
+    reset_when: weight_deviation('QQQ') > -2%
+    message: QQQ 비중이 목표보다 3.0%p 이상 낮음 (매수 기준 -4.0%p)
+
+  - id: target-deviation
+    when: >
+      target_deviation() >= 5% and target_deviation() < 7.5%
+    reset_when: target_deviation() < 4%
+    message: 목표 비중 괴리가 실행 기준에 접근 (5.0%p 이상 / 실행 7.5%p)
