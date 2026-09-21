@@ -414,6 +414,14 @@ test('comparison charts bind visible-period y-axis autoscaling',()=>{
   assert.match(source,/bindVisibleYAutoscale\('drawdown-plot'\)/);
 });
 
+test('comparison and small indicator line sets use a restrained display spline',()=>{
+  assert.match(source,/const ADAPTIVE_SPLINE_MAX_LINES=6;/);
+  assert.match(source,/\['performance-plot','drawdown-plot','indicator-plot'\]/);
+  assert.match(source,/if\(!lines\.length\|\|lines\.length>ADAPTIVE_SPLINE_MAX_LINES\)return;/);
+  assert.match(source,/if\(trace\.type==='scattergl'\)trace\.type='scatter';/);
+  assert.match(source,/shape:'spline',smoothing:ADAPTIVE_SPLINE_SMOOTHING/);
+});
+
 test('visible x-axis zoom derives a new y-axis range from only visible points',()=>{
   let handler,updates;
   const plot={

@@ -2454,3 +2454,26 @@ function bindIndicatorComparisonInput(){
   });
 }
 bindIndicatorComparisonInput();
+
+// Keep the primary comparison charts pleasant to inspect when there are only
+// a few series.  This changes only the rendered path between observations;
+// it never creates or changes a data point.  Dense indicator views retain the
+// existing straight-line path so their render cost stays bounded.
+const ADAPTIVE_SPLINE_MAX_LINES=6;
+const ADAPTIVE_SPLINE_SMOOTHING=.25;
+function applyAdaptiveSpline(target,traces){
+  const id=typeof target==='string'?target:target?.id;
+  if(!['performance-plot','drawdown-plot','indicator-plot'].includes(id)||!Array.isArray(traces))return;
+  const lines=traces.filter(trace=>trace&&trace.type!=='candlestick'&&String(trace.mode||'').includes('lines'));
+  if(!lines.length||lines.length>ADAPTIVE_SPLINE_MAX_LINES)return;
+  for(const trace of lines){
+    // Plotly supports spline paths on SVG scatter traces, not scattergl.
+    if(trace.type==='scattergl')trace.type='scatter';
+    trace.line={...(trace.line||{}),shape:'spline',smoothing:ADAPTIVE_SPLINE_SMOOTHING};
+  }
+}
+const adaptiveSplineReact=Plotly.react.bind(Plotly);
+Plotly.react=function(target,traces,layout,...args){
+  applyAdaptiveSpline(target,traces);
+  return adaptiveSplineReact(target,traces,layout,...args);
+};
