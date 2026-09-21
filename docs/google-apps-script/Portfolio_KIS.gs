@@ -439,3 +439,38 @@ function GET_NASDAQ_SMA(period) {
     return Number((sum / period).toFixed(2));
   } catch(e) { return "에러"; }
 }
+
+
+// 웹 브라우저로 접속했을 때 실행되는 함수
+function doGet() {
+  // 1. 기존에 작성해두신 포트폴리오 계산 로직 실행 (텔레그램으로 보내던 메시지 내용)
+  // 예: var reportText = generatePortfolioReport(); 
+  var reportText = DC_buildPortfolioMessage_(); // 기존 메시지 생성 함수 호출
+  
+  // 2. 모바일 브라우저 화면에 깔끔하게 출력
+  var html = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <title>📊 내 포트폴리오 현황</title>
+      <style>
+        body { font-family: -apple-system, sans-serif; background: #0f172a; color: #f8fafc; padding: 20px; }
+        .card { background: #1e293b; padding: 18px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
+        pre { white-space: pre-wrap; word-break: break-all; font-family: inherit; font-size: 14px; line-height: 1.6; }
+        .btn { display: block; width: 100%; padding: 12px; margin-top: 15px; background: #3b82f6; color: white; text-align: center; border-radius: 8px; text-decoration: none; font-weight: bold; border: none; }
+      </style>
+    </head>
+    <body>
+      <h2>📊 퇴직연금DC 포트폴리오</h2>
+      <div class="card">
+        <pre>${reportText}</pre>
+      </div>
+      <button class="btn" onclick="location.reload()">🔄 새로고침</button>
+    </body>
+    </html>
+  `;
+  
+  return HtmlService.createHtmlOutput(html)
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+}
