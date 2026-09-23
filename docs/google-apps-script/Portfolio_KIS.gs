@@ -12,13 +12,11 @@
  *  현금                           0       1      1395          0
  * ==============================================================================
  */
-
 function checkPortfolio() {
   var day = Utilities.formatDate(new Date(), 'Asia/Seoul', 'u');
 //  if (day === '6' || day === '7') return;
   sendTelegram(DC_buildPortfolioMessage_());
 }
-
 function DC_buildPortfolioMessage_() {
   var sheet = DC_sheet_();
   // 5개의 열만 사용하므로 범위를 (2, 1, 7, 5)로 최적화 (A~E열)
@@ -28,7 +26,6 @@ function DC_buildPortfolioMessage_() {
   var total_profit = 0;
   var riskAssetValue = 0; 
   var portfolio = []; 
-
   // [1] 개별 종목 실시간 가격/RSI API 직접 호출 및 자산 계산
   data.forEach(row => {
     var name = row[0];
@@ -38,9 +35,7 @@ function DC_buildPortfolioMessage_() {
     var count = Number(row[2]) || 0;
     var basePrice = Number(row[3]) || 0; // 평단
     var isRiskAsset = (row[4] == 1);     // 위험자산여부
-
     var currentPrice, rsi, rsi_d1;
-
     // 💡 현금 예외 처리 (API 조회 스킵)
     if (String(name).trim() === "현금" || DC_normalizeCode_(code) === "000000") {
       currentPrice = basePrice; 
@@ -49,17 +44,17 @@ function DC_buildPortfolioMessage_() {
     } else {
       // 일반 주식 실시간 현재가 / RSI 가져오기
       currentPrice = GET_KIS_PRICE(code);
-      rsi = GET_NAVER_RSI(code, 14, 0);
-      rsi_d1 = GET_NAVER_RSI(code, 14, 1);
+      // 💡 최적화: 1회 호출로 오늘 RSI와 전일 RSI 동시 계산 (기존 2회 -> 1회)
+      var rsiData = GET_NAVER_RSI_BOTH(code, 14);
+      rsi = rsiData.rsi;
+      rsi_d1 = rsiData.rsi_d1;
     }
-
     var evalAmount = currentPrice * count;
     totalValue += evalAmount;
     
     if (isRiskAsset) {
       riskAssetValue += evalAmount;
     }
-
     portfolio.push({
       name: name,
       code: code,
@@ -71,19 +66,18 @@ function DC_buildPortfolioMessage_() {
       basePrice: basePrice
     });
   });
-
   var riskAssetRatio = (totalValue > 0) ? ((riskAssetValue / totalValue) * 100).toFixed(1) : 0;
   
   // [2] 텔레그램 메시지 시작 (오늘 날짜 포함)
   var todayDate = Utilities.formatDate(new Date(), "Asia/Seoul", "yyyy-MM-dd HH:mm");
   var alertMessage = `📊 재영이 4조 진행 현황 (${todayDate})\n`; 
-  alertMessage += "- 현재가: 한국투자증권 KRX (REST 조회 기준)\n";
+//  alertMessage += "- 현재가: 한국투자증권 KRX (REST 조회 기준)\n";
   var arrow = "";
-
-  // NASDAQ 및 이동평균선(20일, 55일) API
-  var NASDAQ_today = GET_NASDAQ(0); 
-  var NASDAQ_m20 = GET_NASDAQ_SMA(20); 
-  var NASDAQ_m55 = GET_NASDAQ_SMA(55); 
+  // NASDAQ 및 이동평균선(20일, 55일) API (💡 최적화: 6개월 차트 1회 호출로 오늘/20일선/55일선 동시 계산)
+  var nasdaqData = GET_NASDAQ_DATA(); 
+  var NASDAQ_today = nasdaqData.today; 
+  var NASDAQ_m20 = nasdaqData.m20; 
+  var NASDAQ_m55 = nasdaqData.m55; 
   
   // 💡 신호등 로직: 20일선 위(녹색), 20~55일선 사이(노랑), 55일선 아래(빨강)
   if (NASDAQ_today >= NASDAQ_m20) {
@@ -93,25 +87,22 @@ function DC_buildPortfolioMessage_() {
   } else {
     arrow = "🔴";
   }
-
   alertMessage += `- ${arrow} NASDAQ ${NASDAQ_today}\n`;
-
-  // VIX API (상하 화살표와 경고 이모지 동시 출력으로 버그 수정)
-  var vix = GET_VIX(0);
-  var preVix = GET_VIX(1);
+  // VIX API (💡 최적화: 1회 호출로 오늘/전일 추출 및 5분 캐시)
+  var vixData = GET_VIX_DATA();
+  var vix = vixData.today;
+  var preVix = vixData.prev;
   var vixArrow = (vix > preVix) ? "↑" : (vix < preVix ? "↓" : "=");
   var vixWarn = (vix >= 30) ? "🚨" : (vix >= 20 ? "⚠️" : "");
   alertMessage += `- ${vixWarn} VIX ${vix}${vixArrow}\n`; 
-
-  // 하이일드 스프레드 API
-  var hys = GET_HIGH_YIELD_SPREAD(0);
-  var prehys = GET_HIGH_YIELD_SPREAD(1);
+  // 하이일드 스프레드 API (💡 최적화: 1회 CSV 다운로드로 오늘/전일 추출 및 30분 캐시)
+  var hysData = GET_HIGH_YIELD_DATA();
+  var hys = hysData.today;
+  var prehys = hysData.prev;
   arrow = (hys > prehys) ? "↑" : (hys < prehys ? "↓" : "=");
   alertMessage += `- 하이일드 스프레드 ${hys}${arrow}\n`; 
-
   // 위험자산 비중  
   alertMessage += `- 위험자산 비중: ${riskAssetRatio}%\n\n`; 
-
   // [3] 개별 종목 수익률 및 비중 메시지 작성
   portfolio.forEach(item => {
     var currentWeight = totalValue > 0 ? item.evalAmount / totalValue : 0;
@@ -120,7 +111,6 @@ function DC_buildPortfolioMessage_() {
     var profit = (item.currentPrice - item.basePrice) * item.count;
     
     total_profit += profit;
-
     if(currentWeight > 0) {
       // 💡 현금일 때와 일반 주식일 때 메시지 포맷 구분
       if (String(item.name).trim() === "현금" || DC_normalizeCode_(item.code) === "000000") {
@@ -130,19 +120,15 @@ function DC_buildPortfolioMessage_() {
         var numRsiD1 = Number(item.rsi_d1);
         arrow = (numRsi > numRsiD1) ? " ⬆️" : (numRsi < numRsiD1 ? "↓" : "=");
         var displayRsi = isNaN(numRsi) ? item.rsi : numRsi.toFixed(2);
-
         // 💡 수익률에 따라 앞에 붙는 기호 색상 자동 변경 (플러스면 빨강, 마이너스면 파랑)
         var bullet = (change > 0) ? "🔺" : (change < 0 ? "🔹" : "🔸");
-
         alertMessage += `[${item.name}]\n${bullet} 비중: ${(currentWeight*100).toFixed(1)}%  rsi: ${displayRsi} ${arrow} \n`;
         alertMessage += `     (수익 ${formatNumber(profit)},  ${change}%) \n\n`;
       }
     }
   });
-
   // [4] 총 자산 및 수익금 표기
   alertMessage +=  `* 총자산 ${formatNumber(totalValue)}\n`; 
-
   var totalPrincipal = totalValue - total_profit;
   var totalProfitRate = (totalPrincipal > 0) ? ((total_profit / totalPrincipal) * 100).toFixed(2) : 0;
    
@@ -150,11 +136,9 @@ function DC_buildPortfolioMessage_() {
     
   return alertMessage;
 }
-
 // =======================================================
 // [아래부터는 텔레그램 및 지표를 가져오는 필수 유틸리티 함수들입니다]
 // =======================================================
-
 function sendTelegram(text) {
   var scriptProperties = PropertiesService.getScriptProperties();
   var token = scriptProperties.getProperty('TELEGRAM_TOKEN');
@@ -176,11 +160,9 @@ function sendTelegram(text) {
   };
   UrlFetchApp.fetch(url, options);
 }
-
 function formatNumber(num) {
   return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 }
-
 /** KIS 실전 REST 현재가. 시세는 캐시하지 않고 인증 토큰만 재사용합니다. */
 function GET_KIS_PRICE(code, trigger) {
   if (code === '' || code === null || code === undefined) return '';
@@ -228,7 +210,6 @@ function GET_KIS_PRICE(code, trigger) {
     return price;
   }
 }
-
 /** 같은 Apps Script 프로젝트의 동시 실행도 조회 간격을 공유합니다. */
 function DC_kisQuoteFetch_(url, options) {
   var lock = LockService.getScriptLock();
@@ -236,8 +217,8 @@ function DC_kisQuoteFetch_(url, options) {
   try {
     var props = PropertiesService.getScriptProperties();
     var last = Number(props.getProperty('DC_KIS_LAST_QUOTE_AT')) || 0;
-    // 6종목 보고용의 보수적인 간격. 공식 초당 한도 값이라는 뜻은 아닙니다.
-    var wait = Math.min(1100, Math.max(0, 1100 - (Date.now() - last)));
+    // 💡 최적화: KIS 실전 REST API 공식 한도(초당 20건) 범위 내에서 안전하면서도 대기시간을 대폭 단축 (1100ms -> 250ms)
+    var wait = Math.min(250, Math.max(0, 250 - (Date.now() - last)));
     if (wait > 0) Utilities.sleep(wait);
     try {
       return UrlFetchApp.fetch(url, options);
@@ -246,14 +227,12 @@ function DC_kisQuoteFetch_(url, options) {
     }
   } finally { lock.releaseLock(); }
 }
-
 function DC_normalizeCode_(code) {
   var value = String(code).trim().toUpperCase();
   if (/^\d{1,6}$/.test(value)) value = value.padStart(6, '0');
   if (!/^[0-9A-Z]{6}$/.test(value)) throw new Error('종목 코드 형식 오류: ' + value);
   return value;
 }
-
 function DC_kisConfig_() {
   var props = PropertiesService.getScriptProperties();
   var key = (props.getProperty('KIS_APP_KEY') || '').trim();
@@ -261,7 +240,6 @@ function DC_kisConfig_() {
   if (!key || !secret) throw new Error('스크립트 속성에 KIS_APP_KEY, KIS_APP_SECRET을 설정하세요.');
   return { key: key, secret: secret };
 }
-
 function DC_json_(response, label) {
   try {
     var body = JSON.parse(response.getContentText());
@@ -272,7 +250,6 @@ function DC_json_(response, label) {
     throw new Error('KIS ' + label + ' 응답 형식 오류 / HTTP ' + response.getResponseCode());
   }
 }
-
 function DC_kisToken_(config, rejectedToken) {
   var lock = LockService.getScriptLock();
   lock.waitLock(20000);
@@ -298,7 +275,6 @@ function DC_kisToken_(config, rejectedToken) {
     return body.access_token;
   } finally { lock.releaseLock(); }
 }
-
 function DC_sheet_() {
   var props = PropertiesService.getScriptProperties();
   var id = props.getProperty('DC_SPREADSHEET_ID');
@@ -308,7 +284,6 @@ function DC_sheet_() {
   if (!sheet) throw new Error('퇴직연금DC 시트를 찾을 수 없습니다. DC_SHEET_NAME을 확인하세요.');
   return sheet;
 }
-
 /** 주말에도 현재가 6종목과 현금 처리를 검증. 텔레그램 발송 없음. */
 function TEST_KIS_PRICES() {
   var rows = DC_sheet_().getRange(2, 1, 7, 5).getValues();
@@ -322,56 +297,128 @@ function TEST_KIS_PRICES() {
   console.log(JSON.stringify(result));
   return result;
 }
-
 /** 주말에도 전체 보고서를 생성. 텔레그램 발송 없음. */
 function PREVIEW_DC_PORTFOLIO() {
   var message = DC_buildPortfolioMessage_();
   console.log(message);
   return message;
 }
-
-
-function GET_NAVER_RSI(code, period, daysAgo) {
-  if (!code) return null;
+/** 💡 1회 fchart 호출로 오늘 RSI와 전일 RSI를 동시에 계산하는 최적화 함수 */
+function GET_NAVER_RSI_BOTH(code, period) {
+  if (!code) return { rsi: "-", rsi_d1: "-" };
   code = DC_normalizeCode_(code);
   period = period || 14;
-  daysAgo = daysAgo || 0; 
   
   var url = "https://fchart.stock.naver.com/sise.nhn?symbol=" + code + "&timeframe=day&count=100&requestType=0";
   try {
     var response = UrlFetchApp.fetch(url, {muteHttpExceptions: true});
     var items = response.getContentText().match(/<item data="[^"]+" \/>/g);
     
-    if (!items || items.length < period + 1 + daysAgo) return "데이터 부족";
+    if (!items || items.length < period + 2) {
+      return { rsi: "데이터 부족", rsi_d1: "데이터 부족" };
+    }
     
-    var closes = [];
-    for (var i = 0; i < items.length - daysAgo; i++) {
+    var allCloses = [];
+    for (var i = 0; i < items.length; i++) {
       var parts = items[i].match(/data="([^"]+)"/)[1].split('|');
-      closes.push(Number(parts[4]));
+      allCloses.push(Number(parts[4]));
     }
     
-    var upSum = 0, downSum = 0;
-    for (var i = 1; i <= period; i++) {
-      var diff = closes[i] - closes[i - 1];
-      if (diff > 0) upSum += diff; else downSum -= diff;
-    }
-    
-    var au = upSum / period, ad = downSum / period;
-    for (var i = period + 1; i < closes.length; i++) {
-      var diff = closes[i] - closes[i - 1];
-      var up = diff > 0 ? diff : 0;
-      var down = diff < 0 ? -diff : 0;
-      au = (au * (period - 1) + up) / period;
-      ad = (ad * (period - 1) + down) / period;
-    }
-    
-    var rs = au / ad;
-    return Number((100 - (100 / (1 + rs))).toFixed(2));
-  } catch (e) { return "Error"; }
+    var computeRsi = function(closes) {
+      var upSum = 0, downSum = 0;
+      for (var i = 1; i <= period; i++) {
+        var diff = closes[i] - closes[i - 1];
+        if (diff > 0) upSum += diff; else downSum -= diff;
+      }
+      
+      var au = upSum / period, ad = downSum / period;
+      for (var i = period + 1; i < closes.length; i++) {
+        var diff = closes[i] - closes[i - 1];
+        var up = diff > 0 ? diff : 0;
+        var down = diff < 0 ? -diff : 0;
+        au = (au * (period - 1) + up) / period;
+        ad = (ad * (period - 1) + down) / period;
+      }
+      
+      if (ad === 0) return 100;
+      var rs = au / ad;
+      return Number((100 - (100 / (1 + rs))).toFixed(2));
+    };
+    var rsiToday = computeRsi(allCloses);
+    var rsiPrev = computeRsi(allCloses.slice(0, -1));
+    return { rsi: rsiToday, rsi_d1: rsiPrev };
+  } catch (e) {
+    return { rsi: "Error", rsi_d1: "Error" };
+  }
 }
-
-function GET_HIGH_YIELD_SPREAD(daysAgo) {
-  daysAgo = daysAgo || 0; 
+/** 💡 나스닥 현재가 + 20일선 + 55일선을 1회 호출로 모두 계산하고 5분간 캐싱 */
+function GET_NASDAQ_DATA() {
+  var cache = CacheService.getScriptCache();
+  var cached = cache.get("CACHE_NASDAQ_DATA");
+  if (cached) {
+    try { return JSON.parse(cached); } catch(e) {}
+  }
+  var url = "https://query2.finance.yahoo.com/v8/finance/chart/%5EIXIC?range=6mo&interval=1d";
+  var options = { muteHttpExceptions: true, headers: { "User-Agent": "Mozilla/5.0" } };
+  try {
+    var response = UrlFetchApp.fetch(url, options);
+    if (response.getResponseCode() !== 200) {
+      return { today: "접속차단", m20: 0, m55: 0 };
+    }
+    var result = JSON.parse(response.getContentText()).chart.result[0];
+    var today = Number(result.meta.regularMarketPrice.toFixed(2));
+    var closes = result.indicators.quote[0].close.filter(function(val) { return val !== null; });
+    var calcSMA = function(period) {
+      if (closes.length < period) return 0;
+      var recentCloses = closes.slice(-period);
+      var sum = 0;
+      for (var i = 0; i < recentCloses.length; i++) sum += recentCloses[i];
+      return Number((sum / period).toFixed(2));
+    };
+    var data = {
+      today: today,
+      m20: calcSMA(20),
+      m55: calcSMA(55)
+    };
+    cache.put("CACHE_NASDAQ_DATA", JSON.stringify(data), 300); // 5분 캐시
+    return data;
+  } catch(e) {
+    return { today: "에러", m20: 0, m55: 0 };
+  }
+}
+/** 💡 VIX 오늘값과 전일값을 1회 호출로 추출하고 5분간 캐싱 */
+function GET_VIX_DATA() {
+  var cache = CacheService.getScriptCache();
+  var cached = cache.get("CACHE_VIX_DATA");
+  if (cached) {
+    try { return JSON.parse(cached); } catch(e) {}
+  }
+  var url = "https://query2.finance.yahoo.com/v8/finance/chart/%5EVIX?range=5d&interval=1d";
+  var options = { muteHttpExceptions: true, headers: { "User-Agent": "Mozilla/5.0" } };
+  try {
+    var response = UrlFetchApp.fetch(url, options);
+    if (response.getResponseCode() !== 200) {
+      return { today: "접속차단", prev: "접속차단" };
+    }
+    var result = JSON.parse(response.getContentText()).chart.result[0];
+    var today = Number(result.meta.regularMarketPrice.toFixed(2));
+    var closes = result.indicators.quote[0].close.filter(function(val) { return val !== null; });
+    var prev = closes.length >= 2 ? Number(closes[closes.length - 2].toFixed(2)) : today;
+    
+    var data = { today: today, prev: prev };
+    cache.put("CACHE_VIX_DATA", JSON.stringify(data), 300); // 5분 캐시
+    return data;
+  } catch(e) {
+    return { today: "에러", prev: "에러" };
+  }
+}
+/** 💡 하이일드 스프레드 CSV를 1회만 받아 오늘값/전일값 추출하고 30분간 캐싱 */
+function GET_HIGH_YIELD_DATA() {
+  var cache = CacheService.getScriptCache();
+  var cached = cache.get("CACHE_HY_DATA");
+  if (cached) {
+    try { return JSON.parse(cached); } catch(e) {}
+  }
   var url = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=BAMLH0A0HYM2";
   try {
     var csv = UrlFetchApp.fetch(url, {muteHttpExceptions: true}).getContentText();
@@ -379,72 +426,23 @@ function GET_HIGH_YIELD_SPREAD(daysAgo) {
       var parts = line.trim().split(',');
       return parts.length === 2 && parts[0] !== 'DATE' && parts[1] !== '.';
     });
-    if (validLines.length === 0) return "데이터 없음";
+    if (validLines.length === 0) return { today: "데이터 없음", prev: "데이터 없음" };
+    if (validLines.length < 2) return { today: Number(validLines[0].split(',')[1]), prev: "데이터 부족" };
     
-    var targetIndex = validLines.length - 1 - daysAgo;
-    if (targetIndex < 0) return "데이터 부족";
+    var today = Number(validLines[validLines.length - 1].split(',')[1]);
+    var prev = Number(validLines[validLines.length - 2].split(',')[1]);
     
-    return Number(validLines[targetIndex].split(',')[1]);
-  } catch(e) { return "Error"; }
+    var data = { today: today, prev: prev };
+    cache.put("CACHE_HY_DATA", JSON.stringify(data), 1800); // 30분 캐시 (FRED는 1일 1회 업데이트)
+    return data;
+  } catch(e) {
+    return { today: "Error", prev: "Error" };
+  }
 }
-
-function GET_VIX(daysAgo) {
-  daysAgo = daysAgo || 0;
-  var url = "https://query2.finance.yahoo.com/v8/finance/chart/%5EVIX?range=5d&interval=1d";
-  var options = { muteHttpExceptions: true, headers: { "User-Agent": "Mozilla/5.0" } };
-  try {
-    var response = UrlFetchApp.fetch(url, options);
-    if (response.getResponseCode() !== 200) return "접속차단";
-    
-    var result = JSON.parse(response.getContentText()).chart.result[0];
-    if (daysAgo === 0) return Number(result.meta.regularMarketPrice.toFixed(2));
-    
-    var closes = result.indicators.quote[0].close.filter(function(val) { return val !== null; });
-    var targetIndex = closes.length - 1 - daysAgo;
-    return Number(closes[targetIndex].toFixed(2));
-  } catch(e) { return "에러"; }
-}
-
-function GET_NASDAQ(daysAgo) {
-  daysAgo = daysAgo || 0;
-  var url = "https://query2.finance.yahoo.com/v8/finance/chart/%5EIXIC?range=5d&interval=1d";
-  var options = { muteHttpExceptions: true, headers: { "User-Agent": "Mozilla/5.0" } };
-  try {
-    var response = UrlFetchApp.fetch(url, options);
-    if (response.getResponseCode() !== 200) return "접속차단";
-    
-    var result = JSON.parse(response.getContentText()).chart.result[0];
-    if (daysAgo === 0) return Number(result.meta.regularMarketPrice.toFixed(2));
-    
-    var closes = result.indicators.quote[0].close.filter(function(val) { return val !== null; });
-    var targetIndex = closes.length - 1 - daysAgo;
-    return Number(closes[targetIndex].toFixed(2));
-  } catch(e) { return "에러"; }
-}
-
-function GET_NASDAQ_SMA(period) {
-  period = period || 55;
-  var url = "https://query2.finance.yahoo.com/v8/finance/chart/%5EIXIC?range=6mo&interval=1d";
-  var options = { muteHttpExceptions: true, headers: { "User-Agent": "Mozilla/5.0" } };
-  try {
-    var response = UrlFetchApp.fetch(url, options);
-    if (response.getResponseCode() !== 200) return "접속차단";
-    
-    var closes = JSON.parse(response.getContentText()).chart.result[0].indicators.quote[0].close.filter(function(val) { return val !== null; });
-    if (closes.length < period) return "데이터 부족";
-    
-    var recentCloses = closes.slice(-period);
-    var sum = 0;
-    for (var i = 0; i < recentCloses.length; i++) sum += recentCloses[i];
-    return Number((sum / period).toFixed(2));
-  } catch(e) { return "에러"; }
-}
-
 
 // 웹 브라우저로 접속했을 때 실행되는 함수
 function doGet() {
   // 1. 기존에 작성해두신 포트폴리오 계산 로직 실행 (텔레그램으로 보내던 메시지 내용)
-  // 예: var reportText = generatePortfolioReport(); 
   var reportText = DC_buildPortfolioMessage_(); // 기존 메시지 생성 함수 호출
   
   // 2. 모바일 브라우저 화면에 깔끔하게 출력
