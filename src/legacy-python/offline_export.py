@@ -440,6 +440,10 @@ def export_static_site(
                 "hidden_strategy_ids": hidden_strategy_ids,
                 "enabled_bundle": enabled_name,
                 "results": result_files,
+                # Historical CSVs do not record their valuation currency.  The
+                # browser may use them only after a future exporter explicitly
+                # certifies an individual result as KRW.
+                "result_currencies": {strategy_id: "UNVERIFIED" for strategy_id in result_files},
                 "strategies": manifest,
             },
             ensure_ascii=False,
@@ -520,7 +524,7 @@ def export_static_site(
         "market_data_version": market_data_version,
         "data_proxy": data_proxy or "",
         "strategy_manifest_url": "./strategies/manifest.json",
-        "precomputed_results_currency": "KRW",
+        "precomputed_results_currency": "UNVERIFIED",
         "static_site": True,
     }, ensure_ascii=False)
     template = (WEB_SOURCE_DIR / "index.html").read_text(encoding="utf-8")

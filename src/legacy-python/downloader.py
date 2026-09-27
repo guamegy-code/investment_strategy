@@ -87,6 +87,32 @@ def download_one(ticker: str, output_dir=DATA_DIR) -> pd.DataFrame:
         print(f"Building {TDF_PROXY_TICKER}...")
         return build_tdf2050_proxy(data_dir=output_dir)
 
+    if ticker == "BAA10Y":
+        # FRED observations are not guaranteed to be known at that day's
+        # equity close. Align first, then expose the previous QQQ session.
+        ensure_data_files(("QQQ",), data_dir=output_dir)
+        qqq_dates = _load_saved_prices(output_dir, "QQQ").index
+        local_source = Path(__file__).resolve().parents[2] / "tmp" / "BAA10Y.csv"
+        source = local_source if local_source.is_file() else (
+            "https://fred.stlouisfed.org/graph/fredgraph.csv?id=BAA10Y"
+        )
+        observations = pd.read_csv(source)
+        dates = pd.to_datetime(observations.iloc[:, 0], errors="coerce")
+        spread = pd.Series(
+            pd.to_numeric(observations.iloc[:, 1], errors="coerce").to_numpy(),
+            index=dates,
+        ).dropna().sort_index()
+        spread = spread.reindex(qqq_dates, method="ffill").shift(1)
+        frame = pd.DataFrame(index=qqq_dates)
+        for field in ("Open", "High", "Low", "Close"):
+            frame[field] = spread
+        frame["Volume"] = 0
+        frame = Indicator.add_indicators(frame.dropna(subset=["Close"]))
+        frame.index.name = "Date"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        frame.to_csv(output_dir / "BAA10Y.csv")
+        return frame
+
     print(f"Downloading {ticker}...")
 
     df = yf.download(

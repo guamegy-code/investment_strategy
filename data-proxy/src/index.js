@@ -76,6 +76,7 @@ function unixSeconds(value, fallback) {
 }
 
 export async function loadTicker(ticker, start, end, {bypassCache = false} = {}) {
+  if (ticker === "BAA10Y") return loadLaggedBaaSpread(start, end, {bypassCache});
   const upstreamTicker = ticker === "KRW=X" ? "USDKRW=X" : ticker;
   let upstream = null;
   let lastStatus = null;
@@ -130,6 +131,66 @@ export async function loadTicker(ticker, start, end, {bypassCache = false} = {})
     };
   }).filter((row) => Object.values(row).every((value) => Number.isFinite(value) || typeof value === "string"));
   if (!rows.length) throw new Error(`${ticker}: no complete daily rows available`);
+  return rows;
+}
+
+async function boundedText(response, maxBytes = 2_000_000) {
+  const reader = response.body?.getReader();
+  if (!reader) throw new Error("credit spread response has no body");
+  const chunks = [];
+  let size = 0;
+  while (true) {
+    const {done, value} = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > maxBytes) {
+      await reader.cancel();
+      throw new Error("credit spread response exceeds limit");
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(bytes);
+}
+
+export async function loadLaggedBaaSpread(start, end, {bypassCache = false} = {}) {
+  // FRED BAA10Y is a daily percentage-point spread, not an investable price.
+  // The value labelled with a date is visible to a strategy only on the next
+  // QQQ trading session. This mirrors the one-session-lag research convention.
+  const [qqq, reply] = await Promise.all([
+    loadTicker("QQQ", start, end, {bypassCache}),
+    fetch("https://fred.stlouisfed.org/graph/fredgraph.csv?id=BAA10Y", {
+      ...(bypassCache ? {cache: "no-store"} : {cf: {cacheTtl: CACHE_SECONDS, cacheEverything: true}}),
+    }),
+  ]);
+  if (!reply.ok) throw new Error(`BAA10Y: FRED returned ${reply.status}`);
+  const csv = await boundedText(reply);
+  const observations = csv.trim().split(/\r?\n/).slice(1).map(line => {
+    const [date, value] = line.split(",");
+    const valid = /^-?\d+(?:\.\d+)?$/.test((value || "").trim());
+    return {date, value: valid ? Number(value) : NaN};
+  }).filter(row => /^\d{4}-\d{2}-\d{2}$/.test(row.date) && Number.isFinite(row.value));
+  if (!observations.length) throw new Error("BAA10Y: FRED returned no valid observations");
+  let position = 0;
+  let last = null;
+  const rows = [];
+  for (const quote of qqq) {
+    while (position < observations.length && observations[position].date < quote.date) {
+      last = observations[position].value;
+      position++;
+    }
+    if (!Number.isFinite(last)) continue;
+    rows.push({
+      date: quote.date, open: last, high: last, low: last,
+      close: last, volume: 0,
+    });
+  }
+  if (!rows.length) throw new Error("BAA10Y: no observations align to QQQ sessions");
   return rows;
 }
 
@@ -926,7 +987,7 @@ export default {
       const includeLabels = url.searchParams.get("include_labels") === "1";
       const labels = includeLabels ? await cachedTickerLabels(env, tickers) : {};
       const payload = response({
-        provider: "yahoo-finance",
+        provider: tickers.includes("BAA10Y") ? "yahoo-finance+fred" : "yahoo-finance",
         fetched_at: new Date().toISOString(),
         stale_tickers: staleTickers,
         price_freshness: priceFreshness,

@@ -65,6 +65,29 @@ test("loadTicker maps the legacy KRW symbol to Yahoo's complete USDKRW history",
   assert.doesNotMatch(requestedUrl, /\/KRW%3DX/);
 });
 
+test("BAA10Y uses only the preceding FRED observation on QQQ sessions", async (context) => {
+  const originalFetch = globalThis.fetch;
+  context.after(() => { globalThis.fetch = originalFetch; });
+  globalThis.fetch = async (url) => {
+    if (String(url).includes("fredgraph.csv")) {
+      return new Response("DATE,BAA10Y\n2024-01-01,2.00\n2024-01-02,\n2024-01-03,3.00\n");
+    }
+    return Response.json({
+      chart: {result: [{
+        timestamp: [1_704_153_600, 1_704_240_000],
+        indicators: {quote: [{open: [100, 100], high: [100, 100],
+          low: [100, 100], close: [100, 100], volume: [1, 1]}]},
+      }]},
+    });
+  };
+
+  const rows = await loadTicker("BAA10Y", 1_704_000_000, 1_704_300_000);
+
+  assert.deepEqual(rows.map(row => [row.date, row.close]), [
+    ["2024-01-02", 2.00], ["2024-01-03", 2.00],
+  ]);
+});
+
 test("loadPriceRange serves cached rows when every upstream host is rate limited", async (context) => {
   const originalFetch = globalThis.fetch;
   context.after(() => { globalThis.fetch = originalFetch; });

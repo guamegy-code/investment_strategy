@@ -75,6 +75,31 @@ class Strategy2526ProductMappingTests(unittest.TestCase):
             "dsl:band-7030-tdf-valuation-defense-kodex-koact"
         ].products)
 
+    def test_strategy_30_product_mapping_matches_strategy_28_products(self):
+        mapped = self.strategies[
+            "dsl:qqq-valuation-credit-guard-no-topup-kodex-koact"
+        ]
+
+        self.assertIsInstance(mapped, ProductMappedStrategy)
+        self.assertEqual(mapped.source_strategy_id, "qqq-valuation-credit-guard-no-topup")
+        self.assertEqual(mapped.products, self.strategies[
+            "dsl:qqq-valuation-warning-dip-buyer-kodex-koact"
+        ].products)
+
+    def test_strategy_31_product_mapping_matches_strategy_29_products(self):
+        mapped = self.strategies[
+            "dsl:band-7030-tdf-valuation-credit-guard-no-topup-kodex-koact"
+        ]
+
+        self.assertIsInstance(mapped, ProductMappedStrategy)
+        self.assertEqual(
+            mapped.source_strategy_id,
+            "band-7030-tdf-valuation-credit-guard-no-topup",
+        )
+        self.assertEqual(mapped.products, self.strategies[
+            "dsl:band-7030-tdf-valuation-warning-dip-buyer-kodex-koact"
+        ].products)
+
 
 if __name__ == "__main__":
     unittest.main()

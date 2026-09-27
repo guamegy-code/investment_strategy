@@ -59,6 +59,13 @@
 | `26P_band_7030_tdf_valuation_defense_kodex_koact.yaml` | `band-7030-tdf-valuation-defense-kodex-koact` | 예 | 26의 QQQ를 KODEX·KoAct에 반반, TDF·BIL을 국내 상품에 매핑 |
 | `27_buy_3dip_valuation_defense_80_98_99_100.yaml` | `buy-3dip-bil-valuation-hybrid-80-98-99-100` | 예 | 3단계 매수·회복 규칙에 밸류에이션 방어와 80/98/99/100 비중을 결합한 개인연금 전략 |
 | `28_qqq_valuation_warning_dip_buyer.yaml` | `qqq-valuation-warning-dip-buyer` | 예 | WARNING에서 QQQ 70%로 방어하고 고점 대비 -10%에서 QQQ 100%로 즉시 복귀하는 전략 |
+| `28P_qqq_valuation_warning_dip_buyer_kodex_koact.yaml` | `qqq-valuation-warning-dip-buyer-kodex-koact` | 예 | 28의 QQQ·BIL을 국내 상품에 매핑 |
+| `29_band_7030_tdf_valuation_warning_dip_buyer.yaml` | `band-7030-tdf-valuation-warning-dip-buyer` | 예 | 26의 70/30 구조에 WARNING 완충자금과 -10% 재투입을 결합 |
+| `29P_band_7030_tdf_valuation_warning_dip_buyer_kodex_koact.yaml` | `band-7030-tdf-valuation-warning-dip-buyer-kodex-koact` | 예 | 29의 QQQ·TDF·BIL을 국내 상품에 매핑 |
+| `30_qqq_valuation_credit_guard_no_topup.yaml` | `qqq-valuation-credit-guard-no-topup` | 예 | 28에 신용·상대약세 2단계 경보와 심화 방어 중 QQQ 재매수 제한을 추가 |
+| `30P_qqq_valuation_credit_guard_no_topup_kodex_koact.yaml` | `qqq-valuation-credit-guard-no-topup-kodex-koact` | 예 | 30의 QQQ·BIL을 28P와 같은 국내 상품에 매핑 |
+| `31_band_7030_tdf_valuation_credit_guard_no_topup.yaml` | `band-7030-tdf-valuation-credit-guard-no-topup` | 예 | 29의 퇴직연금 70/30 구조에 30의 신용 방어 신호를 적용 |
+| `31P_band_7030_tdf_valuation_credit_guard_no_topup_kodex_koact.yaml` | `band-7030-tdf-valuation-credit-guard-no-topup-kodex-koact` | 예 | 31의 QQQ·TDF·BIL을 29P와 같은 국내 상품에 매핑 |
 
 다음 파일들은 독립 규칙이 아니라 `source` 전략의 신호·상태·리밸런싱·알림 규칙을 그대로 사용해 실제
 상품만 바꾸는 매핑입니다. 자세한 매핑은 [국내 상품 매핑](#국내-상품-매핑)에 있습니다.
@@ -76,6 +83,10 @@
 | `27P_buy_3dip_80_98_99_100_active.yaml` | `buy-3dip-bil-valuation-hybrid-active` | `buy-3dip-bil-valuation-hybrid-80-98-99-100` | 예 |
 | `25P_qqq_valuation_breakdown_balanced_kodex_koact.yaml` | `qqq-valuation-breakdown-balanced-kodex-koact` | `qqq-valuation-breakdown-balanced` | 예 |
 | `26P_band_7030_tdf_valuation_defense_kodex_koact.yaml` | `band-7030-tdf-valuation-defense-kodex-koact` | `band-7030-tdf-valuation-defense` | 예 |
+| `28P_qqq_valuation_warning_dip_buyer_kodex_koact.yaml` | `qqq-valuation-warning-dip-buyer-kodex-koact` | `qqq-valuation-warning-dip-buyer` | 예 |
+| `29P_band_7030_tdf_valuation_warning_dip_buyer_kodex_koact.yaml` | `band-7030-tdf-valuation-warning-dip-buyer-kodex-koact` | `band-7030-tdf-valuation-warning-dip-buyer` | 예 |
+| `30P_qqq_valuation_credit_guard_no_topup_kodex_koact.yaml` | `qqq-valuation-credit-guard-no-topup-kodex-koact` | `qqq-valuation-credit-guard-no-topup` | 예 |
+| `31P_band_7030_tdf_valuation_credit_guard_no_topup_kodex_koact.yaml` | `band-7030-tdf-valuation-credit-guard-no-topup-kodex-koact` | `band-7030-tdf-valuation-credit-guard-no-topup` | 예 |
 
 ## 공통 용어와 상태 전이
 
@@ -320,6 +331,80 @@ BEAR 확정 전 `structural_bear` 신호만으로 BIL 100%로 이동하던 예�
 - 전체 표본에서는 25번보다 CAGR이 0.030%p 높고 MDD가 0.833%p 개선됐습니다.
 - 세부 검증은 [28번 밸류에이션 WARNING 하락 매수 검증](research/strategy28-warning-dip-buyer.md)에 기록합니다.
 
+### 29 — 70/30 TDF Valuation Warning Dip Buyer
+
+`29_band_7030_tdf_valuation_warning_dip_buyer.yaml`은 26번의 퇴직연금형 QQQ 70%·
+TDF2050 프록시 30%를 기본으로 하고 28번의 WARNING 완충·-10% 재투입을 접목합니다.
+
+- 밸류에이션 WARNING에서는 QQQ 50%·TDF 30%·BIL 20%를 목표로 합니다.
+- QQQ가 추적 고점에서 -10% 내려가면 보유 BIL 20%를 투입해 70/30으로 복귀합니다.
+  -20%·-32.5% 단계는 경로를 추적하되 목표는 계속 70/30입니다.
+- BEAR, 구조적 약세, DEFENSE, RECOVERY 목표가 하락 재투입보다 우선합니다.
+  확정 BEAR는 QQQ 0%·TDF 20%·BIL 80%입니다.
+- 목표 비중과의 최대 괴리 7.5%p 또는 QQQ 부족 4%p에서 리밸런싱하며,
+  주문은 다음 거래일 시가부터 1일에 실행합니다.
+
+`29P_band_7030_tdf_valuation_warning_dip_buyer_kodex_koact.yaml`은 같은 신호를
+국내 상품에 매핑합니다. 실제 ETF의 추적 오차·환율·가격은 프록시와 다를 수 있습니다.
+
+### 30 — QQQ Valuation Credit Guard No Top-up
+
+`30_qqq_valuation_credit_guard_no_topup.yaml`은 28번을 기본으로 두고 QQQ의 SPY 대비
+상대약세와 Baa-국채 신용스프레드 악화를 별도 경보로 결합합니다.
+
+- 1차 신용 경보에서는 QQQ를 최대 65%로, 상대약세가 심화된 2차 경보에서는 20%로
+  줄입니다. 기존 BEAR처럼 더 낮은 목표가 있으면 기존 방어가 우선합니다.
+- 심화 경보 첫날 QQQ를 20%로 줄인 후에는 가격 하락으로 실제 비중이 20% 아래가
+  되어도 부족분을 다시 사지 않습니다. 경보 해제 후 기존 28번의 목표로 복귀합니다.
+- FRED `BAA10Y` 관측값은 관측일보다 한 거래일 늦춰 사용합니다. 신호와 매매에는
+  데이터 공급 시점 및 다음 거래일 체결의 제약이 있습니다.
+
+`30P_qqq_valuation_credit_guard_no_topup_kodex_koact.yaml`은 28P와 같은 국내
+QQQ 2종·머니마켓 상품을 사용하고 `source`만 30번으로 바꿉니다.
+
+### 31 — 70/30 TDF Valuation Credit Guard No Top-up
+
+`31_band_7030_tdf_valuation_credit_guard_no_topup.yaml`은 29번의 정상 70/30과
+WARNING·하락 재투입을 유지하면서 30번의 신용 경보를 적용합니다.
+
+- 1차 경보 목표는 QQQ 50%·TDF 30%·BIL 20%로 29번의 WARNING 목표와 같습니다.
+  경보가 유지되면 29번의 RECOVERY·-10% 재투입보다 이 목표가 우선합니다.
+- 2차 경보는 QQQ를 20% 이하로 제한하고 추가 매수를 막습니다. TDF는 보통 30%를
+  유지하지만 DEFENSE에서는 0%, BEAR에서는 기존 BEAR 목표가 우선합니다.
+- 2012~2026 검증에서 1차 경보는 2022-02-18~2023-04-11 켜졌고 2차 경보는
+  발생하지 않았습니다. 따라서 최근 성과만으로 심화 방어의 효용을 단정할 수 없습니다.
+
+`31P_band_7030_tdf_valuation_credit_guard_no_topup_kodex_koact.yaml`은 29P와
+같은 국내 QQQ 2종·TDF·머니마켓 상품을 사용하고 `source`만 31번으로 바꿉니다.
+
+#### 닷컴·금융위기 대체검증의 MDD
+
+아래 수치는 **달러 기준 연구용 대체검증**이며 실제 ETF·연금 상품 성과가 아닙니다.
+닷컴(2000-03-10~2005-12-30)과 금융위기(2007-01-03~2011-12-30)에는 실제
+TDF2050 프록시와 원/달러 자료가 없으므로 29·31번의 TDF 30%는 SPY를 당시
+해외주식 부분의 대용으로, 장기 채권 대체 자료를 채권 부분의 대용으로 구성했습니다.
+BIL·BND의 출시 전 대체자료, CAPE 밸류에이션 대체치, 신용 데이터의 1거래일 지연,
+기본 거래비용과 다음 거래일 시가 체결을 전제로 합니다.
+
+| 위기 구간 | 28번 | 30번 | 29번 | 31번 |
+|---|---:|---:|---:|---:|
+| 닷컴 MDD | -66.028% | **-15.859%** | -52.876% | **-14.460%** |
+| 금융위기 MDD | -29.215% | **-26.745%** | -26.492% | **-25.014%** |
+
+28·30번은 QQQ/BIL 연구, 29·31번은 별도로 만든 TDF 시계열 연구입니다.
+**열 간에 30번과 31번의 절대 수치를 직접 비교해서는 안 됩니다.** 닷컴에서
+31번의 심화 방어는 2000-04-03~2003-05-27 작동해 29번의 재진입 노출을 크게
+줄였습니다. 금융위기에는 1차 경보만 작동해 29번 대비 MDD 개선이 약 1.48%p에
+그쳤습니다. TDF 해외주식 부분을 SPY 대신 QQQ로 대체한 민감도 검증에서도
+닷컴 29/31번 MDD는 -54.856%/-16.718%, 금융위기는 -26.001%/-24.445%였습니다.
+이 수치는 대체자산과 몇 차례의 위기에 민감하므로 미래 방어력을 보증하지 않습니다.
+
+28·30번의 검증은 [30·31번 구현 검증](research/strategy30-31-deployment-validation.md)과
+[닷컴 빠른 2차 방어](research/strategy28-dotcom-fast-second-tier.md), 29·31번의
+TDF 대체검증 재현법은
+[`strategy29_31_crisis_proxy.py`](../src/legacy-python/validation/strategy29_31_crisis_proxy.py)에
+기록합니다.
+
 ## VXUS 수익 밴드 계열
 
 ### 04 — Profit Band VXUS
@@ -395,6 +480,10 @@ BIL 중 ROC40이 더 좋은 쪽을 안전자산으로 고릅니다. `02_allocati
 | `buy-3dip-tdf` | `buy-3dip-bil` | QQQ는 그대로, BIL → `434060.KS` 100% |
 | `qqq-valuation-breakdown-balanced-kodex-koact` | `qqq-valuation-breakdown-balanced` | QQQ → `379810.KS` 50% + `0015B0.KS` 50%, BIL → `488770.KS` 100% |
 | `band-7030-tdf-valuation-defense-kodex-koact` | `band-7030-tdf-valuation-defense` | QQQ → `379810.KS` 50% + `0015B0.KS` 50%, TDF2050 프록시 → `434060.KS` 100%, BIL → `488770.KS` 100% |
+| `qqq-valuation-warning-dip-buyer-kodex-koact` | `qqq-valuation-warning-dip-buyer` | QQQ → `379810.KS` 50% + `0015B0.KS` 50%, BIL → `488770.KS` 100% |
+| `band-7030-tdf-valuation-warning-dip-buyer-kodex-koact` | `band-7030-tdf-valuation-warning-dip-buyer` | QQQ → `379810.KS` 50% + `0015B0.KS` 50%, TDF2050 프록시 → `434060.KS` 100%, BIL → `488770.KS` 100% |
+| `qqq-valuation-credit-guard-no-topup-kodex-koact` | `qqq-valuation-credit-guard-no-topup` | QQQ → `379810.KS` 50% + `0015B0.KS` 50%, BIL → `488770.KS` 100% |
+| `band-7030-tdf-valuation-credit-guard-no-topup-kodex-koact` | `band-7030-tdf-valuation-credit-guard-no-topup` | QQQ → `379810.KS` 50% + `0015B0.KS` 50%, TDF2050 프록시 → `434060.KS` 100%, BIL → `488770.KS` 100% |
 
 상품 코드에 대한 메모는 각 매핑 YAML의 주석을 따릅니다. 특히 `time-vxus-tdf2050`은 기준
 전략에서 서로 다른 QQQ와 VXUS 비중을 모두 `426030.KS`로 합산하므로, 기준 자산별 비중과
