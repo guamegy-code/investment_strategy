@@ -1,7 +1,7 @@
 strategy:
   id: qqq-valuation-credit-guard-no-topup
   name: QQQ Valuation Credit Guard No Top-up (30) [BIL]
-  version: 1
+  version: 2
   dsl_version: 1
   enabled: true
 
@@ -87,7 +87,7 @@ state:
         set: "=state.relative_weak_age + 1"
 
   # 최근 상대약세, 스프레드 2%p 이상, 20일 확대 폭 0.30%p 이상이
-  # 동시에 충족되면 1차 방어를 켠다. 가격·상대강도 회복은 10일 확인 후 해제한다.
+  # 동시에 충족되면 1차 방어를 켠다. 가격·상대강도 회복과 신용스프레드 3.0%p 미만을 5일 확인 후 해제한다.
   credit_guard:
     initial: 'FALSE'
     rules:
@@ -100,11 +100,12 @@ state:
       - when: >
           state.credit_guard == 'TRUE'
           and QQQ.close > QQQ.ema200
-          and QQQ.ema55 > QQQ.ema200
+          and QQQ.ema55 > QQQ.ema200 * 0.97
           and variables.relative_roc60 > 0
           and SPY.close > SPY.ema200
+          and BAA10Y.close < 3.0
         set: 'FALSE'
-        confirm: 10
+        confirm: 5
 
   # 1차 방어 중 QQQ의 20일 상대수익률이 -10% 이하이면 심화 방어를 켠다.
   # 해제에는 10일 가격 회복과 신용스프레드 정상화 또는 고점 대비 0.50%p 축소가 필요하다.
@@ -312,7 +313,7 @@ target:
     weights: {QQQ: 50%, BIL: 50%}
   # 앞선 방어 규칙이 더 낮은 QQQ 비중을 요구하면 그 목표를 우선한다.
   - when: state.credit_guard == 'TRUE'
-    weights: {QQQ: 65%, BIL: 35%}
+    weights: {QQQ: 50%, BIL: 50%}
   - when: state.trend_mode == 'RECOVERY'
     weights: {QQQ: 80%, BIL: 20%}
   # -10%에 진입한 뒤에는 추가 하락 단계가 바뀌어도 QQQ 100%를 유지한다.

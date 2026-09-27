@@ -28,6 +28,25 @@ STRATEGY31 = ROOT / "strategies/31_band_7030_tdf_valuation_credit_guard_no_topup
 STRATEGY29 = ROOT / "strategies/29_band_7030_tdf_valuation_warning_dip_buyer.yaml"
 
 
+def original_30_definition():
+    """Reconstruct the pre-tuning YAML for the research-wrapper parity check."""
+    definition = deepcopy(load_strategy_definition(STRATEGY30))
+    release = definition["state"]["credit_guard"]["rules"][1]
+    assert "QQQ.ema55 > QQQ.ema200 * 0.97" in release["when"]
+    assert "and BAA10Y.close < 3.0" in release["when"]
+    assert release["confirm"] == 5
+    release["when"] = release["when"].replace(
+        "QQQ.ema55 > QQQ.ema200 * 0.97", "QQQ.ema55 > QQQ.ema200"
+    ).replace("and BAA10Y.close < 3.0", "").rstrip() + "\n"
+    release["confirm"] = 10
+    first = next(rule for rule in definition["target"]
+                 if rule.get("when") == "state.credit_guard == 'TRUE'")
+    assert first["weights"] == {"QQQ": "50%", "BIL": "50%"}
+    first["weights"] = {"QQQ": "65%", "BIL": "35%"}
+    definition["strategy"]["version"] = 1
+    return definition
+
+
 def add_credit_observation(directory):
     qqq = pd.read_csv(directory / "QQQ.csv", index_col="Date", parse_dates=True)
     spread = qqq["BAA_SPREAD"]
@@ -71,9 +90,10 @@ def main(*, current_only=False):
             research_metrics = None
             for name, strategy in (
                 ("RESEARCH_30", MixedTuning(cape_proxy=proxy, no_topup=True)),
+                ("YAML_30_BASE", DeclarativeStrategy(original_30_definition())),
                 ("YAML_30", DeclarativeStrategy(load_strategy_definition(STRATEGY30))),
             ):
-                if proxy and name == "YAML_30":
+                if proxy and name.startswith("YAML_30"):
                     strategy.parameters["valuation_arm_score"] = 30.0
                     strategy.parameters["valuation_breakdown_points"] = 4.0
                 metrics, history = run(strategy, directory, dates)
@@ -81,7 +101,7 @@ def main(*, current_only=False):
                 print(rows[-1], flush=True)
                 if name == "RESEARCH_30":
                     research_metrics = metrics
-                else:
+                elif name == "YAML_30_BASE":
                     for field in ("CAGR", "MDD", "Trades", "Rebalances"):
                         assert abs(metrics[field] - research_metrics[field]) < 1e-9, (
                             period, field, metrics[field], research_metrics[field]

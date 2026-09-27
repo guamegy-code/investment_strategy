@@ -1,20 +1,16 @@
 {
   "version": 1,
   "hidden_strategy_ids": [],
-  "enabled_bundle": "enabled.1faff2ab129d.json",
+  "enabled_bundle": "enabled.06c6b14e6133.json",
   "results": {
     "profit-band-tdf2050": "../results/profit-band-tdf2050.260199001a21.json.gz",
     "buy-3dip-bil": "../results/buy-3dip-bil.c0599d5e2522.json.gz",
-    "buy-3dip-bil-delayed-recovery": "../results/buy-3dip-bil-delayed-recovery.010dd4bb012a.json.gz",
-    "qqq-valuation-credit-guard-no-topup": "../results/qqq-valuation-credit-guard-no-topup.08109ed36d31.json.gz",
-    "band-7030-tdf-valuation-credit-guard-no-topup": "../results/band-7030-tdf-valuation-credit-guard-no-topup.5edf22df8f4f.json.gz"
+    "buy-3dip-bil-delayed-recovery": "../results/buy-3dip-bil-delayed-recovery.010dd4bb012a.json.gz"
   },
   "result_currencies": {
     "profit-band-tdf2050": "UNVERIFIED",
     "buy-3dip-bil": "UNVERIFIED",
-    "buy-3dip-bil-delayed-recovery": "UNVERIFIED",
-    "qqq-valuation-credit-guard-no-topup": "UNVERIFIED",
-    "band-7030-tdf-valuation-credit-guard-no-topup": "UNVERIFIED"
+    "buy-3dip-bil-delayed-recovery": "UNVERIFIED"
   },
   "strategies": [
     {
@@ -260,25 +256,25 @@
     {
       "id": "qqq-valuation-credit-guard-no-topup",
       "path": "30_qqq_valuation_credit_guard_no_topup.yaml",
-      "version": 1,
+      "version": 2,
       "enabled": true
     },
     {
       "id": "qqq-valuation-credit-guard-no-topup-kodex-koact",
       "path": "30P_qqq_valuation_credit_guard_no_topup_kodex_koact.yaml",
-      "version": 1,
+      "version": 2,
       "enabled": true
     },
     {
       "id": "band-7030-tdf-valuation-credit-guard-no-topup",
       "path": "31_band_7030_tdf_valuation_credit_guard_no_topup.yaml",
-      "version": 1,
+      "version": 2,
       "enabled": true
     },
     {
       "id": "band-7030-tdf-valuation-credit-guard-no-topup-kodex-koact",
       "path": "31P_band_7030_tdf_valuation_credit_guard_no_topup_kodex_koact.yaml",
-      "version": 1,
+      "version": 2,
       "enabled": true
     }
   ]

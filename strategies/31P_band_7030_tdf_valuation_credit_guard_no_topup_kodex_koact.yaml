@@ -1,7 +1,7 @@
 strategy:
   id: band-7030-tdf-valuation-credit-guard-no-topup-kodex-koact
   name: "[퇴직] QQQ/TDF Valuation Credit Guard No Top-up"
-  version: 1
+  version: 2
   dsl_version: 1
   enabled: true
 
