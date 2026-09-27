@@ -231,6 +231,17 @@ function notificationMarket(policy,market){
   return summary;
 }
 
+function refreshNotificationDisplay(context){
+  const policy=context?.notification_policy;
+  if(!policy)return context;
+  return{
+    ...context,
+    notification_display:notificationDisplay(
+      policy,context.state_values||{},context.variables||{},context.market||{},context.confirmations||[],
+    ),
+  };
+}
+
 function requiredConfirmationDays(definition,name,value){
   const rules=definition.state?.[name]?.rules||[];
   return Math.max(1,...rules.filter(rule=>String(rule.set)===String(value)).map(rule=>Number(rule.confirm||1)));
@@ -386,7 +397,7 @@ function confirmationExplanation(item,policy){
 }
 
 export function selectNotificationAlerts(history,notificationState={}){
-  let deviationArmed=Boolean(notificationState.deviation_armed),armedRules={...(notificationState.armed_rules||{})},latestContext=notificationState.latest_context||null;
+  let deviationArmed=Boolean(notificationState.deviation_armed),armedRules={...(notificationState.armed_rules||{})},latestContext=refreshNotificationDisplay(notificationState.latest_context||null);
   const alerts=[];
   for(const row of history){
     const context=row.notificationContext||{},deviation=Number(context.target_deviation||0),policy=context.notification_policy;
@@ -426,7 +437,7 @@ export function selectNotificationAlerts(history,notificationState={}){
         source_target_weights:context.source_target_weights||null,
       });
     }
-    latestContext=context;
+    latestContext=refreshNotificationDisplay(context);
   }
   return{alerts,state:{deviation_armed:deviationArmed,armed_rules:armedRules,latest_context:latestContext}};
 }

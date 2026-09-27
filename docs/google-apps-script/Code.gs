@@ -451,7 +451,12 @@ function formatSignals_(event) {
 function formatConfirmations_(event) {
   const configured = event.notification_display?.confirmations;
   if (Array.isArray(configured)) return configured.map(item => `${item.label || item.name} → ${item.display_desired || item.desired} ${item.days}/${item.required_days}일`).join('\n');
-  return (event.confirmations || []).map(item => `${item.name} → ${item.desired} ${item.days}/${item.required_days}일`).join('\n');
+  const states = new Map(stateDisplayItems_(event).map(item => [item.name, item]));
+  return (event.confirmations || []).map(item => {
+    const state = states.get(item.name), desired = String(item.desired);
+    const display = state?.value === desired ? state.display : desired;
+    return `${state?.label || item.name} → ${display === desired ? desired : `${display} (${desired})`} ${item.days}/${item.required_days}일`;
+  }).join('\n');
 }
 function formatAllocationTable_(event) {
   const current = event.current_weights || {}, target = event.target_weights || {};
