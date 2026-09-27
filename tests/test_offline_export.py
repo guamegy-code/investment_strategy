@@ -458,6 +458,8 @@ class OfflineExportTests(unittest.TestCase):
                 "id": "sample", "path": "sample.yaml", "version": 1,
                 "enabled": True,
             }])
+            self.assertEqual(manifest["result_currencies"], {})
+            self.assertIn('"precomputed_results_currency": "UNVERIFIED"', document)
             self.assertIn('"strategy_manifest_url": "./strategies/manifest.json"', document)
             self.assertIn('"static_site": true', document)
             self.assertIn('<script defer src="./assets/plotly.', document)

@@ -1,0 +1,16 @@
+strategy:
+  id: qqq-valuation-credit-guard-no-topup-kodex-koact
+  name: "[개인] QQQ Valuation Credit Guard No Top-up"
+  version: 1
+  dsl_version: 1
+  enabled: true
+
+# 28P와 같은 국내 상품을 사용하고, 신호와 목표 비중만 30번에서 가져온다.
+source: qqq-valuation-credit-guard-no-topup
+
+products:
+  QQQ:
+    379810.KS: 50%  # KODEX 미국나스닥100
+    0015B0.KS: 50%  # KoAct 미국나스닥성장기업액티브
+  BIL:
+    488770.KS: 100%  # KODEX 머니마켓액티브

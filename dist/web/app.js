@@ -7,6 +7,7 @@ let precomputedResults = null;
 let dashboardResults = new Map();
 let hostedManifestUrl = null;
 let hostedResultFiles = {};
+let hostedResultCurrencies = {};
 const hostedResultCache = new Map();
 const proxyUrl = bundle.data_proxy || localStorage.getItem('investment-strategy:data-proxy') || '';
 
@@ -47,6 +48,8 @@ async function loadData() {
 }
 async function loadPrecomputedResults() {
   if (precomputedResults) return precomputedResults;
+  // A stored USD or unverified history must never enter KRW comparison views.
+  if (bundle.precomputed_results_currency !== 'KRW') return precomputedResults = {};
   if (!bundle.precomputed_results) return precomputedResults = {};
   const stream = new Blob([bytesFromBase64(bundle.precomputed_results || '')], {type:'application/gzip'}).stream().pipeThrough(new DecompressionStream('gzip'));
   precomputedResults = JSON.parse(await new Response(stream).text());
@@ -157,6 +160,9 @@ function browserNotificationPolicy(definition){
   return{states,prealerts:threshold?[{id:'target-deviation',when:`target_deviation() >= ${threshold*2/3}`,reset_when:`target_deviation() < ${threshold*8/15}`,message:`목표 비중 괴리가 ${(threshold*200/3).toFixed(1)}%p에 도달 (리밸런싱 조건 ${threshold*100}%p)`}]:[]};
 }
 async function loadHostedPrecomputedResult(strategyId){
+  // Hosted results are optional. Only explicitly KRW-valued histories are safe
+  // for the comparison, detail-default, and indicator-default views.
+  if(hostedResultCurrencies[strategyId]!=='KRW')return null;
   if(hostedResultCache.has(strategyId))return hostedResultCache.get(strategyId);
   const path=hostedResultFiles[strategyId];
   if(!path||!hostedManifestUrl)return null;
@@ -568,6 +574,7 @@ if(detailUsdToggle){
 async function updateDetailFxView(){
   const toggle=$('detail-remove-fx'),id=$('detail-strategy').value,entry=dashboardResults.get(id);
   if(!toggle||!entry)return;
+  if(entry[0].source){toggle.checked=false;detailFxHistories.clear();renderDetail();return;}
   if(!toggle.checked){detailFxHistories.delete(id);renderDetail();return;}
   toggle.disabled=true;
   try{
@@ -684,7 +691,8 @@ renderIndicators=async function(){
 // Imported strategies use this single preparation path: download, calculate,
 // validate and cache. It intentionally sits after the dashboard compatibility
 // wrappers above, so existing chart behavior is left unchanged.
-const BROWSER_ENGINE_VERSION = '2026-09-13.1';
+// Invalidate browser histories built before KRW became the comparison default.
+const BROWSER_ENGINE_VERSION = '2026-09-27.1';
 const NOTIFICATION_CONTEXT_VERSION = 3;
 const FX_TICKER_BY_SUFFIX = {'.KS': 'KRW=X', '.KQ': 'KRW=X'};
 const TDF2050_PROXY_COMPONENT_WEIGHTS = {SPY:.4081,VXUS:.3339,BND:.258};
@@ -1044,6 +1052,7 @@ async function loadHostedStrategies(){
     Array.isArray(manifest)?[]:(Array.isArray(manifest.hidden_strategy_ids)?manifest.hidden_strategy_ids:[])
   );
   hostedResultFiles=Array.isArray(manifest)||!manifest.results?{}:manifest.results;
+  hostedResultCurrencies=Array.isArray(manifest)||!manifest.result_currencies?{}:manifest.result_currencies;
   let loaded;
   if(!Array.isArray(manifest)&&manifest.enabled_bundle){
     const bundleResponse=await fetch(new URL(manifest.enabled_bundle,manifestUrl));
@@ -2477,3 +2486,40 @@ Plotly.react=function(target,traces,layout,...args){
   applyAdaptiveSpline(target,traces);
   return adaptiveSplineReact(target,traces,layout,...args);
 };
+
+// Comparison charts and summary always use KRW. Only a strategy's detail and
+// indicator research may opt into USD, and KRW-listed product mappings cannot.
+const detailCurrencyToggle=$('detail-remove-fx');
+if(detailCurrencyToggle){
+  detailCurrencyToggle.checked=false;
+  const label=detailCurrencyToggle.closest('label')?.querySelector('.form-check-label');
+  if(label)label.textContent='달러 기준으로 보기';
+}
+function syncDetailCurrencyChoice(){
+  const toggle=$('detail-remove-fx'),definition=definitions.find(item=>item.strategy.id===$('detail-strategy')?.value);
+  if(!toggle)return;
+  const productMapped=Boolean(definition?.source),label=toggle.closest('label');
+  toggle.disabled=productMapped;
+  if(label){label.hidden=productMapped;label.style.display=productMapped?'none':'';}
+  if(productMapped){toggle.checked=false;detailFxHistories.clear();}
+}
+function syncIndicatorCurrencyChoice(){
+  const toggle=$('indicator-remove-fx'),definition=definitions.find(item=>item.strategy.id===$('indicator-strategy')?.value);
+  if(!toggle)return;
+  const productMapped=Boolean(definition?.source),label=toggle.closest('label');
+  toggle.disabled=productMapped;
+  if(label){label.hidden=productMapped;label.style.display=productMapped?'none':'';}
+  if(productMapped){toggle.checked=false;indicatorFxHistories.clear();}
+}
+const krwDefaultDetailRenderer=renderDetail;
+renderDetail=function(){syncDetailCurrencyChoice();return krwDefaultDetailRenderer();};
+const krwDefaultIndicatorRenderer=renderIndicators;
+renderIndicators=async function(){syncIndicatorCurrencyChoice();return krwDefaultIndicatorRenderer();};
+for(const [id,description] of [
+  ['performance-plot','원화 기준 · 동일 시작점으로 정규화한 전략별 성과'],
+  ['drawdown-plot','원화 기준 · 고점 대비 손실과 회복 구간 비교'],
+  ['summary','원화 기준 · 전략별 성과를 비교할 수 있습니다.'],
+]){
+  const caption=$(id)?.closest('.research-card')?.querySelector('.research-card-description');
+  if(caption)caption.textContent=description;
+}
