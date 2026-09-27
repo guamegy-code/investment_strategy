@@ -706,9 +706,19 @@ test("Apps Script notification message uses configured state labels and values",
   });
 
   assert.match(message, /• 추세: 상승 \(BULL\)/);
+  assert.match(message, /• 추세: 상승 \(BULL\) → 하락 \(BEAR\)/);
+  assert.doesNotMatch(message, /판단: 추세:/);
   assert.match(message, /추세 → 하락 \(BEAR\) 1\/10일/);
   assert.doesNotMatch(message, /trend_mode →/);
   assert.doesNotMatch(message, /internal_mode/);
+
+  const ordinary = messageFor({
+    type: "SUMMARY", strategy_name: "Sample", market_data_at: "2026-09-25",
+    notification_display: {states: [], variables: [], market: [], confirmations: []},
+    reason_text: "정기 시장 상황 점검", current_weights: {QQQ: 1},
+    target_weights: {QQQ: 1}, target_deviation: 0,
+  });
+  assert.match(ordinary, /• 판단: 정기 시장 상황 점검/);
 });
 
 test("custom notification DSL supports arbitrary state names and presentation", () => {

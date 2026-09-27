@@ -458,6 +458,12 @@ function formatConfirmations_(event) {
     return `${state?.label || item.name} → ${display === desired ? desired : `${display} (${desired})`} ${item.days}/${item.required_days}일`;
   }).join('\n');
 }
+function formatReason_(event) {
+  const reason = event.reason_text || event.reason;
+  if (!reason) return '';
+  const isStateReason = stateDisplayItems_(event).some(item => String(reason).startsWith(`${item.label}: `));
+  return `• ${isStateReason ? '' : '판단: '}${reason}`;
+}
 function formatAllocationTable_(event) {
   const current = event.current_weights || {}, target = event.target_weights || {};
   const tickers = [...Object.keys(target), ...Object.keys(current).filter(ticker => !Object.prototype.hasOwnProperty.call(target, ticker))];
@@ -483,7 +489,7 @@ function messageFor_(event) {
   const states = formatConfiguredStates_(event); if (states) lines.push('', '[[B]]📌 시장 상태[[/B]]', states);
   const signals = formatSignals_(event); if (signals) lines.push('', '[[B]]📊 신호[[/B]]', signals);
   const market = formatConfiguredMarket_(event); if (market) lines.push('', market);
-  if (event.reason_text || event.reason) lines.push(`• 판단: ${event.reason_text || event.reason}`);
+  const reason = formatReason_(event); if (reason) lines.push(reason);
   const confirmations = formatConfirmations_(event); if (confirmations) lines.push(`확인 진행\n${confirmations}`);
   lines.push(`• 목표 괴리: [[C]]${(Number(event.target_deviation || 0) * 100).toFixed(1)}%p[[/C]]`);
   const allocationStatus = type === 'REBALANCE' ? (event.target_changed ? '목표 변경' : '리밸런싱 예정') : '매매 없음';

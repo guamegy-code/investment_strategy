@@ -69,7 +69,7 @@ class NotificationWorkerContractTests(unittest.TestCase):
         self.assertNotIn("defense_mode:", source)
         self.assertIn("event.product_names?.[ticker] || ticker", source)
         self.assertIn("return `• ${event.product_names?.[ticker] || ticker}", source)
-        self.assertIn("`• 판단: ${event.reason_text || event.reason}`", source)
+        self.assertIn("function formatReason_(event)", source)
         self.assertIn("[[B]]📈 시장 지표 (${ticker})[[/B]]", source)
         self.assertNotIn("'현재 → 목표'", source)
         self.assertIn("function telegramHtml_(text)", source)
