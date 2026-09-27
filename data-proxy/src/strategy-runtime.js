@@ -199,7 +199,12 @@ function notificationPolicy(definition){
   };
 }
 
-function notificationDisplay(policy,stateValues,variables,market){
+function notificationStateValue(config,value){
+  const raw=String(value),display=String(config?.values?.[raw]??raw);
+  return display===raw?raw:`${display} (${raw})`;
+}
+
+function notificationDisplay(policy,stateValues,variables,market,confirmations=[]){
   const schedule=policy.schedule??(policy.weekly===false?'none':'weekly');
   return{
     schedule,
@@ -207,6 +212,11 @@ function notificationDisplay(policy,stateValues,variables,market){
     states:Object.entries(policy.states||{}).filter(([name])=>Object.prototype.hasOwnProperty.call(stateValues,name)).map(([name,item])=>({name,label:item.label,value:stateValues[name],...(item.values ? {display_value:item.values[String(stateValues[name])]??String(stateValues[name])} : {})})),
     variables:Object.entries(policy.variables||{}).filter(([name])=>Object.prototype.hasOwnProperty.call(variables,name)).map(([name,item])=>({name,label:item.label,value:variables[name],max:item.max??null,decimals:item.decimals??0,display:item.display||'number'})),
     market:(policy.market||[]).map(item=>({ticker:item.ticker,field:item.field,label:item.label,format:item.format||'number',decimals:item.decimals??1,value:finiteNumber(market[item.ticker]?.[String(item.field).toLowerCase()])})).filter(item=>item.value!==null),
+    confirmations:confirmations.filter(item=>policy.states?.[item.name]).map(item=>({
+      ...item,
+      label:policy.states[item.name].label,
+      display_desired:notificationStateValue(policy.states[item.name],item.desired),
+    })),
   };
 }
 
@@ -236,7 +246,7 @@ function transitionExplanation(change,policy){
   const changed=alerts.filter(item=>notificationAlertMatches(item,'changed',change.current));
   const exact=changed.find(item=>Object.prototype.hasOwnProperty.call(item,'from')&&String(item.from)===String(change.previous));
   const general=changed.find(item=>!Object.prototype.hasOwnProperty.call(item,'from'));
-  const transition=`${configured?.label||change.name}: ${change.previous} → ${change.current}`,message=(exact||general)?.message;
+  const transition=`${configured?.label||change.name}: ${notificationStateValue(configured,change.previous)} → ${notificationStateValue(configured,change.current)}`,message=(exact||general)?.message;
   return message?`${transition} · ${message}`:transition;
 }
 
@@ -287,7 +297,7 @@ function installNotificationContext(StrategyClass){
       reason_text:reasons.join(' · '),
       reason_details:reasons,
       notification_policy:policy,
-      notification_display:notificationDisplay(policy,this.state||{},this.variables||{},market),
+      notification_display:notificationDisplay(policy,this.state||{},this.variables||{},market,confirmations),
       prealerts,
       mapped_products:false,
     };
@@ -371,7 +381,7 @@ function criticalConfirmation(item,policy){
 function confirmationExplanation(item,policy){
   const configured=policy?.states?.[item.name],alerts=configured?.alerts||[];
   const alert=alerts.find(rule=>notificationAlertMatches(rule,'confirmation_started',item.desired));
-  const confirmation=`${configured?.label||item.name}: ${item.desired} 확인 시작 (${item.days}/${item.required_days}일)`;
+  const confirmation=`${configured?.label||item.name}: ${notificationStateValue(configured,item.desired)} 확인 시작 (${item.days}/${item.required_days}일)`;
   return alert?.message?`${confirmation} · ${alert.message}`:confirmation;
 }
 

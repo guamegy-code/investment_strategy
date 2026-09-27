@@ -573,7 +573,7 @@ function notificationFixture() {
     notifications: {
       weekly: true,
       states: {
-        defense_mode: {label: "방어 상태", alerts: [{on: "confirmation_started", to: ["DEFENSE"]}, {from: "NORMAL", to: "WARNING", message: "밸류에이션 급락을 추가 확인 중"}, {to: "DEFENSE", message: "방어 진입"}]},
+        defense_mode: {label: "방어 상태", values: {NORMAL: "정상", WARNING: "경고", DEFENSE: "방어"}, alerts: [{on: "confirmation_started", to: ["DEFENSE"]}, {from: "NORMAL", to: "WARNING", message: "밸류에이션 급락을 추가 확인 중"}, {to: "DEFENSE", message: "방어 진입"}]},
       },
       variables: {risk_off_score: {label: "약세 신호", max: 1}},
       market: [{ticker: "QQQ", field: "close", label: "가격", format: "price"}],
@@ -660,16 +660,48 @@ test("notification context emits selected prealerts and a detailed rebalance", (
 
   assert.deepEqual(selected.alerts.map(alert => alert.type), ["PREALERT", "PREALERT", "REBALANCE"]);
   assert.deepEqual(selected.alerts[0].state_values, {defense_mode: "WARNING", trend_mode: "BULL"});
-  assert.match(selected.alerts[0].reason_text, /방어 상태: NORMAL → WARNING/);
+  assert.match(selected.alerts[0].reason_text, /방어 상태: 정상 \(NORMAL\) → 경고 \(WARNING\)/);
   assert.match(selected.alerts[0].reason_text, /밸류에이션 급락/);
   assert.deepEqual(selected.alerts[1].confirmations, [{
     name: "defense_mode", desired: "DEFENSE", days: 1, required_days: 2,
   }]);
-  assert.match(selected.alerts[1].reason_text, /방어 상태: DEFENSE 확인 시작 \(1\/2일\)/);
+  assert.match(selected.alerts[1].reason_text, /방어 상태: 방어 \(DEFENSE\) 확인 시작 \(1\/2일\)/);
+  assert.deepEqual(selected.alerts[1].notification_display.confirmations, [{
+    name: "defense_mode", desired: "DEFENSE", days: 1, required_days: 2,
+    label: "방어 상태", display_desired: "방어 (DEFENSE)",
+  }]);
   assert.deepEqual(selected.alerts[2].target_weights, {QQQ: .3, BIL: .7});
   assert.deepEqual(selected.alerts[2].previous_target_weights, {QQQ: 1, BIL: 0});
   assert.equal(selected.alerts[2].target_changed, true);
   assert.equal(selected.alerts[2].market.QQQ.close, 80);
+});
+
+test("Apps Script notification message uses configured state labels and values", () => {
+  const code = readFileSync(new URL("../../docs/google-apps-script/Code.gs", import.meta.url), "utf8");
+  const messageFor = new Function(`${code}\nreturn messageFor_;`)();
+  const message = messageFor({
+    type: "PREALERT", strategy_name: "Sample", market_data_at: "2026-09-25",
+    notification_display: {
+      states: [{name: "trend_mode", label: "추세", value: "BULL", display_value: "상승"}],
+      variables: [], market: [],
+      confirmations: [{
+        name: "trend_mode", desired: "BEAR", days: 1, required_days: 10,
+        label: "추세", display_desired: "하락 (BEAR)",
+      }],
+    },
+    reason_text: "추세: 상승 (BULL) → 하락 (BEAR)",
+    confirmations: [
+      {name: "trend_mode", desired: "BEAR", days: 1, required_days: 10},
+      {name: "internal_mode", desired: "ON", days: 1, required_days: 2},
+    ],
+    current_weights: {QQQ: 1}, target_weights: {QQQ: 1}, target_deviation: 0,
+    product_names: {QQQ: "QQQ"},
+  });
+
+  assert.match(message, /• 추세: 상승 \(BULL\)/);
+  assert.match(message, /추세 → 하락 \(BEAR\) 1\/10일/);
+  assert.doesNotMatch(message, /trend_mode →/);
+  assert.doesNotMatch(message, /internal_mode/);
 });
 
 test("custom notification DSL supports arbitrary state names and presentation", () => {
