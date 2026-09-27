@@ -95,6 +95,33 @@ test("mapped product alerts distinguish the US signal date and Korean execution 
   assert.match(message, /한국장 시가부터 1일/);
 });
 
+test("warning resolution and status updates have distinct Telegram titles", () => {
+  const app = runtime();
+  const base = "strategy_name: 'QQQ', market_data_at: '2026-09-18', current_weights: {QQQ: 1}, target_weights: {QQQ: 1}";
+  assert.match(app.call(`messageFor_({type: 'RESOLVED', ${base}})`), /\[주의 해제 · 매매 없음\]/);
+  assert.match(app.call(`messageFor_({type: 'UPDATE', ${base}})`), /\[상태 변경 · 매매 없음\]/);
+});
+
+test("multiple alerts from one evaluation run are batched without losing event boundaries", () => {
+  const app = runtime();
+  const event = index => ({
+    type: index ? "REBALANCE" : "PREALERT", strategy_name: `Strategy ${index}`,
+    market_data_at: "2026-09-18", current_weights: {QQQ: 1}, target_weights: {QQQ: 1},
+  });
+  const batches = app.call(`notificationBatches_(${JSON.stringify([event(0), event(1)])})`);
+  assert.equal(batches.length, 1);
+  assert.equal(batches[0].length, 2);
+  const longEvents = [event(0), event(1)].map(item => ({...item, reason_text: "긴 설명".repeat(800)}));
+  const split = app.call(`notificationBatches_(${JSON.stringify(longEvents)})`);
+  assert.equal(split.length, 2);
+});
+
+test("an empty Worker alert list does not revive a suppressed rebalance", () => {
+  const app = runtime();
+  assert.equal(app.call("evaluationAlerts_({alerts: [], rebalance_required: true}).length"), 0);
+  assert.equal(app.call("evaluationAlerts_({rebalance_required: true}).length"), 1);
+});
+
 test("holiday lookup is cached across many strategy evaluations", () => {
   const sharedCache = new Map();
   const app = runtime({sharedCache});
