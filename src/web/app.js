@@ -101,8 +101,9 @@ function parseYaml(text) {
   const raw = text.replace(/\r/g,'').split('\n').map(cleanLine);
   const lines=[];
   for(let i=0;i<raw.length;i++) { if(!raw[i].trim())continue; const indent=raw[i].match(/^ */)[0].length, body=raw[i].trim();
-    if (body.endsWith('>') || body.endsWith('|')) {
-      const key=body.slice(0,-1).trimEnd(), pieces=[]; let contentIndent=null;
+    const blockStyle=body.match(/[>|][+-]?$/);
+    if (blockStyle) {
+      const key=body.slice(0,-blockStyle[0].length).trimEnd(), pieces=[]; let contentIndent=null;
       while(i+1<raw.length) {
         const next=raw[i+1], nextIndent=next.match(/^ */)[0].length;
         if (!next.trim()) { i++; continue; }
