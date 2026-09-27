@@ -448,8 +448,10 @@ function formatSignals_(event) {
   }).join('\n');
   return Object.entries(event.variables || {}).filter(([, value]) => ['number', 'boolean', 'string'].includes(typeof value)).map(([name, value]) => `• ${name}: ${value}`).join('\n');
 }
-function formatConfirmations_(confirmations) {
-  return (confirmations || []).map(item => `${item.name} → ${item.desired} ${item.days}/${item.required_days}일`).join('\n');
+function formatConfirmations_(event) {
+  const configured = event.notification_display?.confirmations;
+  if (Array.isArray(configured)) return configured.map(item => `${item.label || item.name} → ${item.display_desired || item.desired} ${item.days}/${item.required_days}일`).join('\n');
+  return (event.confirmations || []).map(item => `${item.name} → ${item.desired} ${item.days}/${item.required_days}일`).join('\n');
 }
 function formatAllocationTable_(event) {
   const current = event.current_weights || {}, target = event.target_weights || {};
@@ -477,7 +479,7 @@ function messageFor_(event) {
   const signals = formatSignals_(event); if (signals) lines.push('', '[[B]]📊 신호[[/B]]', signals);
   const market = formatConfiguredMarket_(event); if (market) lines.push('', market);
   if (event.reason_text || event.reason) lines.push(`• 판단: ${event.reason_text || event.reason}`);
-  const confirmations = formatConfirmations_(event.confirmations); if (confirmations) lines.push(`확인 진행\n${confirmations}`);
+  const confirmations = formatConfirmations_(event); if (confirmations) lines.push(`확인 진행\n${confirmations}`);
   lines.push(`• 목표 괴리: [[C]]${(Number(event.target_deviation || 0) * 100).toFixed(1)}%p[[/C]]`);
   const allocationStatus = type === 'REBALANCE' ? (event.target_changed ? '목표 변경' : '리밸런싱 예정') : '매매 없음';
   lines.push('', `[[B]]📦 포트폴리오 비중 (${allocationStatus})[[/B]]`, formatAllocationTable_(event));

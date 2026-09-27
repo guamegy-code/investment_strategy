@@ -210,7 +210,7 @@ notifications:
 
     trend_mode:
       label: 추세
-      values: {BULL: 상승, CAUTION: 주의, BEAR: 하락, RECOVERY: 회복}
+      values: {UNINITIALIZED: 초기화 중, BULL: 상승, CAUTION: 주의, BEAR: 하락, RECOVERY: 회복}
       alerts:
       - on: confirmation_started
         to: [BEAR, RECOVERY, BULL]
