@@ -94,6 +94,8 @@ execution:
 | `notifications.prealerts[]` | `when` | 사전주의를 발생시킬 DSL 조건 | 예 |
 | `notifications.prealerts[]` | `reset_when` | 같은 사전주의를 다시 허용할 DSL 조건 | 예 |
 | `notifications.prealerts[]` | `message` | 사전주의에 표시할 설명 | 예 |
+| `notifications.prealerts[]` | `reset_message` | `reset_when` 충족 시 보낼 해제 설명. 생략하면 기존처럼 재무장만 함 | 아니요 |
+| `notifications.states.<name>.alerts[]` | `kind` | `warning`(기본), `update`, `resolved` 중 알림의 성격 | 아니요 |
 | 최상위 | `rotation` | 현금 슬리브만 자동 대체하는 교차자산 선택 규칙 | 아니요 |
 | `rotation` | `replace` | 자동 대체할 안전자산 티커 | 예 |
 | `rotation` | `assets` | 비교할 후보 자산 티커 목록 | 예 |
@@ -444,6 +446,7 @@ notifications:
       when: target_deviation() >= 3%
       reset_when: target_deviation() < 2%
       message: 목표 비중과 현재 비중의 차이가 커졌습니다
+      reset_message: 목표 비중 괴리 주의가 해제되었습니다
 ```
 
 - `schedule`: 상태·시장 지표를 정기적으로 요약해 보내는 주기다. `none`이면 정기 브리핑을
@@ -458,6 +461,9 @@ notifications:
   `위험 국면: NORMAL → DEFENSIVE · 방어 조건이 확인되었습니다`처럼 전환과 설명을 함께
   표시한다. `from`을 생략하면 출발 상태와 관계없이 `to`로 바뀌는 모든 전환에 적용한다.
   구체적인 `from` 규칙과 생략한 규칙이 함께 일치하면 구체적인 규칙을 우선한다.
+- `alerts[].kind`: 매매가 없는 날의 메시지 제목을 구분한다. 기본값 `warning`은
+  `사전주의`, `update`는 `상태 변경`, `resolved`는 `주의 해제`다. 같은 날 여러 규칙이
+  겹치면 경고를 우선하며, 실제 매매가 필요하면 `리밸런싱 예정`으로 합친다.
 - `states.<name>.values`: 내부값을 사람이 읽기 좋은 표시명으로 바꾼다. 예를 들어
   `BULL: 상승`을 설정하면 메시지에는 `추세: 상승 (BULL)`처럼 표시한다. 생략하면 내부값을
   그대로 표시한다. 이 매핑은 현재 상태뿐 아니라 상태 전환, 확인 시작과 확인 진행에도
@@ -492,7 +498,9 @@ states:
   사용할 수 있다.
 - `prealerts`: 기존 DSL 표현식으로 독립적인 사전주의 조건을 만든다. `id`별로 한 번만
   보내고 `reset_when`이 참이 된 뒤에만 다시 보낸다. 임계값의 의미는 전략마다 다르므로
-  알림 DSL에 공통 실행 임계값을 따로 두지 않는다.
+  알림 DSL에 공통 실행 임계값을 따로 두지 않는다. 선택 항목 `reset_message`가 있으면
+  실제 발송된 주의가 `reset_when`으로 해제될 때 한 번 더 알린다. 생략하면 기존처럼
+  해제 알림 없이 재무장한다.
 
 실제 리밸런싱 여부와 실행일수는 각각 `rebalance[].when`과 `execution.days`가 유일하게
 결정한다. 예를 들어 비중 괴리를 쓰지 않고 상태 전환이나 달력만으로 리밸런싱하는 전략도

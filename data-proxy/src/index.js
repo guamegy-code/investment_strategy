@@ -644,7 +644,7 @@ async function notificationEvaluation(request, env) {
     const nextSnapshot = {...result.snapshot, notification: notification.state, notification_context: latestContext};
     if (!preview) await saveNotificationSnapshot(env, definition.strategy.id, nextSnapshot);
     const history = result.history, marketDataAt = nextSnapshot.date || previousSnapshot.date, prior = String(lastDates[definition.strategy.id] || "");
-    const events = history.filter(row => row.target && row.date > prior);
+    const events = history.filter(row => row.target && Number(row.notificationContext?.target_deviation || 0) > 1e-8 && row.date > prior);
     const event = events.at(-1);
     const alertMetadata = {
       strategy_id: definition.strategy.id,

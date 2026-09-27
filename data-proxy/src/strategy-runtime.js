@@ -2,7 +2,7 @@
 // storage, or network dependencies so it can run in a Cloudflare Worker.
 export const TDF2050_PROXY_COMPONENT_WEIGHTS={SPY:.4081,VXUS:.3339,BND:.258};
 
-const scalar=value=>{value=value.trim();if(!value)return null;if((value[0]==='"'&&value.at(-1)==='"')||(value[0]==="'"&&value.at(-1)==="'"))return value.slice(1,-1);if(value==='true')return true;if(value==='false')return false;if(value==='null')return null;if(/^-?\d+(\.\d+)?$/.test(value))return Number(value);if(value[0]==='['&&value.at(-1)===']')return splitInline(value.slice(1,-1)).filter(Boolean).map(scalar);if(value[0]==='{'&&value.at(-1)==='}'){const out={};for(const item of splitInline(value.slice(1,-1))){const at=colonAt(item);out[item.slice(0,at).trim()]=scalar(item.slice(at+1));}return out;}return value;};
+const scalar=value=>{value=value.trim();if(!value)return null;if((value[0]==='"'&&value.at(-1)==='"')||(value[0]==="'"&&value.at(-1)==="'"))return value.slice(1,-1);if(value==='true')return true;if(value==='false')return false;if(value==='null')return null;if(/^-?\d+(\.\d+)?$/.test(value))return Number(value);if(value[0]==='['&&value.at(-1)===']')return splitInline(value.slice(1,-1)).filter(Boolean).map(scalar);if(value[0]==='{'&&value.at(-1)==='}'){const out={};for(const item of splitInline(value.slice(1,-1))){const at=colonAt(item);out[String(scalar(item.slice(0,at)))]=scalar(item.slice(at+1));}return out;}return value;};
 function splitInline(text){let out=[],start=0,depth=0,quote='';for(let i=0;i<text.length;i++){const c=text[i];if(quote){if(c===quote&&text[i-1]!=='\\')quote='';}else if(c==='"'||c==="'")quote=c;else if(c==='['||c==='{')depth++;else if(c===']'||c==='}')depth--;else if(c===','&&depth===0){out.push(text.slice(start,i));start=i+1;}}out.push(text.slice(start));return out;}
 function colonAt(text){let quote='',depth=0;for(let i=0;i<text.length;i++){const c=text[i];if(quote){if(c===quote&&text[i-1]!=='\\')quote='';}else if(c==='"'||c==="'")quote=c;else if(c==='['||c==='{')depth++;else if(c===']'||c==='}')depth--;else if(c===':'&&depth===0)return i;}return-1;}
 function cleanLine(line){let quote='';for(let i=0;i<line.length;i++){const c=line[i];if(quote){if(c===quote&&line[i-1]!=='\\')quote='';}else if(c==='"'||c==="'")quote=c;else if(c==='#')return line.slice(0,i).trimEnd();}return line.trimEnd();}
@@ -252,12 +252,16 @@ function notificationAlertMatches(alert,event,value){
   return String(alert?.on||'changed')===event&&notificationAlertTargets(alert).some(target=>target==='*'||String(target)===String(value));
 }
 
-function transitionExplanation(change,policy){
+function transitionAlertRule(change,policy){
   const configured=policy?.states?.[change.name],alerts=configured?.alerts||[];
   const changed=alerts.filter(item=>notificationAlertMatches(item,'changed',change.current));
   const exact=changed.find(item=>Object.prototype.hasOwnProperty.call(item,'from')&&String(item.from)===String(change.previous));
   const general=changed.find(item=>!Object.prototype.hasOwnProperty.call(item,'from'));
-  const transition=`${configured?.label||change.name}: ${notificationStateValue(configured,change.previous)} → ${notificationStateValue(configured,change.current)}`,message=(exact||general)?.message;
+  return exact||general||null;
+}
+function transitionExplanation(change,policy){
+  const configured=policy?.states?.[change.name];
+  const transition=`${configured?.label||change.name}: ${notificationStateValue(configured,change.previous)} → ${notificationStateValue(configured,change.current)}`,message=transitionAlertRule(change,policy)?.message;
   return message?`${transition} · ${message}`:transition;
 }
 
@@ -288,7 +292,7 @@ function installNotificationContext(StrategyClass){
       reasons.push(declaredReason||`목표 비중 괴리가 실행 기준에 도달 (${(targetDeviation*100).toFixed(1)}%p)`);
     }
     const ctx=this.context(market,portfolio,targetWeights);
-    const prealerts=(policy.prealerts||[]).map(rule=>({id:String(rule.id),message:String(rule.message),matched:Boolean(evaluate(rule.when,ctx)),reset:Boolean(evaluate(rule.reset_when,ctx))}));
+    const prealerts=(policy.prealerts||[]).map(rule=>({id:String(rule.id),message:String(rule.message),reset_message:rule.reset_message?String(rule.reset_message):null,matched:Boolean(evaluate(rule.when,ctx)),reset:Boolean(evaluate(rule.reset_when,ctx))}));
     const notificationContext={
       date,
       state_values:{...(this.state||{})},
@@ -397,24 +401,31 @@ function confirmationExplanation(item,policy){
 }
 
 export function selectNotificationAlerts(history,notificationState={}){
-  let deviationArmed=Boolean(notificationState.deviation_armed),armedRules={...(notificationState.armed_rules||{})},latestContext=refreshNotificationDisplay(notificationState.latest_context||null);
+  let deviationArmed=Boolean(notificationState.deviation_armed),armedRules={...(notificationState.armed_rules||{})},latestContext=refreshNotificationDisplay(notificationState.latest_context||null),warningPending=Boolean(notificationState.warning_pending);
   const alerts=[];
   for(const row of history){
     const context=row.notificationContext||{},deviation=Number(context.target_deviation||0),policy=context.notification_policy;
-    const ruleDetails=[];
-    if(context.prealerts){for(const rule of context.prealerts){if(rule.reset)armedRules[rule.id]=false;if(rule.matched&&!armedRules[rule.id]){ruleDetails.push(rule.message);armedRules[rule.id]=true;}}}
+    const ruleDetails=[],resolvedDetails=[];
+    if(context.prealerts){for(const rule of context.prealerts){if(rule.reset){if(armedRules[rule.id]&&rule.reset_message)resolvedDetails.push(rule.reset_message);armedRules[rule.id]=false;}if(rule.matched&&!armedRules[rule.id]){ruleDetails.push(rule.message);armedRules[rule.id]=true;}}}
     else if(notificationState.deviation_armed!==undefined){deviationArmed=Boolean(notificationState.deviation_armed);}
     const relevantChanges=(context.state_changes||[]).filter(change=>allocationRelevantStateChange(change,policy));
     const confirmationStarts=(context.confirmation_started||[]).filter(item=>criticalConfirmation(item,policy));
     const details=[];
     for(const change of relevantChanges)details.push(transitionExplanation(change,policy));
     for(const item of confirmationStarts)details.push(confirmationExplanation(item,policy));
-    details.push(...ruleDetails);
-    const actionable=Boolean(row.target);
+    details.push(...ruleDetails,...resolvedDetails);
+    // A rule can fire on a state transition even when the desired allocation is
+    // already held.  It is still an event, but not a trade instruction.
+    const actionable=Boolean(row.target)&&deviation>1e-8;
     if(actionable||details.length){
       const reasonDetails=[...(context.reason_details||[]),...details].filter((value,index,items)=>value&&items.indexOf(value)===index);
+      if(actionable&&!warningPending)reasonDetails.push(relevantChanges.length?'상태 변경으로 사전주의 없이 즉시 실행 조건 충족':'비중 괴리가 사전주의 구간을 거치지 않고 실행 조건에 도달');
+      const stateKinds=relevantChanges.map(change=>transitionAlertRule(change,policy)?.kind||'warning');
+      const informational=!ruleDetails.length&&!confirmationStarts.length&&stateKinds.every(kind=>kind==='resolved'||kind==='update');
+      const onlyResolved=informational&&stateKinds.every(kind=>kind==='resolved')&&(resolvedDetails.length>0||stateKinds.length>0);
+      const type=actionable?'REBALANCE':onlyResolved?'RESOLVED':informational?'UPDATE':'PREALERT';
       alerts.push({
-        type:actionable?'REBALANCE':'PREALERT',
+        type,
         market_data_at:row.date,
         state_values:{...(context.state_values||{})},
         state_changes:context.state_changes||[],
@@ -436,9 +447,10 @@ export function selectNotificationAlerts(history,notificationState={}){
         source_current_weights:context.source_current_weights||null,
         source_target_weights:context.source_target_weights||null,
       });
+      warningPending=type==='PREALERT';
     }
     latestContext=refreshNotificationDisplay(context);
   }
-  return{alerts,state:{deviation_armed:deviationArmed,armed_rules:armedRules,latest_context:latestContext}};
+  return{alerts,state:{deviation_armed:deviationArmed,armed_rules:armedRules,latest_context:latestContext,warning_pending:warningPending}};
 }
 export function buildTdf2050Proxy(components){const tickers=Object.keys(TDF2050_PROXY_COMPONENT_WEIGHTS),maps=Object.fromEntries(tickers.map(t=>[t,new Map(components[t].map(row=>[row.Date,row]))])),dates=[...maps[tickers[0]].keys()].filter(date=>tickers.every(t=>maps[t].has(date))).sort(),weights={...TDF2050_PROXY_COMPONENT_WEIGHTS},target={...weights},out=[];let previous=null,value=100,month='';for(let i=1;i<dates.length;i++){const date=dates[i],market=Object.fromEntries(tickers.map(t=>[t,maps[t].get(dates[i-1])])),nextMonth=date.slice(0,7);if(!previous){out.push({Date:date,Open:100,High:100,Low:100,Close:100,Volume:0});previous=market;month=nextMonth;continue;}if(month!==nextMonth)Object.assign(weights,target);const price=field=>value*tickers.reduce((sum,t)=>sum+weights[t]*Number(market[t][field])/Number(previous[t].Close),0),open=price('Open'),close=price('Close');out.push({Date:date,Open:open,High:Math.max(price('High'),open,close),Low:Math.min(price('Low'),open,close),Close:close,Volume:0});const contributions=Object.fromEntries(tickers.map(t=>[t,weights[t]*Number(market[t].Close)/Number(previous[t].Close)])),total=Object.values(contributions).reduce((a,b)=>a+b,0);for(const t of tickers)weights[t]=contributions[t]/total;previous=market;value=close;month=nextMonth;}return addIndicators(out);}

@@ -67,11 +67,10 @@ function runNotificationCheck() {
       return;
     }
     const evaluations = requestEvaluations_(subscriptions);
-    let sent = 0;
+    const pendingAlerts = [];
     evaluations.forEach(evaluation => {
       updateSubscription_(evaluation);
-      let alerts = Array.isArray(evaluation.alerts) ? evaluation.alerts.slice() : [];
-      if (!alerts.length && evaluation.rebalance_required) alerts.push({...evaluation, type: 'REBALANCE'});
+      let alerts = evaluationAlerts_(evaluation);
       alerts = alerts.filter(alert => !eventAlreadySent_(eventKey_(alert)));
       const summary = scheduledSummaryDue_(evaluation.scheduled_summary, now);
       if (summary && !eventAlreadySent_(eventKey_(summary))) {
@@ -85,19 +84,47 @@ function runNotificationCheck() {
       }
       alerts.forEach(alert => {
         const datedAlert = {...alert, execution_market_date: kstDateKey_(now)};
-        sendTelegram_(messageFor_(datedAlert));
-        recordEvent_(datedAlert, 'SENT');
-        if (datedAlert.coalesced_summary) recordEvent_(datedAlert.coalesced_summary, 'COALESCED');
-        sent++;
+        pendingAlerts.push(datedAlert);
       });
     });
-    logRun_(subscriptions.length, sent, 'SUCCESS', '');
+    pendingAlerts.sort((left, right) => String(left.market_data_at).localeCompare(String(right.market_data_at)));
+    notificationBatches_(pendingAlerts).forEach(batch => {
+      sendTelegram_(batch.map(event => messageFor_(event)).join('\n\n────────\n\n'));
+      batch.forEach(event => {
+        recordEvent_(event, 'SENT');
+        if (event.coalesced_summary) recordEvent_(event.coalesced_summary, 'COALESCED');
+      });
+    });
+    logRun_(subscriptions.length, pendingAlerts.length, 'SUCCESS', '');
   } catch (error) {
     logRun_(0, 0, 'FAILED', error.message || String(error));
     throw error;
   } finally {
     lock.releaseLock();
   }
+}
+
+function evaluationAlerts_(evaluation) {
+  if (Array.isArray(evaluation.alerts)) return evaluation.alerts.slice();
+  return evaluation.rebalance_required ? [{...evaluation, type: 'REBALANCE'}] : [];
+}
+
+function notificationBatches_(events) {
+  const batches = [];
+  let batch = [], length = 0;
+  events.forEach(event => {
+    const nextLength = messageFor_(event).length + (batch.length ? 6 : 0);
+    // Leave room for Telegram HTML entities added by sendTelegram_.
+    if (batch.length && length + nextLength > 3500) {
+      batches.push(batch);
+      batch = [];
+      length = 0;
+    }
+    batch.push(event);
+    length += messageFor_(event).length + (batch.length > 1 ? 6 : 0);
+  });
+  if (batch.length) batches.push(batch);
+  return batches;
 }
 
 function sendTestMessage() {
@@ -482,7 +509,7 @@ function telegramHtml_(text) {
 function messageFor_(event) {
   const type = event.type || 'REBALANCE';
   const summaryTitles = {daily: '[일간 시장 브리핑]', weekly: '[주간 시장 브리핑]', monthly: '[월간 시장 브리핑]'};
-  const titles = {REBALANCE: '[리밸런싱 예정]', PREALERT: '[사전주의 · 매매 없음]', SUMMARY: summaryTitles[event.summary_schedule] || summaryTitles.weekly};
+  const titles = {REBALANCE: '[리밸런싱 예정]', PREALERT: '[사전주의 · 매매 없음]', RESOLVED: '[주의 해제 · 매매 없음]', UPDATE: '[상태 변경 · 매매 없음]', SUMMARY: summaryTitles[event.summary_schedule] || summaryTitles.weekly};
   const marketDateLabel = event.mapped_products ? '미국 신호 기준일' : '시장 기준일';
   const lines = [titles[type] || '[투자 전략 알림]', '', `[[B]]${event.strategy_name}[[/B]]`, `${marketDateLabel}: ${event.market_data_at}`];
   if (event.schedule_disabled) lines.push('정기 브리핑: none 설정 — 테스트로만 전송');

@@ -314,6 +314,7 @@ notifications:
           to: 'TRUE'
         - on: changed
           to: 'FALSE'
+          kind: resolved
     deep_guard:
       label: 심화 방어
       values: {'FALSE': 정상, 'TRUE': 재매수 제한}
@@ -322,12 +323,18 @@ notifications:
           to: 'TRUE'
         - on: changed
           to: 'FALSE'
+          kind: resolved
     stage:
       label: 하락 매수 단계
       values: {0: 대기, 1: 1단계, 2: 2단계, 3: 3단계}
       alerts:
         - on: changed
           to: [1, 2, 3]
+          kind: update
+        - on: changed
+          to: 0
+          kind: resolved
+          message: 하락 매수 단계 종료
     structural_bear_mode:
       label: 구조적 약세
       values: {'FALSE': 정상, 'TRUE': 감지}
@@ -335,6 +342,10 @@ notifications:
         - on: changed
           from: 'FALSE'
           to: 'TRUE'
+        - on: changed
+          to: 'FALSE'
+          kind: resolved
+          message: 구조적 약세 해제
     trend_mode:
       label: 추세
       values: {UNINITIALIZED: 초기화 중, BULL: 상승, CAUTION: 주의, BEAR: 하락, RECOVERY: 회복}
@@ -348,6 +359,10 @@ notifications:
           from: BEAR
           to: RECOVERY
           message: 반등 조건이 확인됨
+        - on: changed
+          to: BULL
+          kind: resolved
+          message: 상승 추세 확인 완료
     defense_mode:
       label: 밸류에이션
       values: {NORMAL: 정상, WARNING: 경고, DEFENSE: 방어}
@@ -364,10 +379,12 @@ notifications:
         - on: changed
           from: WARNING
           to: NORMAL
+          kind: resolved
           message: 밸류에이션 점수가 회복되어 경고 해제
         - on: changed
           from: DEFENSE
           to: NORMAL
+          kind: resolved
           message: 가격 회복 조건이 확인되어 방어 종료
   variables:
     risk_off_score: {label: 약세, max: 6, display: bar}
@@ -383,12 +400,14 @@ notifications:
       when: weight_deviation('QQQ') <= -3%
       reset_when: weight_deviation('QQQ') > -2%
       message: QQQ 비중이 목표보다 3.0%p 이상 낮음 (매수 기준 -4.0%p)
+      reset_message: QQQ 비중 부족 주의 해제
     - id: target-deviation
       when: >
         target_deviation() >= 5%
         and target_deviation() < 7.5%
       reset_when: target_deviation() < 4%
       message: 목표 비중 괴리가 실행 기준에 접근 (5.0%p 이상 / 실행 7.5%p)
+      reset_message: 목표 비중 괴리 주의 해제
 
 rebalance:
   - check: daily
