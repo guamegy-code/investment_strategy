@@ -177,6 +177,20 @@ def rotation_market(*, shy_eligible=True, kospi_eligible=False):
 
 
 class DeclarativeStrategyTests(unittest.TestCase):
+    def test_target_clamps_floating_point_negative_zero_only(self):
+        tiny = DeclarativeStrategy(definition(target=[{
+            "weights": {"QQQ": -1e-14, "BND": 1.00000000000001},
+        }]))
+        target = tiny._target_weights(market(), PortfolioStub())
+        self.assertEqual(target["QQQ"], 0.0)
+        self.assertAlmostEqual(target["BND"], 1.0)
+
+        material = DeclarativeStrategy(definition(target=[{
+            "weights": {"QQQ": -1e-4, "BND": 1.0001},
+        }]))
+        with self.assertRaisesRegex(StrategyDefinitionError, "non-negative"):
+            material._target_weights(market(), PortfolioStub())
+
     def test_confirmation_started_alert_uses_nested_state_rule(self):
         strategy = DeclarativeStrategy(definition(
             state={
@@ -281,6 +295,7 @@ class DeclarativeStrategyTests(unittest.TestCase):
                     "when": "target_deviation() >= 5%",
                     "reset_when": "target_deviation() < 4%",
                     "message": "목표 비중 괴리 접근",
+                    "reset_message": "목표 비중 괴리 해제",
                 }],
             },
         ))
@@ -298,6 +313,28 @@ class DeclarativeStrategyTests(unittest.TestCase):
         }])
         self.assertTrue(context["prealerts"][0]["matched"])
         self.assertFalse(context["prealerts"][0]["reset"])
+        self.assertEqual(context["prealerts"][0]["reset_message"], "목표 비중 괴리 해제")
+
+    def test_notification_kind_and_reset_message_used_by_30_31(self):
+        for filename in (
+            "30_qqq_valuation_credit_guard_no_topup.yaml",
+            "31_band_7030_tdf_valuation_credit_guard_no_topup.yaml",
+        ):
+            from strategy_dsl import load_strategy_definition
+
+            loaded = load_strategy_definition(PROJECT_ROOT / "strategies" / filename)
+            self.assertEqual(
+                loaded["notifications"]["states"]["credit_guard"]["alerts"][1]["kind"],
+                "resolved",
+            )
+            self.assertTrue(loaded["notifications"]["prealerts"][0]["reset_message"])
+        with self.assertRaises(StrategyDefinitionError):
+            DeclarativeStrategy(definition(
+                state={"mode": {"initial": "NORMAL", "rules": []}},
+                notifications={"states": {"mode": {"alerts": [
+                    {"to": "NORMAL", "kind": "unknown"},
+                ]}}},
+            ))
 
     def test_weight_deviation_triggers_a_directional_underweight_rebalance(self):
         strategy = DeclarativeStrategy(definition(

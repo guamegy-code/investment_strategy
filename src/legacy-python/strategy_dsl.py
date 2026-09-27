@@ -746,7 +746,11 @@ def _validate_definition(raw: Any, source: str) -> dict[str, Any]:
                     raise StrategyDefinitionError(f"notifications.states.{name}.alerts must be a list")
                 for index, alert in enumerate(alerts):
                     alert = _require_mapping(alert, f"notifications.states.{name}.alerts[{index}]")
-                    _reject_unknown(alert, {"on", "from", "to", "message"}, f"notifications.states.{name}.alerts[{index}]")
+                    _reject_unknown(alert, {"on", "from", "to", "message", "kind"}, f"notifications.states.{name}.alerts[{index}]")
+                    if "kind" in alert and alert["kind"] not in {"warning", "resolved", "update"}:
+                        raise StrategyDefinitionError(
+                            f"notifications.states.{name}.alerts[{index}].kind is invalid"
+                        )
                     if "to" not in alert:
                         raise StrategyDefinitionError(f"notifications.states.{name}.alerts[{index}].to is required")
                     event = str(alert.get("on", "changed"))
@@ -783,10 +787,14 @@ def _validate_definition(raw: Any, source: str) -> dict[str, Any]:
     ids = set()
     for index, item in enumerate(prealerts):
         item = _require_mapping(item, f"notifications.prealerts[{index}]")
-        _reject_unknown(item, {"id", "when", "reset_when", "message"}, f"notifications.prealerts[{index}]")
+        _reject_unknown(item, {"id", "when", "reset_when", "message", "reset_message"}, f"notifications.prealerts[{index}]")
         for field in ("id", "when", "reset_when", "message"):
             if not str(item.get(field, "")).strip():
                 raise StrategyDefinitionError(f"notifications.prealerts[{index}].{field} is required")
+        if "reset_message" in item and not str(item["reset_message"]).strip():
+            raise StrategyDefinitionError(
+                f"notifications.prealerts[{index}].reset_message must not be empty"
+            )
         if item["id"] in ids:
             raise StrategyDefinitionError("notifications.prealerts ids must be unique")
         ids.add(item["id"])
@@ -1063,8 +1071,9 @@ class DeclarativeStrategy:
         # receive an explicit 0% liquidation target.
         for ticker in self.rotation_candidate_tickers:
             target.setdefault(ticker, 0.0)
-        if any(weight < 0.0 for weight in target.values()):
+        if any(weight < -1e-12 for weight in target.values()):
             raise StrategyDefinitionError("target weights must be non-negative")
+        target = {ticker: max(0.0, weight) for ticker, weight in target.items()}
         if abs(sum(target.values()) - 1.0) > 1e-8:
             raise StrategyDefinitionError("target weights must sum to 100%")
         return target
@@ -1582,6 +1591,7 @@ class DeclarativeStrategy:
                 {
                     "id": str(rule["id"]),
                     "message": str(rule["message"]),
+                    "reset_message": str(rule["reset_message"]) if rule.get("reset_message") else None,
                     "matched": bool(evaluator.evaluate(rule["when"])),
                     "reset": bool(evaluator.evaluate(rule["reset_when"])),
                 }
