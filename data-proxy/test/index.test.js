@@ -670,6 +670,13 @@ test("notification context emits selected prealerts and a detailed rebalance", (
     name: "defense_mode", desired: "DEFENSE", days: 1, required_days: 2,
     label: "방어 상태", display_desired: "방어 (DEFENSE)",
   }]);
+  const staleContext = structuredClone(result.history[1].notificationContext);
+  delete staleContext.notification_display.confirmations;
+  const refreshed = selectNotificationAlerts([], {latest_context: staleContext});
+  assert.deepEqual(refreshed.state.latest_context.notification_display.confirmations, [{
+    name: "defense_mode", desired: "DEFENSE", days: 1, required_days: 2,
+    label: "방어 상태", display_desired: "방어 (DEFENSE)",
+  }]);
   assert.deepEqual(selected.alerts[2].target_weights, {QQQ: .3, BIL: .7});
   assert.deepEqual(selected.alerts[2].previous_target_weights, {QQQ: 1, BIL: 0});
   assert.equal(selected.alerts[2].target_changed, true);
