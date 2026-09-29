@@ -1,0 +1,550 @@
+strategy:
+  id: qqq-valuation-financial-credit-guard-no-topup
+  name: QQQ Financial Credit Guard No Top-up (32) [BIL]
+  version: 1
+  dsl_version: 1
+  enabled: true
+
+# 평상시에는 QQQ 100%를 유지한다. 밸류에이션 경고에서는 BIL 30%를 확보하고,
+# 이후 고점 대비 -10% 하락하면 완충 자금을 QQQ에 재투입한다.
+# 상대약세와 신용 악화가 확인되면 방어 비중을 높인다. 심화 방어가 지속되는 동안에는
+# 가격 하락으로 줄어든 QQQ 비중을 다시 채우지 않는다.
+# 하락 추세·구조적 약세·밸류에이션 방어는 하락 매수보다 우선한다.
+assets:
+  required: [QQQ, BIL]
+  observations: [SPY, BAA10Y, XLF]
+  risk: [QQQ]
+
+parameters:
+  # drop_*는 추적 고점 대비 하락률이다. 각각 하락 매수 1·2·3단계의 진입선이다.
+  drop_b: -0.10
+  drop_c: -0.20
+  drop_d: -0.325
+  # 복귀선은 진입선과 다르게 두어 경계 부근에서 단계가 반복 전환되지 않게 한다.
+  # 3→2: -17.5%, 2→1: -8.5%, 1→0: 이전 고점보다 7.5% 높은 가격.
+  recovery_stage_1: 0.075
+  recovery_stage_2: -0.085
+  recovery_stage_3: -0.175
+  # 밸류에이션 점수가 65점 이상이었던 뒤 고점에서 25점 이상 하락하면 경고한다.
+  valuation_arm_score: 65
+  valuation_breakdown_points: 25
+
+variables:
+  # 가격/이평선 관계 3개, 5·20일 수익률, EMA20 기울기 중 약세 조건의 수(0~6).
+  risk_off_score: >
+    count(
+      QQQ.close < QQQ.ema20,
+      QQQ.close < QQQ.ema55,
+      QQQ.ema20 < QQQ.ema55,
+      QQQ.roc5 < 0,
+      QQQ.roc20 < 0,
+      QQQ.ema20_slope5 < 0
+    )
+  # 위 여섯 조건을 상승 방향으로 검사한 회복 조건의 수(0~6).
+  recovery_score: >
+    count(
+      QQQ.close > QQQ.ema20,
+      QQQ.close > QQQ.ema55,
+      QQQ.ema20 > QQQ.ema55,
+      QQQ.roc5 > 0,
+      QQQ.roc20 > 0,
+      QQQ.ema20_slope5 > 0
+    )
+  # 약세 조건 5개 이상에 단·중·장기 이평선 역배열, 60일 하락과
+  # 장기 이평선 하향 기울기가 함께 있어야 구조적 약세로 판단한다.
+  structural_bear: >
+    variables.risk_off_score >= 5
+    and QQQ.close < QQQ.ema20
+    and QQQ.ema20 < QQQ.ema55
+    and QQQ.ema55 < QQQ.ema200
+    and QQQ.roc60 < 0
+    and QQQ.ema200_slope20 < 0
+  # 회복 중 상승 추세로 돌아갈 때는 EMA55 회복과 60일 수익률 플러스를 함께 요구한다.
+  bull_reentry_allowed: >
+    QQQ.close > QQQ.ema55
+    and QQQ.roc60 > 0
+
+  # 단순 수익률의 차이가 아니라 QQQ의 누적 수익 배율을 SPY의 배율로 나눈
+  # 상대수익률(%). 음수면 해당 기간 QQQ가 SPY보다 부진했다는 뜻이다.
+  relative_roc20: >
+    (1 + QQQ.roc20 / 100) / (1 + SPY.roc20 / 100) * 100 - 100
+  relative_roc60: >
+    (1 + QQQ.roc60 / 100) / (1 + SPY.roc60 / 100) * 100 - 100
+  # BAA10Y의 20일 전 값은 현재 값과 ROC20으로 복원한다. 두 값의 차이는
+  # 최근 20거래일 신용스프레드 확대 폭(%p)이다. 지연 반영된 관측값을 사용한다.
+  credit_change20: >
+    BAA10Y.close - BAA10Y.close / (1 + BAA10Y.roc20 / 100)
+
+  # 금융주 ETF의 SPY 대비 20거래일 상대수익률(%).
+  financial_relative_roc20: >
+    (1 + XLF.roc20 / 100) / (1 + SPY.roc20 / 100) * 100 - 100
+  financial_baa_mild: >
+    BAA10Y.close >= 1.8 and variables.credit_change20 >= 0.20
+
+state:
+  # 매일 금융주 약세를 11칸 뒤로 민다. lag6~lag11은 오늘보다 5~10거래일
+  # 앞선 관측값이다. 역순으로 갱신하여 이전 칸의 같은 날 값이 보존된다.
+  financial_weak_lag11:
+    initial: 0
+    rules:
+      - otherwise: true
+        set: "=state.financial_weak_lag10"
+  financial_weak_lag10:
+    initial: 0
+    rules:
+      - otherwise: true
+        set: "=state.financial_weak_lag9"
+  financial_weak_lag9:
+    initial: 0
+    rules:
+      - otherwise: true
+        set: "=state.financial_weak_lag8"
+  financial_weak_lag8:
+    initial: 0
+    rules:
+      - otherwise: true
+        set: "=state.financial_weak_lag7"
+  financial_weak_lag7:
+    initial: 0
+    rules:
+      - otherwise: true
+        set: "=state.financial_weak_lag6"
+  financial_weak_lag6:
+    initial: 0
+    rules:
+      - otherwise: true
+        set: "=state.financial_weak_lag5"
+  financial_weak_lag5:
+    initial: 0
+    rules:
+      - otherwise: true
+        set: "=state.financial_weak_lag4"
+  financial_weak_lag4:
+    initial: 0
+    rules:
+      - otherwise: true
+        set: "=state.financial_weak_lag3"
+  financial_weak_lag3:
+    initial: 0
+    rules:
+      - otherwise: true
+        set: "=state.financial_weak_lag2"
+  financial_weak_lag2:
+    initial: 0
+    rules:
+      - otherwise: true
+        set: "=state.financial_weak_lag1"
+  financial_weak_lag1:
+    initial: 0
+    rules:
+      - otherwise: true
+        set: "=count(variables.financial_relative_roc20 <= -8)"
+
+  # BAA 약한 경고가 새로 시작할 때만 선행 금융주 약세를 조회한다.
+  financial_guard:
+    initial: 'FALSE'
+    rules:
+      - when: >
+          state.financial_guard == 'FALSE'
+          and state.financial_baa_mild_previous == 0
+          and variables.financial_baa_mild
+          and (
+            state.financial_weak_lag6 == 1
+            or state.financial_weak_lag7 == 1
+            or state.financial_weak_lag8 == 1
+            or state.financial_weak_lag9 == 1
+            or state.financial_weak_lag10 == 1
+            or state.financial_weak_lag11 == 1
+          )
+        set: 'TRUE'
+      - when: >
+          state.financial_guard == 'TRUE'
+          and variables.financial_relative_roc20 > -2
+          and variables.credit_change20 <= 0
+          and SPY.close > SPY.ema55
+        set: 'FALSE'
+        confirm: 5
+
+  financial_baa_mild_previous:
+    initial: 0
+    rules:
+      - otherwise: true
+        set: "=count(variables.financial_baa_mild)"
+
+  # -5% 상대약세가 발생한 날을 0으로 두고 하루씩 늘린다.
+  # 값이 20 미만이면 최근 20거래일 안에 상대약세가 있었다는 뜻이다.
+  relative_weak_age:
+    initial: 20
+    rules:
+      - when: variables.relative_roc20 <= -5
+        set: 0
+      - when: state.relative_weak_age < 20
+        set: "=state.relative_weak_age + 1"
+
+  # 최근 상대약세, 스프레드 2%p 이상, 20일 확대 폭 0.30%p 이상이
+  # 동시에 충족되면 1차 방어를 켠다. 가격·상대강도 회복과 신용스프레드 3.0%p 미만을 5일 확인 후 해제한다.
+  credit_guard:
+    initial: 'FALSE'
+    rules:
+      - when: >
+          state.credit_guard == 'FALSE'
+          and state.relative_weak_age < 20
+          and BAA10Y.close >= 2
+          and variables.credit_change20 >= 0.30
+        set: 'TRUE'
+      - when: >
+          state.credit_guard == 'TRUE'
+          and QQQ.close > QQQ.ema200
+          and QQQ.ema55 > QQQ.ema200 * 0.97
+          and variables.relative_roc60 > 0
+          and SPY.close > SPY.ema200
+          and BAA10Y.close < 3.0
+        set: 'FALSE'
+        confirm: 5
+
+  # 1차 방어 중 QQQ의 20일 상대수익률이 -10% 이하이면 심화 방어를 켠다.
+  # 해제에는 10일 가격 회복과 신용스프레드 정상화 또는 고점 대비 0.50%p 축소가 필요하다.
+  deep_guard:
+    initial: 'FALSE'
+    rules:
+      - when: >
+          state.deep_guard == 'FALSE'
+          and state.credit_guard == 'TRUE'
+          and variables.relative_roc20 <= -10
+        set: 'TRUE'
+      - when: >
+          state.deep_guard == 'TRUE'
+          and QQQ.close > QQQ.ema200
+          and QQQ.ema55 > QQQ.ema200
+          and variables.relative_roc60 > 0
+          and SPY.close > SPY.ema200
+          and (BAA10Y.close < 2 or state.deep_credit_peak - BAA10Y.close >= 0.50)
+        set: 'FALSE'
+        confirm: 10
+
+  # 심화 방어 시작 뒤 신용스프레드의 최고값을 기억해 해제 시 축소 폭을 계산한다.
+  deep_credit_peak:
+    initial: 0
+    rules:
+      - when: changed(state.deep_guard) and state.deep_guard == 'TRUE'
+        set: "=BAA10Y.close"
+      - when: state.deep_guard == 'TRUE' and BAA10Y.close > state.deep_credit_peak
+        set: "=BAA10Y.close"
+
+  stage:
+    initial: 0
+    rules:
+      # 3단계에서 이전 고점 대비 -17.5%까지 회복하면 2단계로 낮춘다.
+      - when: >
+          state.stage == 3
+          and state.peak_price > 0
+          and QQQ.close >= state.peak_price * (1 + parameters.recovery_stage_3)
+        set: 2
+      # 2단계에서 -32.5%까지 추가 하락하면 3단계로 올린다.
+      - when: >
+          state.stage == 2
+          and state.peak_price > 0
+          and QQQ.close <= state.peak_price * (1 + parameters.drop_d)
+        set: 3
+      # 2단계에서 -8.5%까지 회복하면 1단계로 낮춘다.
+      - when: >
+          state.stage == 2
+          and state.peak_price > 0
+          and QQQ.close >= state.peak_price * (1 + parameters.recovery_stage_2)
+        set: 1
+      # 1단계에서 -20%까지 추가 하락하면 2단계로 올린다.
+      - when: >
+          state.stage == 1
+          and state.peak_price > 0
+          and QQQ.close <= state.peak_price * (1 + parameters.drop_c)
+        set: 2
+      # 이전 고점을 7.5% 돌파해야 하락 매수 사이클을 완전히 종료한다.
+      - when: >
+          state.stage == 1
+          and state.peak_price > 0
+          and QQQ.close >= state.peak_price * (1 + parameters.recovery_stage_1)
+        set: 0
+      # 추적 고점 대비 -10%가 되면 첫 하락 매수 단계에 진입한다.
+      - when: >
+          state.stage == 0
+          and state.peak_price > 0
+          and QQQ.close <= state.peak_price * (1 + parameters.drop_b)
+        set: 1
+
+  # 하락 매수 단계의 기준 고점. 대기(0) 중에만 신고가를 반영한다.
+  peak_price:
+    initial: 0
+    rules:
+      # 0단계에서만 신고가를 따라가며, 사이클 종료 시 기준 고점을 새로 잡는다.
+      - when: state.peak_price == 0
+        set: "=QQQ.close"
+      - when: changed(state.stage) and state.stage == 0
+        set: "=QQQ.close"
+      - when: state.stage == 0 and QQQ.close > state.peak_price
+        set: "=QQQ.close"
+
+  defense_mode:
+    initial: NORMAL
+    rules:
+      # 밸류에이션 붕괴와 6개 약세 조건이 동시에 충족되면 즉시 DEFENSE로 간다.
+      - when: >
+          state.defense_mode == 'NORMAL'
+          and state.valuation_peak >= parameters.valuation_arm_score
+          and QQQ.valuation_score <= state.valuation_peak - parameters.valuation_breakdown_points
+          and variables.risk_off_score >= 6
+        set: DEFENSE
+      # 고평가 이후 밸류에이션 점수가 25점 이상 꺾이면 먼저 WARNING을 건다.
+      - when: >
+          state.defense_mode == 'NORMAL'
+          and state.valuation_peak >= parameters.valuation_arm_score
+          and QQQ.valuation_score <= state.valuation_peak - parameters.valuation_breakdown_points
+        set: WARNING
+      # 밸류에이션이 기존 고점까지 회복하면 WARNING을 해제한다.
+      - when: >
+          state.defense_mode == 'WARNING'
+          and QQQ.valuation_score >= state.valuation_peak
+        set: NORMAL
+      # WARNING에서 약세 조건 4개 이상이 6거래일 지속되면 DEFENSE로 강화한다.
+      - when: >
+          state.defense_mode == 'WARNING'
+          and variables.risk_off_score >= 4
+        set: DEFENSE
+        confirm: 6
+      # DEFENSE 해제는 회복 조건과 EMA20 회복이 2거래일 확인돼야 한다.
+      - when: >
+          state.defense_mode == 'DEFENSE'
+          and variables.recovery_score >= 4
+          and QQQ.close > QQQ.ema20
+        set: NORMAL
+        confirm: 2
+
+  # 정상 상태의 밸류에이션 최고점을 저장해 경고 진입과 해제 기준으로 사용한다.
+  valuation_peak:
+    initial: 0
+    rules:
+      - when: state.valuation_peak == 0
+        set: "=QQQ.valuation_score"
+      - when: changed(state.defense_mode) and state.defense_mode == 'NORMAL'
+        set: "=QQQ.valuation_score"
+      - when: >
+          state.defense_mode == 'NORMAL'
+          and QQQ.valuation_score > state.valuation_peak
+        set: "=QQQ.valuation_score"
+
+  # 장기 추세는 약세 진입 10일, 회복·상승 복귀 3일의 연속 확인을 사용한다.
+  # CAUTION은 QQQ와 SPY의 단기 동반 약세를 나타내며 방어 목표보다 후순위다.
+  trend_mode:
+    initial: UNINITIALIZED
+    rules:
+      - when: state.trend_mode == 'UNINITIALIZED' and variables.structural_bear
+        set: BEAR
+      - when: state.trend_mode == 'UNINITIALIZED' and variables.risk_off_score >= 5
+        set: CAUTION
+      - when: state.trend_mode == 'UNINITIALIZED'
+        set: BULL
+      - when: state.trend_mode == 'BULL' and variables.structural_bear
+        set: BEAR
+        confirm: 10
+      - when: >
+          state.trend_mode == 'BULL'
+          and QQQ.close < QQQ.ema20
+          and variables.risk_off_score >= 3
+          and SPY.close < SPY.ema20
+          and SPY.roc5 <= -1
+        set: CAUTION
+        confirm: 1
+      - when: state.trend_mode == 'CAUTION' and variables.structural_bear
+        set: BEAR
+        confirm: 10
+      - when: state.trend_mode == 'CAUTION' and variables.recovery_score >= 4
+        set: BULL
+        confirm: 3
+      - when: state.trend_mode == 'BEAR' and variables.recovery_score >= 3
+        set: RECOVERY
+        confirm: 3
+      - when: state.trend_mode == 'RECOVERY' and variables.structural_bear
+        set: BEAR
+        confirm: 10
+      - when: >
+          state.trend_mode == 'RECOVERY'
+          and variables.recovery_score >= 4
+          and variables.bull_reentry_allowed
+        set: BULL
+        confirm: 3
+      - when: state.trend_mode == 'RECOVERY' and variables.risk_off_score >= 5
+        set: CAUTION
+        confirm: 3
+
+  # 장기 약세 조건의 현재 충족 여부. 추세의 10일 확인과 별도로 즉시 갱신된다.
+  structural_bear_mode:
+    initial: 'FALSE'
+    rules:
+      - when: >
+          state.structural_bear_mode == 'FALSE'
+          and variables.structural_bear
+        set: 'TRUE'
+      - when: >
+          state.structural_bear_mode == 'TRUE'
+          and not variables.structural_bear
+        set: 'FALSE'
+
+target:
+  # 아래 규칙은 위에서부터 먼저 맞는 하나를 적용한다.
+  # 따라서 BEAR·DEFENSE·구조적 약세·RECOVERY가 하락 매수보다 우선한다.
+  - when: state.trend_mode == 'BEAR'
+    weights: {QQQ: 0%, BIL: 100%}
+  # 심화 방어 진입일은 즉시 20%로 축소한다. 이후 가격 하락으로
+  # 실제 QQQ 비중이 20% 아래로 내려가면 min(20%, 현재 비중)을 목표로 삼아
+  # QQQ를 다시 사지 않는다. BIL은 남은 100%를 차지한다. 해제 뒤에는 기존 목표로 복귀한다.
+  - when: state.deep_guard == 'TRUE' and previous(state.deep_guard) == 'TRUE'
+    weights:
+      QQQ: "min(20%, portfolio.weight.QQQ)"
+      BIL: "1 - min(20%, portfolio.weight.QQQ)"
+  - when: state.deep_guard == 'TRUE'
+    weights: {QQQ: 20%, BIL: 80%}
+  - when: state.defense_mode == 'DEFENSE'
+    weights: {QQQ: 30%, BIL: 70%}
+  # 금융주 약세가 먼저 관측된 새 신용 경고에만 별도 방어를 적용한다.
+  - when: state.financial_guard == 'TRUE'
+    weights: {QQQ: 35%, BIL: 65%}
+  - when: state.structural_bear_mode == 'TRUE'
+    weights: {QQQ: 50%, BIL: 50%}
+  # 앞선 방어 규칙이 더 낮은 QQQ 비중을 요구하면 그 목표를 우선한다.
+  - when: state.credit_guard == 'TRUE'
+    weights: {QQQ: 50%, BIL: 50%}
+  - when: state.trend_mode == 'RECOVERY'
+    weights: {QQQ: 80%, BIL: 20%}
+  # -10%에 진입한 뒤에는 추가 하락 단계가 바뀌어도 QQQ 100%를 유지한다.
+  - when: state.stage == 3
+    weights: {QQQ: 100%, BIL: 0%}
+  - when: state.stage == 2
+    weights: {QQQ: 100%, BIL: 0%}
+  - when: state.stage == 1
+    weights: {QQQ: 100%, BIL: 0%}
+  # 하락 매수 단계가 아니면 WARNING에서만 BIL 30%를 확보한다.
+  - when: state.defense_mode == 'WARNING'
+    weights: {QQQ: 70%, BIL: 30%}
+  - weights: {QQQ: 100%, BIL: 0%}
+
+notifications:
+  # 아래 label·message는 실제 사용자 알림에 사용된다. 주석은 전송되지 않는다.
+  schedule: weekly
+  states:
+    financial_guard:
+      label: 금융주 선행·신용 경보
+      values: {'FALSE': 정상, 'TRUE': 금융 방어}
+      alerts:
+        - on: changed
+          to: 'TRUE'
+        - on: changed
+          to: 'FALSE'
+          kind: resolved
+    credit_guard:
+      label: 상대약세·신용 경보
+      values: {'FALSE': 정상, 'TRUE': 1차 방어}
+      alerts:
+        - on: changed
+          to: 'TRUE'
+        - on: changed
+          to: 'FALSE'
+          kind: resolved
+    deep_guard:
+      label: 심화 방어
+      values: {'FALSE': 정상, 'TRUE': 재매수 제한}
+      alerts:
+        - on: changed
+          to: 'TRUE'
+        - on: changed
+          to: 'FALSE'
+          kind: resolved
+    stage:
+      label: 하락 매수 단계
+      values: {0: 대기, 1: 1단계, 2: 2단계, 3: 3단계}
+      alerts:
+        - on: changed
+          to: [1, 2, 3]
+          kind: update
+        - on: changed
+          to: 0
+          kind: resolved
+          message: 하락 매수 단계 종료
+    structural_bear_mode:
+      label: 구조적 약세
+      values: {'FALSE': 정상, 'TRUE': 감지}
+      alerts:
+        - on: changed
+          from: 'FALSE'
+          to: 'TRUE'
+        - on: changed
+          to: 'FALSE'
+          kind: resolved
+          message: 구조적 약세 해제
+    trend_mode:
+      label: 추세
+      values: {UNINITIALIZED: 초기화 중, BULL: 상승, CAUTION: 주의, BEAR: 하락, RECOVERY: 회복}
+      alerts:
+        - on: confirmation_started
+          to: [BEAR, RECOVERY, BULL]
+        - on: changed
+          to: BEAR
+        - on: changed
+          from: BEAR
+          to: RECOVERY
+        - on: changed
+          to: BULL
+          kind: resolved
+          message: 상승 추세 확인 완료
+    defense_mode:
+      label: 밸류에이션
+      values: {NORMAL: 정상, WARNING: 경고, DEFENSE: 방어}
+      alerts:
+        - on: confirmation_started
+          to: [DEFENSE, NORMAL]
+        - on: changed
+          from: NORMAL
+          to: WARNING
+        - on: changed
+          to: DEFENSE
+        - on: changed
+          from: WARNING
+          to: NORMAL
+          kind: resolved
+        - on: changed
+          from: DEFENSE
+          to: NORMAL
+          kind: resolved
+  variables:
+    risk_off_score: {label: 약세, max: 6, display: bar}
+    recovery_score: {label: 회복, max: 6, display: bar}
+  market:
+    - {ticker: QQQ, field: roc1, label: 1일, format: percent}
+    - {ticker: QQQ, field: roc5, label: 5일, format: percent}
+    - {ticker: QQQ, field: roc20, label: 20일, format: percent}
+    - {ticker: QQQ, field: drawdown120, label: 120일 고점 대비, format: ratio_percent}
+    - {ticker: QQQ, field: valuation_score, label: 밸류에이션, format: number}
+  prealerts:
+    # 실행 기준보다 앞선 비중 괴리를 한 번 알리고, reset_when 충족 시 해제를 알린다.
+    - id: qqq-underweight
+      when: weight_deviation('QQQ') <= -3%
+      reset_when: weight_deviation('QQQ') > -2%
+      message: QQQ 비중이 목표보다 3.0%p 이상 낮음 (매수 기준 -4.0%p)
+      reset_message: QQQ 비중 부족 주의 해제
+    - id: target-deviation
+      when: target_deviation() >= 5% and target_deviation() < 7.5%
+      reset_when: target_deviation() < 4%
+      message: 목표 비중 괴리가 실행 기준에 접근 (5.0%p 이상 / 실행 7.5%p)
+      reset_message: 목표 비중 괴리 주의 해제
+
+rebalance:
+  # 방어 상태가 바뀌거나 목표 괴리 7.5%p·QQQ 부족 4%p에 도달하면 매매를 검토한다.
+  # 상태 변경만 있고 매매할 비중 차이가 없으면 리밸런싱 알림은 보내지 않는다.
+  - check: daily
+    when: >
+      changed(state.credit_guard)
+      or changed(state.financial_guard)
+      or changed(state.deep_guard)
+      or target_deviation() >= 7.5%
+      or weight_deviation('QQQ') <= -4%
+
+execution:
+  days: 1
