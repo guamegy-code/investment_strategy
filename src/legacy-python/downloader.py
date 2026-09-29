@@ -6,6 +6,7 @@ ETF 데이터를 다운로드하고
 """
 
 from pathlib import Path
+import warnings
 
 import pandas as pd
 import yfinance as yf
@@ -23,6 +24,84 @@ from indicators import Indicator
 
 
 KRW_ADJUSTED_SUFFIX = "_KRW"
+HY_OAS_TICKER = "BAMLH0A0HYM2"
+FRED_URL = "https://fred.stlouisfed.org/graph/fredgraph.csv?id={}"
+
+
+def _load_fred_series(source) -> pd.Series:
+    """Read a FRED CSV, accepting both DATE and observation_date headers."""
+    observations = pd.read_csv(source)
+    if observations.shape[1] < 2:
+        raise ValueError(f"FRED source has no observations: {source}")
+    dates = pd.to_datetime(observations.iloc[:, 0], errors="coerce")
+    values = pd.to_numeric(observations.iloc[:, 1], errors="coerce")
+    series = pd.Series(values.to_numpy(), index=dates, dtype=float).dropna()
+    series = series[~series.index.isna()].sort_index()
+    if series.empty or series.index.has_duplicates:
+        raise ValueError(f"FRED source is empty or has duplicate dates: {source}")
+    return series
+
+
+def _merge_historical_and_live_fred(
+    historical: pd.Series, live: pd.Series, *, overlap_tolerance: float = 0.05,
+) -> pd.Series:
+    """Prefer revised live observations and flag material overlap differences."""
+    overlap = historical.index.intersection(live.index)
+    if len(overlap):
+        difference = (historical.loc[overlap] - live.loc[overlap]).abs()
+        if difference.max() > overlap_tolerance:
+            warnings.warn(
+                f"FRED historical/live overlap differs by up to {difference.max():.3f} pp",
+                stacklevel=2,
+            )
+    merged = pd.concat((historical, live))
+    return merged[~merged.index.duplicated(keep="last")].sort_index()
+
+
+def _align_macro_to_qqq_sessions(
+    observations: pd.Series, qqq_dates: pd.DatetimeIndex, *, lag_sessions: int = 1,
+) -> pd.Series:
+    if lag_sessions < 0:
+        raise ValueError("lag_sessions must be nonnegative")
+    return observations.reindex(qqq_dates, method="ffill").shift(lag_sessions)
+
+
+def _load_hy_oas_observations(historical_path: Path | None = None) -> pd.Series:
+    historical_path = historical_path or (
+        Path(__file__).resolve().parents[2] / "tmp" / f"{HY_OAS_TICKER}_historical.csv"
+    )
+    if not historical_path.is_file():
+        raise FileNotFoundError(
+            f"HY OAS research requires a private pre-2026 FRED archive at {historical_path}"
+        )
+    historical = _load_fred_series(historical_path)
+    if historical.index.min() > pd.Timestamp("1997-01-31"):
+        raise ValueError("HY OAS archive does not reach the 1996/1997 history")
+    try:
+        live = _load_fred_series(FRED_URL.format(HY_OAS_TICKER))
+    except (OSError, ValueError) as error:
+        cached_tail = historical_path.parent / f"{HY_OAS_TICKER}.csv"
+        if not cached_tail.is_file():
+            warnings.warn(f"Current HY OAS unavailable; using archive only: {error}", stacklevel=2)
+            return historical
+        live = _load_fred_series(cached_tail)
+        warnings.warn(
+            f"Current HY OAS unavailable; using cached tail through "
+            f"{live.index.max().date()}: {error}",
+            stacklevel=2,
+        )
+    return _merge_historical_and_live_fred(historical, live)
+
+
+def _macro_market_frame(observations: pd.Series, qqq_dates: pd.DatetimeIndex) -> pd.DataFrame:
+    spread = _align_macro_to_qqq_sessions(observations, qqq_dates)
+    frame = pd.DataFrame(index=qqq_dates)
+    for field in ("Open", "High", "Low", "Close"):
+        frame[field] = spread
+    frame["Volume"] = 0
+    frame = Indicator.add_indicators(frame.dropna(subset=["Close"]))
+    frame.index.name = "Date"
+    return frame
 
 
 def _load_saved_prices(data_dir: Path, ticker: str) -> pd.DataFrame:
@@ -87,30 +166,20 @@ def download_one(ticker: str, output_dir=DATA_DIR) -> pd.DataFrame:
         print(f"Building {TDF_PROXY_TICKER}...")
         return build_tdf2050_proxy(data_dir=output_dir)
 
-    if ticker == "BAA10Y":
+    if ticker in ("BAA10Y", HY_OAS_TICKER):
         # FRED observations are not guaranteed to be known at that day's
         # equity close. Align first, then expose the previous QQQ session.
         ensure_data_files(("QQQ",), data_dir=output_dir)
         qqq_dates = _load_saved_prices(output_dir, "QQQ").index
-        local_source = Path(__file__).resolve().parents[2] / "tmp" / "BAA10Y.csv"
-        source = local_source if local_source.is_file() else (
-            "https://fred.stlouisfed.org/graph/fredgraph.csv?id=BAA10Y"
-        )
-        observations = pd.read_csv(source)
-        dates = pd.to_datetime(observations.iloc[:, 0], errors="coerce")
-        spread = pd.Series(
-            pd.to_numeric(observations.iloc[:, 1], errors="coerce").to_numpy(),
-            index=dates,
-        ).dropna().sort_index()
-        spread = spread.reindex(qqq_dates, method="ffill").shift(1)
-        frame = pd.DataFrame(index=qqq_dates)
-        for field in ("Open", "High", "Low", "Close"):
-            frame[field] = spread
-        frame["Volume"] = 0
-        frame = Indicator.add_indicators(frame.dropna(subset=["Close"]))
-        frame.index.name = "Date"
+        if ticker == "BAA10Y":
+            local_source = Path(__file__).resolve().parents[2] / "tmp" / "BAA10Y.csv"
+            source = local_source if local_source.is_file() else FRED_URL.format(ticker)
+            observations = _load_fred_series(source)
+        else:
+            observations = _load_hy_oas_observations()
+        frame = _macro_market_frame(observations, qqq_dates)
         output_dir.mkdir(parents=True, exist_ok=True)
-        frame.to_csv(output_dir / "BAA10Y.csv")
+        frame.to_csv(output_dir / f"{ticker}.csv")
         return frame
 
     print(f"Downloading {ticker}...")

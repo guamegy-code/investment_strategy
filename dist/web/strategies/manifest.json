@@ -1,7 +1,7 @@
 {
   "version": 1,
   "hidden_strategy_ids": [],
-  "enabled_bundle": "enabled.06c6b14e6133.json",
+  "enabled_bundle": "enabled.d93bca7d4a53.json",
   "results": {
     "profit-band-tdf2050": "../results/profit-band-tdf2050.260199001a21.json.gz",
     "buy-3dip-bil": "../results/buy-3dip-bil.c0599d5e2522.json.gz",
@@ -275,6 +275,12 @@
       "id": "band-7030-tdf-valuation-credit-guard-no-topup-kodex-koact",
       "path": "31P_band_7030_tdf_valuation_credit_guard_no_topup_kodex_koact.yaml",
       "version": 2,
+      "enabled": true
+    },
+    {
+      "id": "qqq-valuation-financial-credit-guard-no-topup",
+      "path": "32_qqq_valuation_financial_credit_guard_no_topup.yaml",
+      "version": 1,
       "enabled": true
     }
   ]
