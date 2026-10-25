@@ -136,3 +136,68 @@ test("holiday lookup is cached across many strategy evaluations", () => {
   assert.equal(nextTrigger.call("isKrxTradingDay_('2026-09-21')"), true);
   assert.equal(nextTrigger.calendarReads(), 0);
 });
+
+test("test messages do not suppress production notifications", () => {
+  const app = runtime();
+  app.call(`
+    let eventRows = [['same-key', '', '', '', '', '', '', '', 'TEST']];
+    SpreadsheetApp = {getActiveSpreadsheet: () => ({getSheetByName: () => ({
+      getLastRow: () => eventRows.length + 1,
+      getRange: () => ({getValues: () => eventRows}),
+    })})};
+  `);
+  assert.equal(app.call("eventAlreadySent_('same-key')"), false);
+  app.call("eventRows.push(['same-key', '', '', '', '', '', '', '', 'SENT'])");
+  assert.equal(app.call("eventAlreadySent_('same-key')"), true);
+  app.call("eventRows = [['same-key', '', '', '', '', '', '', '', 'COALESCED']]");
+  assert.equal(app.call("eventAlreadySent_('same-key')"), true);
+  assert.equal(app.call("eventAlreadySent_('other-key')"), false);
+});
+
+test("a missing or mismatched evaluation response is an error", () => {
+  const app = runtime();
+  app.call(`
+    let evaluationPayload = {};
+    Logger = {log: () => {}};
+    requiredProperty_ = () => 'configured';
+    privateStrategies_ = () => [];
+    UrlFetchApp = {fetch: () => ({getResponseCode: () => 200,
+      getContentText: () => JSON.stringify(evaluationPayload)})};
+  `);
+  assert.throws(() => app.call("requestEvaluations_([{strategyId: 'expected'}])"), /전략 목록/);
+  app.call("evaluationPayload = {evaluations: [{strategy_id: 'other'}]}");
+  assert.throws(() => app.call("requestEvaluations_([{strategyId: 'expected'}])"), /전략 목록/);
+  app.call("evaluationPayload = {evaluations: [{strategy_id: 'expected'}]}");
+  assert.equal(app.call("requestEvaluations_([{strategyId: 'expected'}]).length"), 1);
+});
+
+test("Telegram errors include the reason while redacting the bot token", () => {
+  const app = runtime();
+  app.call(`
+    requiredProperty_ = () => 'test-secret-token';
+    UrlFetchApp = {fetch: () => ({getResponseCode: () => 403,
+      getContentText: () => JSON.stringify({ok: false, error_code: 403,
+        description: 'blocked test-secret-token'})})};
+  `);
+  assert.throws(() => app.call("sendTelegram_('test')"), error =>
+    /403.*blocked \[REDACTED\]/.test(error.message) && !error.message.includes('test-secret-token'));
+});
+
+test("a successful evaluation logs why its summary was not sent", () => {
+  const app = runtime();
+  app.call(`
+    let recordedRun;
+    LockService = {getScriptLock: () => ({tryLock: () => true, releaseLock: () => {}})};
+    withinNotificationWindow_ = () => true;
+    isKrxTradingDay_ = () => true;
+    enabledSubscriptions_ = () => [{strategyId: 's'}];
+    requestEvaluations_ = () => [{strategy_id: 's', market_data_at: '2026-10-16', alerts: []}];
+    updateSubscription_ = () => {};
+    sendTelegram_ = () => {throw new Error('Must not send without an event')};
+    logRun_ = (...args) => {recordedRun = args};
+    runNotificationCheck();
+  `);
+  assert.equal(app.call("recordedRun[2]"), 'SUCCESS');
+  assert.equal(app.call("JSON.parse(recordedRun[3])[0].summary_status"), 'MISSING');
+  assert.equal(app.call("recordedRun[1]"), 0);
+});

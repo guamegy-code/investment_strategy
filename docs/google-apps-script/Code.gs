@@ -68,16 +68,26 @@ function runNotificationCheck() {
     }
     const evaluations = requestEvaluations_(subscriptions);
     const pendingAlerts = [];
+    const decisions = [];
     evaluations.forEach(evaluation => {
       updateSubscription_(evaluation);
       let alerts = evaluationAlerts_(evaluation);
+      const receivedAlerts = alerts.length;
       alerts = alerts.filter(alert => !eventAlreadySent_(eventKey_(alert)));
       const summary = scheduledSummaryDue_(evaluation.scheduled_summary, now);
-      if (summary && !eventAlreadySent_(eventKey_(summary))) {
+      const summaryDuplicate = Boolean(summary && eventAlreadySent_(eventKey_(summary)));
+      const decision = {
+        strategy_id: evaluation.strategy_id, market_data_at: evaluation.market_data_at,
+        received_alerts: receivedAlerts, duplicate_alerts: receivedAlerts - alerts.length,
+        summary_schedule: evaluation.scheduled_summary?.summary_schedule || null,
+        summary_status: !evaluation.scheduled_summary ? 'MISSING' : !summary ? 'NOT_DUE' : summaryDuplicate ? 'DUPLICATE' : 'INCLUDED',
+      };
+      if (summary && !summaryDuplicate) {
         const sameDate = alerts.slice().reverse().find(alert => alert.market_data_at === summary.market_data_at);
         if (sameDate) {
           sameDate.includes_summary = true;
           sameDate.coalesced_summary = summary;
+          decision.summary_status = 'COALESCED';
         } else {
           alerts.push(summary);
         }
@@ -86,6 +96,7 @@ function runNotificationCheck() {
         const datedAlert = {...alert, execution_market_date: kstDateKey_(now)};
         pendingAlerts.push(datedAlert);
       });
+      decisions.push(decision);
     });
     pendingAlerts.sort((left, right) => String(left.market_data_at).localeCompare(String(right.market_data_at)));
     notificationBatches_(pendingAlerts).forEach(batch => {
@@ -95,7 +106,7 @@ function runNotificationCheck() {
         if (event.coalesced_summary) recordEvent_(event.coalesced_summary, 'COALESCED');
       });
     });
-    logRun_(subscriptions.length, pendingAlerts.length, 'SUCCESS', '');
+    logRun_(subscriptions.length, pendingAlerts.length, 'SUCCESS', JSON.stringify(decisions));
   } catch (error) {
     logRun_(0, 0, 'FAILED', error.message || String(error));
     throw error;
@@ -332,7 +343,20 @@ function requestEvaluations_(subscriptions, preview) {
     payload: JSON.stringify({strategy_ids: subscriptions.map(item => item.strategyId), last_evaluated_dates: lastDates, private_strategies: privateStrategies, preview: preview === true}),
   });
   if (response.getResponseCode() !== 200) throw new Error(`평가 API 오류 (${response.getResponseCode()}): ${response.getContentText()}`);
-  return JSON.parse(response.getContentText()).evaluations || [];
+  const payload = JSON.parse(response.getContentText());
+  if (!Array.isArray(payload.evaluations)
+      || payload.evaluations.length !== subscriptions.length
+      || subscriptions.some(item => !payload.evaluations.some(evaluation => evaluation.strategy_id === item.strategyId))) {
+    throw new Error('평가 API 응답의 전략 목록이 요청과 일치하지 않습니다.');
+  }
+  Logger.log('EVALUATION_STATUS ' + JSON.stringify({
+    preview: preview === true, freshness: payload.freshness,
+    decision_advanced: payload.decision_advanced,
+    price_freshness: Object.fromEntries(Object.entries(payload.price_freshness || {}).map(([ticker, item]) => [ticker, {
+      status: item.status, latest_session: item.latest_session, expected_session: item.expected_session,
+    }])),
+  }));
+  return payload.evaluations;
 }
 
 // Run this on demand after the Korean market close. It refreshes portfolio
@@ -383,7 +407,11 @@ function sendTelegram_(text) {
   const response = UrlFetchApp.fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
     method: 'post', payload: {chat_id: chatId, text: html, parse_mode: 'HTML'}, muteHttpExceptions: true,
   });
-  if (response.getResponseCode() !== 200) throw new Error('Telegram 메시지 전송에 실패했습니다.');
+  const result = JSON.parse(response.getContentText());
+  if (response.getResponseCode() !== 200 || result.ok !== true) {
+    const description = String(result.description || 'Unknown error').split(token).join('[REDACTED]');
+    throw new Error(`Telegram 오류 (${result.error_code || response.getResponseCode()}): ${description}`);
+  }
 }
 
 function eventKey_(evaluation) {
@@ -392,7 +420,8 @@ function eventKey_(evaluation) {
 
 function eventAlreadySent_(key) {
   const sheet = requireSpreadsheet_().getSheetByName(SHEETS.EVENTS);
-  return sheet.getLastRow() > 1 && sheet.getRange(2, 2, sheet.getLastRow() - 1, 1).getValues().flat().includes(key);
+  return sheet.getLastRow() > 1 && sheet.getRange(2, 2, sheet.getLastRow() - 1, 9).getValues()
+    .some(row => row[0] === key && ['SENT', 'COALESCED'].includes(String(row[8])));
 }
 
 function recordEvent_(evaluation, result) {
