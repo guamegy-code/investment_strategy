@@ -14,7 +14,8 @@ from pathlib import Path
 
 import pandas as pd
 
-from config import EXTENDED_DATA_DIR, RESULT_DIR
+from config import EXTENDED_DATA_DIR
+from result_paths import research_result_path
 
 
 THRESHOLDS = tuple(-value / 100 for value in range(6, 17))
@@ -98,9 +99,9 @@ def run_event_study() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
         )
         .sort_values(["Sample", "Threshold"], ascending=[True, False])
     )
-    events.to_csv(RESULT_DIR / "strategy26_dip_threshold_events.csv", index=False)
-    summary.to_csv(RESULT_DIR / "strategy26_dip_threshold_summary.csv", index=False)
-    split.to_csv(RESULT_DIR / "strategy26_dip_threshold_split.csv", index=False)
+    events.to_csv(research_result_path("strategy26_dip_threshold_events.csv"), index=False)
+    summary.to_csv(research_result_path("strategy26_dip_threshold_summary.csv"), index=False)
+    split.to_csv(research_result_path("strategy26_dip_threshold_split.csv"), index=False)
     return events, summary, split
 
 

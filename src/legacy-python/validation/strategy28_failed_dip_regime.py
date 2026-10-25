@@ -19,9 +19,10 @@ MODULE_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(MODULE_DIR))
 
 from backtest import Backtest  # noqa: E402
-from config import COMMISSION, DATA_DIR, EXTENDED_DATA_DIR, RESULT_DIR, SLIPPAGE  # noqa: E402
+from config import COMMISSION, DATA_DIR, EXTENDED_DATA_DIR, RESEARCH_RESULT_DIR as RESULT_DIR, SLIPPAGE  # noqa: E402
 from performance import Performance  # noqa: E402
 from strategy_dsl import DeclarativeStrategy, load_strategy_definition  # noqa: E402
+from result_paths import research_result_path
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -410,11 +411,11 @@ def main() -> None:
                 })
 
     RESULT_DIR.mkdir(exist_ok=True)
-    pd.DataFrame(summary_rows).to_csv(RESULT_DIR / "strategy28_failed_dip_summary.csv", index=False)
-    pd.DataFrame(event_rows).to_csv(RESULT_DIR / "strategy28_failed_dip_events.csv", index=False)
-    pd.DataFrame(transition_rows).to_csv(RESULT_DIR / "strategy28_failed_dip_transitions.csv", index=False)
+    pd.DataFrame(summary_rows).to_csv(research_result_path("strategy28_failed_dip_summary.csv"), index=False)
+    pd.DataFrame(event_rows).to_csv(research_result_path("strategy28_failed_dip_events.csv"), index=False)
+    pd.DataFrame(transition_rows).to_csv(research_result_path("strategy28_failed_dip_transitions.csv"), index=False)
     rolling = pd.DataFrame(rolling_rows)
-    rolling.to_csv(RESULT_DIR / "strategy28_failed_dip_rolling.csv", index=False)
+    rolling.to_csv(research_result_path("strategy28_failed_dip_rolling.csv"), index=False)
     rolling.groupby(["Years", "Label"], as_index=False).agg(
         Windows=("Window", "count"),
         CAGRWins=("CAGRGap", lambda values: int((values > 0).sum())),
@@ -422,7 +423,7 @@ def main() -> None:
         MDDWins=("MDDImprovement", lambda values: int((values > 0).sum())),
         AverageMDDImprovement=("MDDImprovement", "mean"),
         CalmarWins=("CalmarGap", lambda values: int((values > 0).sum())),
-    ).to_csv(RESULT_DIR / "strategy28_failed_dip_rolling_summary.csv", index=False)
+    ).to_csv(research_result_path("strategy28_failed_dip_rolling_summary.csv"), index=False)
 
 
 if __name__ == "__main__":

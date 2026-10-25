@@ -14,7 +14,6 @@ import numpy as np
 import pandas as pd
 
 from backtest import Backtest
-from config import RESULT_DIR
 from strategy_dsl import load_strategy_definition
 from validation.probability_accuracy import classification_metrics
 from validation.state_conditioned_continuous_overlay import (
@@ -22,6 +21,7 @@ from validation.state_conditioned_continuous_overlay import (
     SOURCE,
     RecordingDeclarativeStrategy,
 )
+from result_paths import research_result_path
 
 
 HORIZON_DAYS = 20
@@ -409,7 +409,7 @@ def run_state_sufficiency_validation():
         "state_sufficiency_decision": decision,
         "state_sufficiency_state_mix": state_mix,
     }.items():
-        report.to_csv(RESULT_DIR / f"{name}.csv", index=True if name in {
+        report.to_csv(research_result_path(f"{name}.csv"), index=True if name in {
             "state_sufficiency_sample", "state_sufficiency_forecasts"
         } else False)
     return {

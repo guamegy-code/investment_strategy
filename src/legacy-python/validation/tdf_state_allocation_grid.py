@@ -17,7 +17,8 @@ from validation.tdf_bnd_improvement_candidates import run
 
 ROOT = Path(__file__).resolve().parents[2]
 SOURCE = ROOT / "strategies" / "06_profit_band_tdf2050.yaml"
-RESULT_DIR = ROOT / "results"
+from config import RESEARCH_RESULT_DIR as RESULT_DIR
+from result_paths import research_result_path
 STRONG_QQQ_WEIGHTS = (0.60, 0.65, 0.70)
 RECOVERY_QQQ_WEIGHTS = (0.45, 0.50, 0.55)
 RECOVERY_TDF_SHARES = (0.00, 0.20, 0.40)
@@ -132,10 +133,10 @@ def main(argv=None):
     RESULT_DIR.mkdir(exist_ok=True)
     suffix = f"_{args.output_suffix}" if args.output_suffix else ""
     summary.to_csv(
-        RESULT_DIR / f"tdf_state_allocation_grid{suffix}.csv", index=False
+        research_result_path(f"tdf_state_allocation_grid{suffix}.csv"), index=False
     )
     rolling.to_csv(
-        RESULT_DIR / f"tdf_state_allocation_grid_rolling{suffix}.csv",
+        research_result_path(f"tdf_state_allocation_grid_rolling{suffix}.csv"),
         index=False,
     )
     display = summary.copy()

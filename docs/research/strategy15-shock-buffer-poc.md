@@ -89,6 +89,6 @@ Calmar 비악화, 목표 사건 네 개 중 세 개 이상 개선, 롤링 MDD �
 ## 재현
 
 - 구현: `src/legacy-python/validation/strategy15_shock_buffer_overlay.py`
-- 단위 테스트: `tests/test_strategy15_shock_buffer_overlay.py`
+- 단위 테스트: `tests/research/test_strategy15_shock_buffer_overlay.py`
 - 실행: `uv run python -m validation.strategy15_shock_buffer_overlay`
-- 산출물: `results/strategy15_shock_buffer_*.csv`
+- 산출물: `results/research/strategy15/strategy15_shock_buffer_*.csv`

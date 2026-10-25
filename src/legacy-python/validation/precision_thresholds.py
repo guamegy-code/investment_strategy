@@ -7,7 +7,7 @@ from math import sqrt
 import numpy as np
 import pandas as pd
 
-from config import EXTENDED_DATA_DIR, RESULT_DIR
+from config import EXTENDED_DATA_DIR
 from strategy import STATIC_RETIREMENT_7030
 from .enhanced_probability_features import (
     EnhancedProbabilityBacktest,
@@ -20,6 +20,7 @@ from .multi_horizon_probability import (
     TAIL_RETURN_THRESHOLD,
 )
 from .probability_accuracy import classification_metrics
+from result_paths import research_result_path
 
 
 PROFILE = next(
@@ -208,11 +209,11 @@ def run_precision_threshold_validation():
     metrics = _threshold_metrics(sample, thresholds)
     selection = _selection_report(metrics)
     signals = _signal_report(sample, thresholds)
-    metrics.to_csv(RESULT_DIR / "precision_threshold_metrics.csv", index=False)
+    metrics.to_csv(research_result_path("precision_threshold_metrics.csv"), index=False)
     selection.to_csv(
-        RESULT_DIR / "precision_threshold_selection.csv", index=False
+        research_result_path("precision_threshold_selection.csv"), index=False
     )
-    signals.to_csv(RESULT_DIR / "precision_threshold_signals.csv", index=False)
+    signals.to_csv(research_result_path("precision_threshold_signals.csv"), index=False)
     return {
         "metrics": metrics,
         "selection": selection,

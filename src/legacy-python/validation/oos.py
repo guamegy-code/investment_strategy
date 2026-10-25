@@ -11,7 +11,6 @@ from config import (
     COMMISSION,
     EXTENDED_DATA_DIR,
     PROJECT_ROOT,
-    RESULT_DIR,
     SLIPPAGE,
 )
 from .extended_data import ASSETS, build_extended_data
@@ -22,6 +21,7 @@ from strategy import (
     RetirementAllocationLegacyStrategy,
     STATIC_70_BND10_BIL10_GLD10,
 )
+from result_paths import research_result_path
 
 
 LOCK_PATH = PROJECT_ROOT / "validation" / "oos_strategy_lock.json"
@@ -124,7 +124,7 @@ def retrospective_validation(results):
                 **metrics,
             })
     frame = pd.DataFrame(rows)
-    frame.to_csv(RESULT_DIR / "final_validation_retrospective.csv", index=False)
+    frame.to_csv(research_result_path("final_validation_retrospective.csv"), index=False)
     return frame
 
 
@@ -144,7 +144,7 @@ def annual_retrospective_validation(results):
     frame["DynamicWon"] = frame["Gap"] > 0
     frame.insert(0, "EvidenceType", "RETROSPECTIVE_NOT_OOS")
     frame.index.name = "Year"
-    frame.to_csv(RESULT_DIR / "final_validation_annual.csv")
+    frame.to_csv(research_result_path("final_validation_annual.csv"))
     return frame
 
 
@@ -204,10 +204,10 @@ def update_oos(refresh_data=False):
         })
 
     status = pd.DataFrame(status_rows)
-    status.to_csv(RESULT_DIR / "oos_status.csv", index=False)
+    status.to_csv(research_result_path("oos_status.csv"), index=False)
     if daily_frames:
         pd.concat(daily_frames, ignore_index=True).to_csv(
-            RESULT_DIR / "oos_daily.csv", index=False
+            research_result_path("oos_daily.csv"), index=False
         )
     return status, retrospective, annual
 

@@ -49,7 +49,7 @@ PERSIST2는 신용 무반응·지연 두 경로에서 MDD를 각각 6.73%p, 5.82
 
 **2일 연속 확인이 이번 탐색에서 가장 나은 노이즈 필터였지만, 운영 30번으로 채택할 근거는 아직 부족하다.** 최근 구간 CAGR은 운영 30번보다 0.136%p 낮고 실제 과거 구간 MDD 개선은 없다. 가상 급락 개선은 정해진 가격 배율 경로에 조건부로 나타난 결과다. 2020년 9월 한 사건을 제거한 효과가 크고, 이 사건을 이미 보고 선택한 2일 문턱의 독립 표본은 없다. 추가 숫자 탐색보다 다른 시점·경로에서 경보가 얼마나 유지되는지, 단순 평균 QQQ 비중 축소와 비교해 신호 자체의 가치가 있는지를 먼저 검증해야 한다.
 
-재현: `uv run --offline python src/legacy-python/validation/strategy30_price_noise_review.py --stress`. 부분 실행은 `--periods`, `--variants`, `--scenarios`, `--output-stem`을 사용한다. 사건별 수치는 무시 목록의 `results/strategy30_price_noise*_episodes.csv`, 구간별 성과는 `_summary.csv`에 기록된다. 운영 YAML과 배포 설정은 변경하지 않았다.
+재현: `uv run --offline python src/legacy-python/validation/strategy30_price_noise_review.py --stress`. 부분 실행은 `--periods`, `--variants`, `--scenarios`, `--output-stem`을 사용한다. 사건별 수치는 무시 목록의 `results/research/strategy30/strategy30_price_noise*_episodes.csv`, 구간별 성과는 `_summary.csv`에 기록된다. 운영 YAML과 배포 설정은 변경하지 않았다.
 
 
 ---
@@ -116,7 +116,7 @@ SEQUENTIAL도 신용 무반응·지연 두 가상 경로의 사건 MDD와 방어
 
 다음 실험은 PRICE70의 **거짓 경보와 복귀 손실**을 사건별로 분해하고, 짧은 신용 경보에 지속성 확인을 추가해 신호가 얼마나 줄어드는지 먼저 평가하는 것이다. 추가 후보의 사건별 MDD, 방어 전 손실, 방어 기간, 반등 손실, CAGR, 거래 수를 함께 보고, 단순히 QQQ 평균 비중을 낮춘 대조군과도 비교해야 한다. 닷컴·금융위기·코로나·2022년과 여러 가상 경로 전체에서 결과가 유지되는지 확인해야 하며, 이미 조사한 과거 구간은 독립적인 새 표본이 아니다.
 
-재현: `uv run --offline python src/legacy-python/validation/strategy30_signal_combination_review.py --stress`. 결과 CSV는 무시 목록의 `results/strategy30_signal_combination_*.csv`에 기록된다. `--periods`, `--variants`, `--scenarios`, `--output-stem`으로 부분 실행을 분리할 수 있다. 위 실험에서는 부분 실행으로 전체 과거 구간의 7개 안과 지정한 가상 경로를 각각 평가했다. 운영 YAML과 배포 설정은 변경하지 않았다.
+재현: `uv run --offline python src/legacy-python/validation/strategy30_signal_combination_review.py --stress`. 결과 CSV는 무시 목록의 `results/research/strategy30/strategy30_signal_combination_*.csv`에 기록된다. `--periods`, `--variants`, `--scenarios`, `--output-stem`으로 부분 실행을 분리할 수 있다. 위 실험에서는 부분 실행으로 전체 과거 구간의 7개 안과 지정한 가상 경로를 각각 평가했다. 운영 YAML과 배포 설정은 변경하지 않았다.
 
 
 ---

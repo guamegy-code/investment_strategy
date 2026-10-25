@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 
 from backtest import Backtest
-from config import EXTENDED_DATA_DIR, RESULT_DIR
+from config import EXTENDED_DATA_DIR
 from strategy import BaseStrategy, STATIC_RETIREMENT_7030
 from .probabilistic_allocation import (
     DEFAULT_CONFIG,
@@ -19,6 +19,7 @@ from .probabilistic_allocation import (
     _window_summary,
     walk_forward_event_probabilities,
 )
+from result_paths import research_result_path
 
 
 HORIZONS = (21, 42, 63)
@@ -289,13 +290,13 @@ def run_multi_horizon_probability_validation():
     diagnostics = diagnostics.rename(columns={"ActualUpRate": "ActualEventRate"})
     calibration = pd.concat(calibration_parts, ignore_index=True)
 
-    summary.to_csv(RESULT_DIR / "multi_horizon_probability_summary.csv", index=False)
-    windows.to_csv(RESULT_DIR / "multi_horizon_probability_windows.csv", index=False)
+    summary.to_csv(research_result_path("multi_horizon_probability_summary.csv"), index=False)
+    windows.to_csv(research_result_path("multi_horizon_probability_windows.csv"), index=False)
     diagnostics.to_csv(
-        RESULT_DIR / "multi_horizon_probability_diagnostics.csv", index=False
+        research_result_path("multi_horizon_probability_diagnostics.csv"), index=False
     )
     calibration.to_csv(
-        RESULT_DIR / "multi_horizon_probability_calibration.csv", index=False
+        research_result_path("multi_horizon_probability_calibration.csv"), index=False
     )
     return {
         "summary": summary,

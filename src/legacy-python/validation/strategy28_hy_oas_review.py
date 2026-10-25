@@ -24,6 +24,7 @@ from strategy28_failed_dip_regime import (
     CURRENT, DOTCOM, EVENTS, GFC, ROOT, RESULT_DIR, FailedDipOverlay,
     build_data, event_result, summarize,
 )
+from result_paths import research_result_path
 
 
 class CreditComparison(FailedDipOverlay):
@@ -173,7 +174,7 @@ def main() -> None:
     RESULT_DIR.mkdir(exist_ok=True)
     for suffix, rows in (("summary", summaries), ("events", events),
                          ("transitions", changes), ("rolling", rollings)):
-        pd.DataFrame(rows).to_csv(RESULT_DIR / f"strategy28_hy_oas_{suffix}.csv", index=False)
+        pd.DataFrame(rows).to_csv(research_result_path(f"strategy28_hy_oas_{suffix}.csv"), index=False)
 
 
 if __name__ == "__main__":

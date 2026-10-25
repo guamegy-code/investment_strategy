@@ -16,6 +16,7 @@ from strategy28_failed_dip_regime import (
     build_data, event_result, summarize,
 )
 from strategy28_dotcom_fast_tier import FastTierOverlay
+from result_paths import research_result_path
 
 
 class SystemicBridge(FastTierOverlay):
@@ -129,13 +130,13 @@ def main():
                 print(summaries[-1], flush=True)
     RESULT_DIR.mkdir(exist_ok=True)
     pd.DataFrame(summaries).to_csv(
-        RESULT_DIR / "strategy28_systemic_bridge_summary.csv", index=False
+        research_result_path("strategy28_systemic_bridge_summary.csv"), index=False
     )
     pd.DataFrame(events).to_csv(
-        RESULT_DIR / "strategy28_systemic_bridge_events.csv", index=False
+        research_result_path("strategy28_systemic_bridge_events.csv"), index=False
     )
     pd.DataFrame(transitions).to_csv(
-        RESULT_DIR / "strategy28_systemic_bridge_transitions.csv", index=False
+        research_result_path("strategy28_systemic_bridge_transitions.csv"), index=False
     )
 
 

@@ -16,7 +16,7 @@ import numpy as np
 import pandas as pd
 
 from backtest import Backtest
-from config import COMMISSION, RESULT_DIR, SLIPPAGE
+from config import COMMISSION, SLIPPAGE
 from validation.state_conditioned_continuous_overlay import (
     BIL,
     QQQ,
@@ -31,6 +31,7 @@ from validation.state_conditioned_continuous_overlay import (
     _stress_report,
 )
 from strategy_dsl import load_strategy_definition
+from result_paths import research_result_path
 
 
 MINIMUM_EXPERT_QQQ_WEIGHT = 0.20
@@ -480,7 +481,7 @@ def run_state_continuous_ensemble_validation():
         "state_continuous_ensemble_decision": decisions,
     }
     for name, report in reports.items():
-        report.to_csv(RESULT_DIR / f"{name}.csv", index=False)
+        report.to_csv(research_result_path(f"{name}.csv"), index=False)
     return reports
 
 

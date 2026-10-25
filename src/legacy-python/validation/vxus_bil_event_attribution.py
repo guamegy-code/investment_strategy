@@ -4,9 +4,10 @@ import numpy as np
 import pandas as pd
 
 from backtest import Backtest
-from config import DATA_DIR, END_DATE, RESULT_DIR, START_DATE
+from config import DATA_DIR, END_DATE, START_DATE
 from strategy import VXUSSubstitutionStrategy
 from .vxus_bil_walkforward import VXUSBILShareStrategy
+from result_paths import research_result_path
 
 
 HORIZONS = (5, 20, 60)
@@ -200,7 +201,7 @@ def run_vxus_bil_event_attribution():
         "vxus_bil_event_attribution_summary": summary,
     }
     for name, report in reports.items():
-        report.to_csv(RESULT_DIR / f"{name}.csv", index=False)
+        report.to_csv(research_result_path(f"{name}.csv"), index=False)
     return reports
 
 

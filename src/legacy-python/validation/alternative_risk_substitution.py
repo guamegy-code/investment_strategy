@@ -5,7 +5,7 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-from config import EXTENDED_DATA_DIR, RESULT_DIR
+from config import EXTENDED_DATA_DIR
 from performance import Performance
 from strategy import RetirementAllocationStrategy
 from .risk_asset_diversification import (
@@ -15,6 +15,7 @@ from .risk_asset_diversification import (
     _max_underwater_days,
     download_candidate_data,
 )
+from result_paths import research_result_path
 
 
 ALTERNATIVES = ("VTV", "VIG", "SPLV", "VXUS")
@@ -255,7 +256,7 @@ def run_alternative_risk_substitution(refresh_data=False):
         "alternative_substitution_annual_scorecard": annual_scorecard,
     }
     for name, report in reports.items():
-        report.to_csv(RESULT_DIR / f"{name}.csv", index=False)
+        report.to_csv(research_result_path(f"{name}.csv"), index=False)
     return reports
 
 

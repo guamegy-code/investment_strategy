@@ -18,14 +18,15 @@ import numpy as np
 import pandas as pd
 
 from backtest import Backtest
-from config import COMMISSION, DATA_DIR, PROJECT_ROOT, RESULT_DIR, SLIPPAGE
+from config import COMMISSION, DATA_DIR, PROJECT_ROOT, SLIPPAGE
+from config import CROSS_ASSET_ROTATION_DATA_DIR as ROTATION_DATA_DIR
 from performance import Performance
 from strategy_dsl import DeclarativeStrategy, load_strategy_definition
+from result_paths import research_result_path
 
 
 START_DATE = pd.Timestamp("2013-01-04")
 LOCK_PATH = PROJECT_ROOT / "validation" / "multi_asset_trend_sleeve_lock.json"
-ROTATION_DATA_DIR = PROJECT_ROOT / "data_cross_asset_rotation"
 STRATEGY15_PATH = PROJECT_ROOT / "strategies" / "15_band_7030_tdf_state_bil.yaml"
 
 CASH = "KRGOVT3"
@@ -466,7 +467,7 @@ def run_multi_asset_trend_validation() -> dict[str, pd.DataFrame]:
         "multi_asset_trend_decision": decision,
     }
     for name, report in reports.items():
-        report.to_csv(RESULT_DIR / f"{name}.csv", index=False)
+        report.to_csv(research_result_path(f"{name}.csv"), index=False)
     return reports
 
 

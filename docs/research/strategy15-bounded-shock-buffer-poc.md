@@ -105,6 +105,6 @@ QQQ 원복 70% 상한과 방어분만의 역거래는 의도대로 작동했다.
 ## 재현
 
 - 구현: `src/legacy-python/validation/strategy15_bounded_shock_buffer.py`
-- 단위 테스트: `tests/test_strategy15_bounded_shock_buffer.py`
+- 단위 테스트: `tests/research/test_strategy15_bounded_shock_buffer.py`
 - 실행: `uv run python -m validation.strategy15_bounded_shock_buffer`
-- 산출물: `results/strategy15_bounded_buffer_*.csv`
+- 산출물: `results/research/strategy15/strategy15_bounded_buffer_*.csv`

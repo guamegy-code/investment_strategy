@@ -18,9 +18,10 @@ MODULE_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(MODULE_DIR))
 
 from backtest import Backtest
-from config import DATA_DIR, EXTENDED_DATA_DIR, RESULT_DIR
+from config import DATA_DIR, EXTENDED_DATA_DIR, RESEARCH_RESULT_DIR as RESULT_DIR
 from performance import Performance
 from strategy_dsl import DeclarativeStrategy, load_strategy_definition
+from result_paths import research_result_path
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -104,7 +105,7 @@ def main() -> None:
                 daily = qqq.loc[START:END, ["Close", "VALUATION_SCORE"]].rename(
                     columns={"Close": "QQQ_Adjusted_Close", "VALUATION_SCORE": "Lagged_SP500_CAPE"}
                 )
-                daily.to_csv(RESULT_DIR / "strategy28_dotcom_cape_daily.csv", index_label="Date")
+                daily.to_csv(research_result_path("strategy28_dotcom_cape_daily.csv"), index_label="Date")
             # SPY exists back to 1999; BIL before 2007 is an ^IRX-based proxy.
             for ticker, directory in (("SPY", DATA_DIR), ("BIL", EXTENDED_DATA_DIR)):
                 frame = pd.read_csv(directory / f"{ticker}.csv", index_col="Date", parse_dates=True)
@@ -131,10 +132,10 @@ def main() -> None:
                 rows.append(row)
                 print(row, flush=True)
                 if arm == 30.0 and decline == 4.0:
-                    event_output = RESULT_DIR / f"strategy28_dotcom_cape_events_lag{lag_months}.csv"
+                    event_output = research_result_path(f"strategy28_dotcom_cape_events_lag{lag_months}.csv")
                     pd.DataFrame(events).to_csv(event_output, index=False)
     RESULT_DIR.mkdir(exist_ok=True)
-    output = RESULT_DIR / "strategy28_dotcom_cape_proxy.csv"
+    output = research_result_path("strategy28_dotcom_cape_proxy.csv")
     pd.DataFrame(rows).to_csv(output, index=False)
     print(f"Wrote {output}")
 

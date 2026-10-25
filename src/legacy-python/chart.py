@@ -14,7 +14,7 @@ from matplotlib.widgets import CheckButtons, TextBox
 import numpy as np
 import pandas as pd
 
-from config import DATA_DIR, FIGURE_SIZE, RESULT_DIR, SAVE_FIGURE, SHOW_CHART, TICKERS
+from config import DATA_DIR, FIGURE_SIZE, CHART_DIR, STATE_DIR, SAVE_FIGURE, SHOW_CHART, TICKERS
 from indicator_catalog import (
     DETAIL_ROWS,
     INDEXED_INDICATORS,
@@ -26,7 +26,7 @@ from strategy_domain import strategy_display_name
 APPLE_COLORS = ["#007AFF", "#FF9500", "#34C759", "#AF52DE", "#FF2D55", "#5AC8FA"]
 LINE_STYLES = ["-", "--", ":", "-."]
 ROW_LINE_STYLES = {"MACD": "-", "MACD_SIGNAL": "--"}
-SELECTION_FILE = RESULT_DIR / "chart_selection.json"
+SELECTION_FILE = STATE_DIR / "chart_selection.json"
 CONTROL_FONT_SIZE = 11
 CONTROL_TITLE_X = 0.0
 CONTROL_TITLE_Y = 1.0
@@ -1973,7 +1973,7 @@ def draw_chart(
     fig.canvas.mpl_connect("resize_event", update_control_layout)
 
     if SAVE_FIGURE:
-        fig.savefig(RESULT_DIR / "strategy_comparison.png", dpi=300)
+        fig.savefig(CHART_DIR / "strategy_comparison.png", dpi=300)
     if show_chart:
         plt.show()
     else:

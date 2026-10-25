@@ -64,9 +64,9 @@ SPY 장기 추세 회복, 신용스프레드 정상화 또는 경보 후 고점 
 줄일 수 있다. 선별적 20% 상한은 가장 유망한 후보지만 한 사건의 사후 적합일 가능성이 크다.
 
 재현: `src/legacy-python/validation/strategy28_dotcom_fast_tier.py`.
-결과: `results/strategy28_dotcom_fast_tier_summary.csv`,
-`results/strategy28_dotcom_fast_tier_events.csv`,
-`results/strategy28_dotcom_fast_tier_transitions.csv`.
+결과: `results/research/strategy28/strategy28_dotcom_fast_tier_summary.csv`,
+`results/research/strategy28/strategy28_dotcom_fast_tier_events.csv`,
+`results/research/strategy28/strategy28_dotcom_fast_tier_transitions.csv`.
 
 참고: [AQR, A Century of Evidence on Trend-Following Investing](https://www.aqr.com/insights/research/journal-article/a-century-of-evidence-on-trend-following-investing).
 이 연구는 추세 기반 위험 조정의 장기 근거이며, 여기서 사용한 QQQ 비중·문턱의 유효성을 직접

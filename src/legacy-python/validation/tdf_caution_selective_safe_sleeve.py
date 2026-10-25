@@ -10,7 +10,8 @@ from validation.tdf_caution_safe_sleeve_grid import caution_definition
 
 
 ROOT = Path(__file__).resolve().parents[2]
-RESULT_DIR = ROOT / "results"
+from config import RESEARCH_RESULT_DIR as RESULT_DIR
+from result_paths import research_result_path
 
 
 def selective_definition(tdf_share, score, entry_confirm, exit_confirm=1):
@@ -109,10 +110,10 @@ def main():
     rolling = pd.DataFrame(rolling_rows)
     RESULT_DIR.mkdir(exist_ok=True)
     summary.to_csv(
-        RESULT_DIR / "tdf_caution_selective_safe_sleeve.csv", index=False
+        research_result_path("tdf_caution_selective_safe_sleeve.csv"), index=False
     )
     rolling.to_csv(
-        RESULT_DIR / "tdf_caution_selective_safe_sleeve_rolling.csv", index=False
+        research_result_path("tdf_caution_selective_safe_sleeve_rolling.csv"), index=False
     )
     display = summary.copy()
     for column in (

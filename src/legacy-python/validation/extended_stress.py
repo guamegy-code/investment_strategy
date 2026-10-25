@@ -2,7 +2,7 @@
 
 import pandas as pd
 
-from config import EXTENDED_DATA_DIR, RESULT_DIR
+from config import EXTENDED_DATA_DIR
 from .extended_data import ASSETS, build_extended_data
 from performance import Performance
 from runner import Runner
@@ -10,6 +10,7 @@ from strategy import (
     RetirementAllocationStrategy,
     STATIC_70_BND10_BIL10_GLD10,
 )
+from result_paths import research_result_path
 
 
 WINDOWS = {
@@ -100,16 +101,16 @@ def run_extended_stress(download=True):
     full = windows.loc[windows["Window"] == "FULL_EXTENDED"].drop(
         columns=["Window"]
     ).reset_index(drop=True)
-    full.to_csv(RESULT_DIR / "extended_stress_full_summary.csv", index=False)
-    windows.to_csv(RESULT_DIR / "extended_stress_windows.csv", index=False)
-    relative.to_csv(RESULT_DIR / "extended_stress_relative.csv", index=False)
+    full.to_csv(research_result_path("extended_stress_full_summary.csv"), index=False)
+    windows.to_csv(research_result_path("extended_stress_windows.csv"), index=False)
+    relative.to_csv(research_result_path("extended_stress_relative.csv"), index=False)
     for result in results:
         name = result["strategy"].__class__.__name__
         result["history"].to_csv(
-            RESULT_DIR / f"extended_{name}_history.csv"
+            research_result_path(f"extended_{name}_history.csv")
         )
         pd.DataFrame(result["rebalances"]).to_csv(
-            RESULT_DIR / f"extended_{name}_rebalances.csv", index=False
+            research_result_path(f"extended_{name}_rebalances.csv"), index=False
         )
     return full, windows
 

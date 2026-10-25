@@ -12,7 +12,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from config import RESULT_DIR  # noqa: E402
+from config import RESEARCH_RESULT_DIR as RESULT_DIR  # noqa: E402
 from downloader import _load_fred_series, _load_hy_oas_observations  # noqa: E402
 from strategy28_failed_dip_regime import CURRENT, DOTCOM, GFC, ROOT  # noqa: E402
 from strategy30_31_yaml_parity import add_credit_observation  # noqa: E402
@@ -21,6 +21,7 @@ from strategy30_signal_combination_review import definition_for, event_metrics  
 from strategy30_unknown_crash_stress import (  # noqa: E402
     EVENT_END, EVENT_START, SCENARIOS, inject,
 )
+from result_paths import research_result_path
 
 VARIANTS = ("BASE30", "PRICE70", "PERSIST2", "QUICK_RELEASE", "PERSIST2_QUICK")
 
@@ -159,8 +160,8 @@ def main():
                 summary.extend(rows)
                 episodes.extend(detail)
     RESULT_DIR.mkdir(exist_ok=True)
-    pd.DataFrame(summary).to_csv(RESULT_DIR / f"{args.output_stem}_summary.csv", index=False)
-    pd.DataFrame(episodes).to_csv(RESULT_DIR / f"{args.output_stem}_episodes.csv", index=False)
+    pd.DataFrame(summary).to_csv(research_result_path(f"{args.output_stem}_summary.csv"), index=False)
+    pd.DataFrame(episodes).to_csv(research_result_path(f"{args.output_stem}_episodes.csv"), index=False)
 
 
 if __name__ == "__main__":

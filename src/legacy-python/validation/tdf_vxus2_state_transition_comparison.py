@@ -15,7 +15,8 @@ from validation.tdf_bnd_improvement_candidates import (
 
 
 ROOT = Path(__file__).resolve().parents[2]
-RESULT_DIR = ROOT / "results"
+from config import RESEARCH_RESULT_DIR as RESULT_DIR
+from result_paths import research_result_path
 LEGACY_SOURCE = ROOT / "strategies" / "04_profit_band_vxus.yaml"
 VXUS2_SOURCE = ROOT / "strategies" / "05_profit_band_vxus_v2.yaml"
 STATE_VARIABLES = (
@@ -124,10 +125,10 @@ def main():
     rolling = pd.DataFrame(rolling_rows)
     RESULT_DIR.mkdir(exist_ok=True)
     summary.to_csv(
-        RESULT_DIR / "tdf_vxus2_state_transition_comparison.csv", index=False
+        research_result_path("tdf_vxus2_state_transition_comparison.csv"), index=False
     )
     rolling.to_csv(
-        RESULT_DIR / "tdf_vxus2_state_transition_rolling.csv", index=False
+        research_result_path("tdf_vxus2_state_transition_rolling.csv"), index=False
     )
 
     display = summary.copy()

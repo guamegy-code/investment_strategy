@@ -8,10 +8,11 @@ import io
 import pandas as pd
 
 from backtest import Backtest
-from config import DATA_DIR, END_DATE, RESULT_DIR, START_DATE
+from config import DATA_DIR, END_DATE, START_DATE
 from experimental_strategies import StagedBearRetirementStrategy
 from performance import Performance
 from strategy import RetirementAllocationLegacyStrategy, STATIC_RETIREMENT_7030
+from result_paths import research_result_path
 
 
 FIXED_WINDOWS = (
@@ -178,12 +179,12 @@ def run_staged_bear_validation():
     rolling = _window_report(_rolling_windows())
     full = fixed.loc[fixed["Window"] == "FULL"]
     sensitivity = _sensitivity_summary(full, rolling)
-    fixed.to_csv(RESULT_DIR / "staged_bear_fixed_windows.csv", index=False)
-    rolling.to_csv(RESULT_DIR / "staged_bear_rolling_windows.csv", index=False)
+    fixed.to_csv(research_result_path("staged_bear_fixed_windows.csv"), index=False)
+    rolling.to_csv(research_result_path("staged_bear_rolling_windows.csv"), index=False)
     sensitivity.to_csv(
-        RESULT_DIR / "staged_bear_sensitivity_summary.csv", index=False
+        research_result_path("staged_bear_sensitivity_summary.csv"), index=False
     )
-    (RESULT_DIR / "staged_bear_validation.md").write_text(
+    (research_result_path("staged_bear_validation.md")).write_text(
         _markdown_report(fixed, sensitivity), encoding="utf-8"
     )
     return {"fixed": fixed, "rolling": rolling, "sensitivity": sensitivity}

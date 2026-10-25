@@ -91,4 +91,4 @@ MDD를 약 17.88%p 줄여 닷컴처럼 변동성이 오래 높은 하락에는 �
 해외 성장주 지수의 독립 위기 경로에 규칙을 고정한 채 적용하는 것이 적절하다.
 
 재현 스크립트는 `src/legacy-python/validation/strategy28_reentry_volatility_experiments.py`,
-산출물은 `results/strategy28_reentry_volatility_*.csv`다.
+산출물은 `results/research/strategy28/strategy28_reentry_volatility_*.csv`다.

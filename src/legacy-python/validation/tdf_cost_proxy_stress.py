@@ -14,7 +14,8 @@ from validation.tdf_state_allocation_grid import allocation_definition
 
 ROOT = Path(__file__).resolve().parents[2]
 SOURCE = ROOT / "strategies" / "06_profit_band_tdf2050.yaml"
-RESULT_DIR = ROOT / "results"
+from config import RESEARCH_RESULT_DIR as RESULT_DIR
+from result_paths import research_result_path
 TICKERS = ("QQQ", "TDF2050_PROXY", "BND", "BIL")
 
 
@@ -98,8 +99,8 @@ def main():
     costs = pd.DataFrame(cost_rows)
     proxy = pd.DataFrame(proxy_rows)
     RESULT_DIR.mkdir(exist_ok=True)
-    costs.to_csv(RESULT_DIR / "tdf_cost_stress.csv", index=False)
-    proxy.to_csv(RESULT_DIR / "tdf_proxy_drag_stress.csv", index=False)
+    costs.to_csv(research_result_path("tdf_cost_stress.csv"), index=False)
+    proxy.to_csv(research_result_path("tdf_proxy_drag_stress.csv"), index=False)
     for title, frame in (("Cost stress", costs), ("TDF proxy drag", proxy)):
         display = frame.copy()
         for column in ("CAGR", "MDD", "TransactionCosts"):

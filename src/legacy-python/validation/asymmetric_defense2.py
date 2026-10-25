@@ -6,10 +6,11 @@ import io
 import pandas as pd
 
 from backtest import Backtest
-from config import DATA_DIR, RESULT_DIR
+from config import DATA_DIR
 from performance import Performance
 from experimental_strategies import ASYMMETRIC_TREND_BAND_ADD_DEFENSE2_TUNED
 from strategy import ASYMMETRIC_TREND_BAND_ADD_DEFENSE2
+from result_paths import research_result_path
 
 
 FIXED_WINDOWS = (
@@ -143,13 +144,13 @@ def run_asymmetric_defense2_validation():
     )
     sensitivity = _sensitivity_report()
     fixed.to_csv(
-        RESULT_DIR / "asymmetric_defense2_tuning_windows.csv", index=False
+        research_result_path("asymmetric_defense2_tuning_windows.csv"), index=False
     )
     rolling.to_csv(
-        RESULT_DIR / "asymmetric_defense2_tuning_rolling.csv", index=False
+        research_result_path("asymmetric_defense2_tuning_rolling.csv"), index=False
     )
     sensitivity.to_csv(
-        RESULT_DIR / "asymmetric_defense2_tuning_sensitivity.csv", index=False
+        research_result_path("asymmetric_defense2_tuning_sensitivity.csv"), index=False
     )
     return {"fixed": fixed, "rolling": rolling, "sensitivity": sensitivity}
 

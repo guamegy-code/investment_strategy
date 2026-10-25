@@ -1,0 +1,925 @@
+from tests import PROJECT_ROOT
+import base64
+import gzip
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+from tempfile import TemporaryDirectory
+import unittest
+from unittest.mock import patch
+
+import yaml
+
+sys.path.insert(0, str(PROJECT_ROOT / "src" / "legacy-python"))
+
+from backtest import Backtest
+from offline_export import WEB_SOURCE_DIR, build_bundle, export_html, export_static_site
+from strategy_dsl import DeclarativeStrategy
+
+
+class OfflineExportTests(unittest.TestCase):
+    def test_editable_web_sources_are_used_as_the_export_template(self):
+        self.assertTrue((WEB_SOURCE_DIR / "index.html").is_file())
+        self.assertTrue((WEB_SOURCE_DIR / "app.js").is_file())
+        self.assertIn("__BUNDLE__", (WEB_SOURCE_DIR / "index.html").read_text(
+            encoding="utf-8"
+        ))
+
+    def test_dashboard_results_exist_before_async_bootstrap_finishes(self):
+        runtime = (WEB_SOURCE_DIR / "app.js").read_text(encoding="utf-8")
+
+        declaration = "let dashboardResults = new Map();"
+        self.assertIn(declaration, runtime)
+        self.assertLess(runtime.index(declaration), runtime.index("async function runDashboard()"))
+
+    def test_dashboard_discards_superseded_runs_and_clears_empty_selection(self):
+        runtime = (WEB_SOURCE_DIR / "app.js").read_text(encoding="utf-8")
+        coordinated = runtime.split(
+            "let dashboardRunRevision=0,dashboardRunTimer=null;", 1
+        )[1]
+
+        guard = "if(revision!==dashboardRunRevision)return false;"
+        commit = "dashboardResults=new Map(completed.map"
+        self.assertIn("const revision=++dashboardRunRevision;", coordinated)
+        self.assertIn(guard, coordinated)
+        self.assertLess(coordinated.index(guard), coordinated.index(commit))
+        self.assertIn("function scheduleDashboardRun()", coordinated)
+        self.assertIn("void runDashboard(revision);", coordinated)
+        self.assertIn("input.onchange=()=>{saveUiState();scheduleDashboardRun();};", runtime)
+        self.assertIn("clearDashboardVisuals();", coordinated)
+        self.assertIn("const committed=await periodAwareRunDashboard();", coordinated)
+
+    def test_hosted_site_skips_the_full_market_archive_in_the_browser(self):
+        runtime = (WEB_SOURCE_DIR / "app.js").read_text(encoding="utf-8")
+        load_data = runtime.split("async function loadData()", 1)[1].split(
+            "async function loadPrecomputedResults()", 1
+        )[0]
+
+        hosted_guard = "if (bundle.static_site && proxyUrl)"
+        archive_fetch = "fetch(bundle.data_url)"
+        self.assertIn(hosted_guard, load_data)
+        self.assertIn(archive_fetch, load_data)
+        self.assertLess(load_data.index(hosted_guard), load_data.index(archive_fetch))
+        self.assertIn("fetch(endpoint,{cache:'default'})", runtime)
+        self.assertIn("const proxyTickerFreshness=new Map(),proxyRequests=new Map()", runtime)
+
+    def test_dashboard_restores_saved_selection_before_the_list_is_visible(self):
+        runtime = (WEB_SOURCE_DIR / "app.js").read_text(encoding="utf-8")
+        restoration = runtime.split("const stateRestoringDashboardSetup=setupDashboard;", 1)[1].split(
+            "async function bootstrapDashboard()", 1
+        )[0]
+
+        self.assertIn("selectedIds=Array.isArray(state.strategyIds)?new Set(state.strategyIds):null", restoration)
+        self.assertIn("list.style.visibility='hidden';", restoration)
+        self.assertIn("input.checked=selectedIds.has(input.value)", restoration)
+        self.assertIn("if(state.analysisStart)$('start-date').value=state.analysisStart;", restoration)
+        self.assertIn("if(state.analysisEnd)$('end-date').value=state.analysisEnd;", restoration)
+        self.assertLess(restoration.index("input.checked=selectedIds.has(input.value)"), restoration.index("list.style.visibility='';"))
+        self.assertIn("if(!end.value||end.value<first||end.value>last)end.value=last;", runtime)
+
+    def test_charts_zoom_with_the_wheel_only_when_the_pointer_is_over_a_plot(self):
+        runtime = (WEB_SOURCE_DIR / "app.js").read_text(encoding="utf-8")
+
+        self.assertIn("scrollZoom:true", runtime)
+        self.assertNotIn("scrollZoom:false", runtime)
+
+    def test_comparison_chart_keeps_each_strategy_color_when_selection_changes(self):
+        runtime = (WEB_SOURCE_DIR / "app.js").read_text(encoding="utf-8")
+        renderer = runtime.split("renderAnalysis=function()", 1)[1].split(
+            "renderDetail=function()", 1
+        )[0]
+
+        self.assertIn("const strategyChartColors=new Map();", runtime)
+        self.assertIn("!strategyChartColors.has(id)", runtime)
+        self.assertIn("color:strategyChartColor(def.strategy.id)", renderer)
+        self.assertNotIn("color:dashPalette[index", renderer)
+
+    def test_browser_defers_mapped_risk_product_mix_above_70_percent(self):
+        runtime = (WEB_SOURCE_DIR / "app.js").read_text(encoding="utf-8")
+
+        self.assertIn("function mapProductTarget", runtime)
+        self.assertIn("currentWeight>riskCap+1e-8&&weight>riskCap+1e-8", runtime)
+        self.assertIn(
+            "target=mapProductTarget(signal.target,def,source,actual)", runtime
+        )
+
+    def test_static_site_rebuilds_the_tdf_proxy_from_market_components(self):
+        runtime = (WEB_SOURCE_DIR / "app.js").read_text(encoding="utf-8")
+
+        self.assertIn("TDF2050_PROXY_COMPONENT_WEIGHTS = {SPY:.4081,VXUS:.3339,BND:.258}", runtime)
+        self.assertIn("function buildTdf2050Proxy(components)", runtime)
+        self.assertIn("await ensureTdf2050Proxy(data,tickers)", runtime)
+
+    def test_indicator_rebalance_markers_use_executed_orders(self):
+        runtime = (WEB_SOURCE_DIR / "app.js").read_text(encoding="utf-8")
+        final_renderer = runtime.split(
+            "current=dashboardResults.get(selected)?.[1]", 1
+        )[1].split("function applyResponsiveLegend", 1)[0]
+
+        self.assertIn("filter(({row})=>Boolean(row.target))", final_renderer)
+        self.assertNotIn("Math.abs((row.weights?.[ticker]||0)", final_renderer)
+        self.assertIn("current?.length?current", final_renderer)
+
+    def test_rotation_candidates_do_not_delay_browser_strategy_history(self):
+        runtime = (WEB_SOURCE_DIR / "app.js").read_text(encoding="utf-8")
+
+        self.assertIn("function rotationOptionalTickers", runtime)
+        self.assertIn("recordsFor(validation.tickers,data,optional)", runtime)
+        self.assertIn("optional.has(ticker)||", runtime)
+
+    def test_browser_refreshes_only_the_cached_market_data_tail(self):
+        runtime = (WEB_SOURCE_DIR / "app.js").read_text(encoding="utf-8")
+
+        self.assertIn("function latestCachedDate(rows)", runtime)
+        self.assertIn("function mergeTickerRows(existing,incoming)", runtime)
+        self.assertIn("endpoint.searchParams.set('start',startDate)", runtime)
+        self.assertIn("end.value=last;", runtime)
+
+    def test_strategy_buttons_show_the_yaml_filename(self):
+        runtime = (WEB_SOURCE_DIR / "app.js").read_text(encoding="utf-8")
+
+        self.assertIn("function strategyYamlFilename(definition)", runtime)
+        self.assertIn("function syncStrategyButtonMetadata()", runtime)
+        self.assertIn("new MutationObserver(syncStrategyButtonMetadata)", runtime)
+        self.assertIn("def._yaml_file=file.name", runtime)
+
+    def test_bundle_embeds_yaml_definitions_and_compressed_market_csv(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            data_dir = root / "data"
+            strategy_dir = root / "strategies"
+            data_dir.mkdir()
+            strategy_dir.mkdir()
+            (data_dir / "QQQ.csv").write_text(
+                "Date,Open,Close\n2024-01-01,100,101\n", encoding="utf-8"
+            )
+            (strategy_dir / "sample.yaml").write_text(
+                "strategy:\n  id: sample\n  name: Sample\n  version: 1\n"
+                "assets:\n  required: [QQQ]\n"
+                "target:\n  - weights:\n      QQQ: 100%\n",
+                encoding="utf-8",
+            )
+
+            bundle = build_bundle(data_dir, strategy_dir)
+            market = json.loads(gzip.decompress(
+                base64.b64decode(bundle["data"])
+            ))
+
+            self.assertEqual(bundle["strategies"][0]["strategy"]["id"], "sample")
+            self.assertEqual(bundle["strategies"][0]["_yaml_file"], "sample.yaml")
+            self.assertEqual(market["QQQ"], "Date,Open,Close\n2024-01-01,100,101\n")
+            self.assertRegex(bundle["market_data_version"], r"^[0-9a-f]{16}$")
+
+    def test_bundle_includes_optional_data_proxy_url(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            data_dir = root / "data"
+            strategy_dir = root / "strategies"
+            data_dir.mkdir()
+            strategy_dir.mkdir()
+
+            bundle = build_bundle(
+                data_dir, strategy_dir,
+                data_proxy="https://strategy-data.example.workers.dev",
+            )
+
+            self.assertEqual(
+                bundle["data_proxy"], "https://strategy-data.example.workers.dev"
+            )
+
+    def test_precomputed_results_replace_missing_state_with_empty_text(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            data_dir = root / "data"
+            strategy_dir = root / "strategies"
+            result_dir = root / "results"
+            data_dir.mkdir()
+            strategy_dir.mkdir()
+            result_dir.mkdir()
+            (strategy_dir / "sample.yaml").write_text(
+                "strategy:\n  id: sample\n  name: Sample\n  version: 1\n",
+                encoding="utf-8",
+            )
+            (result_dir / "Sample_history.csv").write_text(
+                "Date,Portfolio,Weights,StrategyState\n"
+                "2024-01-02,1.0,{'QQQ': 1.0},\n",
+                encoding="utf-8",
+            )
+
+            with patch("offline_export.RESULT_DIR", result_dir):
+                bundle = build_bundle(data_dir, strategy_dir)
+            results = json.loads(gzip.decompress(
+                base64.b64decode(bundle["precomputed_results"])
+            ))
+
+            self.assertEqual(results["sample"][0]["state"], "")
+
+    def test_stale_precomputed_results_are_excluded_after_yaml_changes(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            data_dir = root / "data"
+            strategy_dir = root / "strategies"
+            result_dir = root / "results"
+            data_dir.mkdir()
+            strategy_dir.mkdir()
+            result_dir.mkdir()
+            strategy_path = strategy_dir / "sample.yaml"
+            strategy_path.write_text(
+                "strategy:\n  id: sample\n  name: Sample\n  version: 1\n",
+                encoding="utf-8",
+            )
+            history_path = result_dir / "Sample_history.csv"
+            history_path.write_text(
+                "Date,Portfolio,Weights,StrategyState\n"
+                "2024-01-02,1.0,{'QQQ': 1.0},\n",
+                encoding="utf-8",
+            )
+            os.utime(history_path, (1, 1))
+
+            with patch("offline_export.RESULT_DIR", result_dir):
+                bundle = build_bundle(data_dir, strategy_dir)
+            results = json.loads(gzip.decompress(
+                base64.b64decode(bundle["precomputed_results"])
+            ))
+
+            self.assertNotIn("sample", results)
+
+    def test_precomputed_results_include_rebalance_targets(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            data_dir = root / "data"
+            strategy_dir = root / "strategies"
+            result_dir = root / "results"
+            data_dir.mkdir()
+            strategy_dir.mkdir()
+            result_dir.mkdir()
+            (strategy_dir / "sample.yaml").write_text(
+                "strategy:\n  id: sample\n  name: Sample\n  version: 1\n",
+                encoding="utf-8",
+            )
+            (result_dir / "Sample_history.csv").write_text(
+                "Date,Portfolio,Weights,StrategyState\n"
+                "2024-01-02,1.0,{'QQQ': 1.0},\n",
+                encoding="utf-8",
+            )
+            (result_dir / "Sample_rebalances.json").write_text(
+                json.dumps([{
+                    "Date": "2024-01-02",
+                    "Target": {"QQQ": 0.75, "BIL": 0.25},
+                    "PreWeights": {"QQQ": 1.0, "BIL": 0.0},
+                    "ExecutionDays": 3,
+                }]),
+                encoding="utf-8",
+            )
+
+            with patch("offline_export.RESULT_DIR", result_dir):
+                bundle = build_bundle(data_dir, strategy_dir)
+            results = json.loads(gzip.decompress(
+                base64.b64decode(bundle["precomputed_results"])
+            ))
+
+            row = results["sample"][0]
+            self.assertEqual(row["target"], {"QQQ": 0.75, "BIL": 0.25})
+            self.assertEqual(row["preWeights"], {"QQQ": 1.0, "BIL": 0.0})
+            self.assertEqual(row["executionDays"], 3)
+
+    def test_precomputed_results_place_rebalance_on_execution_date(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            data_dir = root / "data"
+            strategy_dir = root / "strategies"
+            result_dir = root / "results"
+            data_dir.mkdir()
+            strategy_dir.mkdir()
+            result_dir.mkdir()
+            (strategy_dir / "sample.yaml").write_text(
+                "strategy:\n  id: sample\n  name: Sample\n  version: 1\n",
+                encoding="utf-8",
+            )
+            (result_dir / "Sample_history.csv").write_text(
+                "Date,Portfolio,Weights,StrategyState\n"
+                "2024-01-02,1.0,{'QQQ': 1.0},\n"
+                "2024-01-03,1.0,{'QQQ': 0.8},\n",
+                encoding="utf-8",
+            )
+            (result_dir / "Sample_rebalances.json").write_text(
+                json.dumps([{
+                    "Date": "2024-01-02",
+                    "ExecutionDate": "2024-01-03",
+                    "Target": {"QQQ": 0.8},
+                }]),
+                encoding="utf-8",
+            )
+
+            with patch("offline_export.RESULT_DIR", result_dir):
+                bundle = build_bundle(data_dir, strategy_dir)
+            results = json.loads(gzip.decompress(
+                base64.b64decode(bundle["precomputed_results"])
+            ))["sample"]
+
+            self.assertIsNone(results[0]["target"])
+            self.assertEqual(results[1]["target"], {"QQQ": 0.8})
+
+    def test_export_is_a_single_offline_html_document(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            data_dir = root / "data"
+            strategy_dir = root / "strategies"
+            data_dir.mkdir()
+            strategy_dir.mkdir()
+            (data_dir / "QQQ.csv").write_text(
+                "Date,Open,Close\n2024-01-01,100,101\n", encoding="utf-8"
+            )
+            (strategy_dir / "sample.yaml").write_text(
+                "strategy:\n  id: sample\n  name: Sample\n  version: 1\n"
+                "assets:\n  required: [QQQ]\n"
+                "target:\n  - weights:\n      QQQ: 100%\n",
+                encoding="utf-8",
+            )
+            output = export_html(root / "offline.html", data_dir=data_dir, strategy_dir=strategy_dir)
+            document = output.read_text(encoding="utf-8")
+
+            self.assertIn("Investment Strategy Research", document)
+            self.assertIn("sample", document)
+            self.assertIn("DecompressionStream", document)
+            self.assertIn('id="reset"', document)
+            self.assertIn("async function resetUserState()", document)
+            self.assertIn("transaction.objectStore(name).clear()", document)
+            self.assertIn("function indicatorTickerData(data)", document)
+            self.assertIn("if(!ticker.endsWith('=X'))visible.add(ticker)", document)
+            self.assertIn("data[ticker]||[]", document)
+            self.assertIn('id="indicator-remove-fx"', document)
+            self.assertIn('value="notifications"', document)
+            self.assertIn("function browserNotificationEvents(history)", document)
+            self.assertIn("notifications:'\\uc54c\\ub9bc'", document)
+            self.assertIn("marker:{symbol:'triangle-up',size:12,color:'#9C27B0'", document)
+            self.assertIn("notificationMarker:true", document)
+            self.assertIn("const notes=date?indicatorNotificationTooltipByDate.get(date):null", document)
+            self.assertIn("configured?.values?.[value]", document)
+            self.assertIn("warningEntries:warningEntries.filter", document)
+            self.assertIn("dipEntries:dipEntries.filter", document)
+            self.assertIn("const rebalanceByDate=new Map", document)
+            self.assertIn("if(date&&!rebalanceByDate.has(date))", document)
+            self.assertIn("existing.text=rebalanceItems.map", document)
+            self.assertNotIn("append('WARNING 진입'", document)
+            self.assertNotIn("append('-10% QQQ 100%'", document)
+            self.assertIn("input.value==='notifications'||input.value==='rebalances'", document)
+            self.assertIn("const milestoneItems=new Set", document)
+            self.assertNotIn("const markerNotes=", document)
+            self.assertIn("plotly_restyle", document)
+            self.assertIn("hiddenTraceNames", document)
+            self.assertIn("querySelectorAll('.legend .traces')", document)
+            self.assertIn("indicatorHiddenTraceNames", document)
+            self.assertIn("plotly_legendclick", document)
+            self.assertIn("bindIndicatorLegendPersistence", document)
+            self.assertIn("captureHiddenLegendItems", document)
+            self.assertIn("hiddenIndexes", document)
+            self.assertIn("research-notification-tooltip-note", document)
+            self.assertIn("const fullMessage=value=>", document)
+            self.assertNotIn("slice(0,34)", document)
+            self.assertIn("white-space: pre-wrap", document)
+            self.assertIn("research-notification-tooltip-section", document)
+            self.assertIn("contain: inline-size", document)
+            self.assertIn("grid.getBoundingClientRect().width", document)
+            self.assertIn(".replace(/\\s*\\(/g,'\\n(')", document)
+            self.assertIn("card.dataset.for=plotId", document)
+            self.assertIn("hoverinfo:'skip'", document)
+            self.assertIn("excludeFromYAutoscale:true", document)
+            self.assertIn("strategyAwareMovingAverageRenderer", document)
+            self.assertIn("function installAnalysisTabFastPath()", document)
+            self.assertIn("tab.dataset.fastAnalysisTabBound='1'", document)
+            self.assertIn("activeView:'analysis'", document)
+            self.assertIn("restoreIndicators&&loadUiState().activeView==='indicators'", document)
+            self.assertIn("if(fxToggle.checked)await updateDetailFxView()", document)
+            self.assertIn("toggle.checked=false;\n    saveUiState();", document)
+            self.assertIn(".research-indicator-fx-toggle input,", document)
+            self.assertIn("width: 36px !important", document)
+            self.assertIn("research-indicator-strategy-fx-row", document)
+            self.assertIn("indicatorEventLegendRenderer", document)
+            self.assertIn("hosted?.strategy?.enabled!==false", document)
+            self.assertIn("hidden_strategy_ids", document)
+            self.assertIn("definition.strategy.enabled=entry.enabled", document)
+            self.assertIn("VALUATION_SCORE:'합성 밸류에이션 점수 (비공식)'", document)
+            self.assertIn("strategyWithSingleQqqIndicator", document)
+            self.assertIn("function exchangeRateRemovedIndicatorRows(data,ticker)", document)
+            self.assertIn("window.ResearchSharedUi", document)
+            self.assertIn("researchDatePickerBound", document)
+            self.assertNotIn("<script src=", document)
+
+    def test_static_site_uses_manifest_and_excludes_market_data(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            strategy_dir = root / "strategies"
+            strategy_dir.mkdir()
+            (strategy_dir / "sample.yaml").write_text(
+                "strategy:\n  id: sample\n  name: Sample\n  version: 1\n"
+                "assets:\n  required: [QQQ]\n"
+                "target:\n  - weights:\n      QQQ: 100%\n",
+                encoding="utf-8",
+            )
+            legacy_proxy = root / "site" / "data" / "TDF2050_PROXY.csv"
+            legacy_proxy.parent.mkdir(parents=True)
+            legacy_proxy.write_text("legacy", encoding="utf-8")
+            stale_sidecar = root / "site" / "market-data.json.gz"
+            stale_sidecar.write_bytes(b"stale")
+            stale_fallback = root / "site" / "market-data"
+            stale_fallback.mkdir()
+            (stale_fallback / "U1BZ.csv.gz").write_bytes(b"stale")
+            stale_strategy_archive = root / "site" / "strategies.zip"
+            stale_strategy_archive.write_bytes(b"stale")
+            stale_assets = root / "site" / "assets"
+            stale_assets.mkdir()
+            for name in (
+                "app.000000000000.css", "app.000000000000.js",
+                "plotly.000000000000.min.js", "app.css", "plotly.min.js",
+            ):
+                (stale_assets / name).write_bytes(b"stale")
+
+            output = export_static_site(
+                root / "site",
+                strategy_dir=strategy_dir,
+                data_proxy="https://strategy-data.example.workers.dev",
+            )
+            document = output.read_text(encoding="utf-8")
+            manifest = json.loads((root / "site" / "strategies" / "manifest.json").read_text(
+                encoding="utf-8"
+            ))
+
+            self.assertTrue((root / "site" / "app.js").is_file())
+            self.assertEqual(len(list((root / "site" / "assets").glob("app.*.css"))), 1)
+            self.assertEqual(len(list((root / "site" / "assets").glob("plotly.*.min.js"))), 1)
+            self.assertEqual(len(list((root / "site" / "assets").glob("app.*.js"))), 1)
+            self.assertEqual(len(list((root / "site" / "assets").glob("shared-ui.*.js"))), 1)
+            self.assertTrue((root / "site" / "strategies" / "sample.yaml").is_file())
+            self.assertEqual(manifest["strategies"], [{
+                "id": "sample", "path": "sample.yaml", "version": 1,
+                "enabled": True,
+            }])
+            self.assertEqual(manifest["result_currencies"], {})
+            self.assertIn('"precomputed_results_currency": "UNVERIFIED"', document)
+            self.assertIn('"strategy_manifest_url": "./strategies/manifest.json"', document)
+            self.assertIn('"static_site": true', document)
+            self.assertIn('<script defer src="./assets/plotly.', document)
+            self.assertIn('<script defer src="./assets/app.', document)
+            self.assertIn('<script defer src="./assets/shared-ui.', document)
+            self.assertIn('<link rel="stylesheet" href="./assets/app.', document)
+            self.assertIn("Cache-Control: public, max-age=31536000, immutable", (root / "site" / "_headers").read_text(encoding="utf-8"))
+            headers = (root / "site" / "_headers").read_text(encoding="utf-8")
+            self.assertIn("/strategies/manifest.json\n  Cache-Control: no-cache", headers)
+            self.assertIn("/strategies/enabled.*.json\n  Cache-Control: public, max-age=31536000, immutable", headers)
+            self.assertNotIn('"data": "H4sI', document)
+            self.assertFalse(legacy_proxy.exists())
+            self.assertFalse(stale_sidecar.exists())
+            self.assertFalse(stale_fallback.exists())
+            self.assertFalse(stale_strategy_archive.exists())
+            self.assertFalse((root / "site" / "assets" / "app.000000000000.css").exists())
+            self.assertFalse((root / "site" / "assets" / "app.000000000000.js").exists())
+            self.assertFalse((root / "site" / "assets" / "plotly.000000000000.min.js").exists())
+            self.assertFalse((root / "site" / "assets" / "app.css").exists())
+            self.assertFalse((root / "site" / "assets" / "plotly.min.js").exists())
+
+    def test_strategy_22_is_enabled_in_the_performance_analysis_manifest(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            strategy_dir = root / "strategies"
+            strategy_dir.mkdir()
+            source = PROJECT_ROOT / "strategies" / "22_buy_3dip_composite_valuation.yaml"
+            shutil.copy2(source, strategy_dir / source.name)
+
+            export_static_site(root / "site", strategy_dir=strategy_dir)
+            manifest = json.loads((root / "site" / "strategies" / "manifest.json").read_text(
+                encoding="utf-8"
+            ))
+            definition = yaml.safe_load((root / "site" / "strategies" / source.name).read_text(
+                encoding="utf-8"
+            ))
+
+            self.assertEqual(manifest["strategies"], [{
+                "id": "buy-3dip-bil-composite-valuation",
+                "path": source.name,
+                "version": 2,
+                "enabled": False,
+            }])
+            self.assertFalse(definition["strategy"]["enabled"])
+
+    def test_static_site_preserves_readable_strategy_visibility_manifest(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            strategy_dir = root / "strategies"
+            strategy_dir.mkdir()
+            (strategy_dir / "sample.yaml").write_text(
+                "strategy:\n  id: sample\n  name: Sample\n  version: 1\n"
+                "assets:\n  required: [QQQ]\n"
+                "target:\n  - weights:\n      QQQ: 100%\n",
+                encoding="utf-8",
+            )
+            (strategy_dir / "manifest.json").write_text(
+                '{\n  "version": 1,\n  "hidden_strategy_ids": ["sample"]\n}\n',
+                encoding="utf-8",
+            )
+
+            export_static_site(root / "site", strategy_dir=strategy_dir)
+            manifest_path = root / "site" / "strategies" / "manifest.json"
+            manifest_text = manifest_path.read_text(encoding="utf-8")
+            manifest = json.loads(manifest_text)
+
+            self.assertEqual(manifest["hidden_strategy_ids"], ["sample"])
+            self.assertIn('\n  "hidden_strategy_ids": [\n', manifest_text)
+            self.assertIn('\n  "strategies": [\n', manifest_text)
+
+    def test_static_enabled_bundle_preserves_notification_on_keys(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            strategy_dir = root / "strategies"
+            strategy_dir.mkdir()
+            (strategy_dir / "sample.yaml").write_text(
+                "strategy:\n  id: sample\n  name: Sample\n  version: 1\n"
+                "assets:\n  required: [QQQ]\n"
+                "state:\n  mode:\n    initial: NORMAL\n    rules:\n"
+                "      - when: QQQ.close < 100\n        set: DEFENSE\n"
+                "        confirm: 2\n"
+                "target:\n  - weights:\n      QQQ: 100%\n"
+                "notifications:\n  states:\n    mode:\n      label: Mode\n"
+                "      alerts:\n        - on: confirmation_started\n"
+                "          to: [DEFENSE]\n        - on: changed\n"
+                "          to: DEFENSE\n",
+                encoding="utf-8",
+            )
+            site = root / "site"
+            stale_bundle = site / "strategies" / "enabled.stale.json"
+            stale_bundle.parent.mkdir(parents=True)
+            stale_bundle.write_text("[]", encoding="utf-8")
+
+            export_static_site(site, strategy_dir=strategy_dir)
+            manifest = json.loads(
+                (site / "strategies" / "manifest.json").read_text(encoding="utf-8")
+            )
+            bundles = list((site / "strategies").glob("enabled.*.json"))
+            definitions = json.loads(
+                (site / "strategies" / manifest["enabled_bundle"]).read_text(
+                    encoding="utf-8"
+                )
+            )
+            alerts = definitions[0]["notifications"]["states"]["mode"]["alerts"]
+
+            self.assertEqual(len(bundles), 1)
+            self.assertEqual(
+                [alert["on"] for alert in alerts],
+                ["confirmation_started", "changed"],
+            )
+            self.assertTrue(all("true" not in alert for alert in alerts))
+
+    def test_strategy_23_is_enabled_in_the_performance_analysis_manifest(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            strategy_dir = root / "strategies"
+            strategy_dir.mkdir()
+            source = PROJECT_ROOT / "strategies" / "23_qqq_structural_defense_balanced.yaml"
+            shutil.copy2(source, strategy_dir / source.name)
+
+            export_static_site(root / "site", strategy_dir=strategy_dir)
+            manifest = json.loads((root / "site" / "strategies" / "manifest.json").read_text(
+                encoding="utf-8"
+            ))
+            definition = yaml.safe_load((root / "site" / "strategies" / source.name).read_text(
+                encoding="utf-8"
+            ))
+
+            self.assertEqual(manifest["strategies"], [{
+                "id": "qqq-structural-defense-balanced",
+                "path": source.name,
+                "version": 1,
+                "enabled": False,
+            }])
+            self.assertFalse(definition["strategy"]["enabled"])
+
+    def test_strategy_24_is_enabled_in_the_performance_analysis_manifest(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            strategy_dir = root / "strategies"
+            strategy_dir.mkdir()
+            source = PROJECT_ROOT / "strategies" / "24_qqq_valuation_breakdown_defense.yaml"
+            shutil.copy2(source, strategy_dir / source.name)
+
+            export_static_site(root / "site", strategy_dir=strategy_dir)
+            manifest = json.loads((root / "site" / "strategies" / "manifest.json").read_text(
+                encoding="utf-8"
+            ))
+            definition = yaml.safe_load((root / "site" / "strategies" / source.name).read_text(
+                encoding="utf-8"
+            ))
+
+            self.assertEqual(manifest["strategies"], [{
+                "id": "qqq-valuation-breakdown-defense",
+                "path": source.name,
+                "version": 1,
+                "enabled": False,
+            }])
+            self.assertFalse(definition["strategy"]["enabled"])
+
+    def test_strategy_25_is_enabled_in_the_performance_analysis_manifest(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            strategy_dir = root / "strategies"
+            strategy_dir.mkdir()
+            source = PROJECT_ROOT / "strategies" / "25_qqq_valuation_breakdown_balanced.yaml"
+            shutil.copy2(source, strategy_dir / source.name)
+
+            export_static_site(root / "site", strategy_dir=strategy_dir)
+            manifest = json.loads((root / "site" / "strategies" / "manifest.json").read_text(
+                encoding="utf-8"
+            ))
+            definition = yaml.safe_load((root / "site" / "strategies" / source.name).read_text(
+                encoding="utf-8"
+            ))
+
+            self.assertEqual(manifest["strategies"], [{
+                "id": "qqq-valuation-breakdown-balanced",
+                "path": source.name,
+                "version": 2,
+                "enabled": True,
+            }])
+            self.assertTrue(definition["strategy"]["enabled"])
+
+    def test_strategy_26_is_enabled_in_the_performance_analysis_manifest(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            strategy_dir = root / "strategies"
+            strategy_dir.mkdir()
+            source = PROJECT_ROOT / "strategies" / "26_band_7030_tdf_valuation_defense.yaml"
+            shutil.copy2(source, strategy_dir / source.name)
+
+            export_static_site(root / "site", strategy_dir=strategy_dir)
+            manifest = json.loads((root / "site" / "strategies" / "manifest.json").read_text(
+                encoding="utf-8"
+            ))
+            definition = yaml.safe_load((root / "site" / "strategies" / source.name).read_text(
+                encoding="utf-8"
+            ))
+
+            self.assertEqual(manifest["strategies"], [{
+                "id": "band-7030-tdf-valuation-defense",
+                "path": source.name,
+                "version": 2,
+                "enabled": True,
+            }])
+            self.assertTrue(definition["strategy"]["enabled"])
+
+    def test_strategy_28_is_enabled_in_the_performance_analysis_manifest(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            strategy_dir = root / "strategies"
+            strategy_dir.mkdir()
+            source = PROJECT_ROOT / "strategies" / "28_qqq_valuation_warning_dip_buyer.yaml"
+            shutil.copy2(source, strategy_dir / source.name)
+
+            export_static_site(root / "site", strategy_dir=strategy_dir)
+            manifest = json.loads((root / "site" / "strategies" / "manifest.json").read_text(
+                encoding="utf-8"
+            ))
+            definition = yaml.safe_load((root / "site" / "strategies" / source.name).read_text(
+                encoding="utf-8"
+            ))
+
+            self.assertEqual(manifest["strategies"], [{
+                "id": "qqq-valuation-warning-dip-buyer",
+                "path": source.name,
+                "version": 2,
+                "enabled": True,
+            }])
+            self.assertTrue(definition["strategy"]["enabled"])
+
+    def test_export_can_write_market_data_as_a_sidecar_file(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            data_dir = root / "data"
+            strategy_dir = root / "strategies"
+            data_dir.mkdir()
+            strategy_dir.mkdir()
+            (data_dir / "QQQ.csv").write_text(
+                "Date,Open,Close\n2024-01-01,100,101\n", encoding="utf-8"
+            )
+            (strategy_dir / "sample.yaml").write_text(
+                "strategy:\n  id: sample\n  name: Sample\n  version: 1\n",
+                encoding="utf-8",
+            )
+
+            output = export_html(
+                root / "offline.html",
+                data_dir=data_dir,
+                strategy_dir=strategy_dir,
+                external_market_data=True,
+            )
+            document = output.read_text(encoding="utf-8")
+            sidecar = root / "offline.market-data.json.gz"
+
+            self.assertTrue(sidecar.is_file())
+            self.assertIn('"data_url": "offline.market-data.json.gz"', document)
+            self.assertNotIn('"data": "H4sI', document)
+
+    def test_static_site_can_include_market_data_fallback(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            data_dir = root / "data"
+            strategy_dir = root / "strategies"
+            data_dir.mkdir()
+            strategy_dir.mkdir()
+            (data_dir / "SPY.csv").write_text(
+                "Date,Open,High,Low,Close,Volume\n"
+                "2024-01-02,100,103,99,102,1000\n",
+                encoding="utf-8",
+            )
+            (strategy_dir / "sample.yaml").write_text(
+                "strategy:\n  id: sample\n  name: Sample\n  version: 1\n"
+                "assets:\n  required: [SPY]\n"
+                "target:\n  - weights:\n      SPY: 100%\n",
+                encoding="utf-8",
+            )
+
+            output = export_static_site(
+                root / "site",
+                strategy_dir=strategy_dir,
+                data_dir=data_dir,
+            )
+            document = output.read_text(encoding="utf-8")
+            sidecar = root / "site" / "market-data.json.gz"
+            ticker_fallback = root / "site" / "market-data" / "U1BZ.csv.gz"
+
+            self.assertTrue(sidecar.is_file())
+            self.assertEqual(json.loads(gzip.decompress(sidecar.read_bytes())), {
+                "SPY": "Date,Open,High,Low,Close,Volume\n"
+                "2024-01-02,100,103,99,102,1000\n",
+            })
+            self.assertIn('"data_url": "./market-data.json.gz"', document)
+            self.assertEqual(
+                gzip.decompress(ticker_fallback.read_bytes()).decode("utf-8").splitlines(),
+                [
+                    "Date,Open,High,Low,Close,Volume",
+                    "2024-01-02,100,103,99,102,1000",
+                ],
+            )
+
+    @unittest.skipUnless(
+        os.environ.get("RUN_OFFLINE_BROWSER_TESTS")
+        and (shutil.which("msedge") or Path(
+            r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
+        ).exists()),
+        "set RUN_OFFLINE_BROWSER_TESTS=1 to run the local Microsoft Edge validation",
+    )
+    def test_browser_runtime_matches_python_for_a_fixed_weight_strategy(self):
+        """Run the generated file in a real browser, without a web server."""
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            data_dir = root / "data"
+            strategy_dir = root / "strategies"
+            data_dir.mkdir()
+            strategy_dir.mkdir()
+            csv = (
+                "Date,Open,High,Low,Close,Volume\n"
+                "2024-01-02,100,100,100,100,1\n"
+                "2024-01-03,110,110,110,110,1\n"
+                "2024-01-04,121,121,121,121,1\n"
+            )
+            (data_dir / "QQQ.csv").write_text(csv, encoding="utf-8")
+            definition = {
+                "strategy": {"id": "sample", "name": "Sample", "version": 1},
+                "assets": {"required": ["QQQ"]},
+                "target": [{"weights": {"QQQ": "100%"}}],
+            }
+            (strategy_dir / "sample.yaml").write_text(
+                yaml.safe_dump(definition, sort_keys=False), encoding="utf-8"
+            )
+            strategy = DeclarativeStrategy(definition)
+            expected = Backtest(strategy, data_dir=data_dir, tickers=["QQQ"]).run()
+            expected_value = expected.iloc[-1]["Portfolio"]
+
+            output = export_html(
+                root / "offline.html", data_dir=data_dir, strategy_dir=strategy_dir
+            )
+            probe = """<script>(async()=>{try{const h=runWithData(definitions[0],await loadData());document.body.dataset.offlineResult=h.at(-1).value;}catch(e){document.body.dataset.offlineError=e.message;}})();</script></html>"""
+            output.write_text(
+                output.read_text(encoding="utf-8").replace("</html>", probe),
+                encoding="utf-8",
+            )
+            edge = shutil.which("msedge") or r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
+            result = subprocess.run(
+                [
+                    edge,
+                    "--headless=new",
+                    "--disable-gpu",
+                    "--disable-software-rasterizer",
+                    f"--user-data-dir={root / 'edge-profile'}",
+                    "--virtual-time-budget=3000",
+                    "--dump-dom",
+                    output.as_uri(),
+                ],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=30,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr[-1000:])
+            self.assertNotIn("data-offline-error=", result.stdout)
+            marker = 'data-offline-result="'
+            self.assertIn(marker, result.stdout)
+            actual_value = float(result.stdout.split(marker, 1)[1].split('"', 1)[0])
+            self.assertAlmostEqual(actual_value, expected_value, places=10)
+
+    @unittest.skipUnless(
+        os.environ.get("RUN_OFFLINE_BROWSER_TESTS")
+        and (shutil.which("msedge") or Path(
+            r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
+        ).exists()),
+        "set RUN_OFFLINE_BROWSER_TESTS=1 to run the local Microsoft Edge validation",
+    )
+    def test_browser_runtime_matches_python_state_and_rebalance_dates(self):
+        """Imported DSL state changes keep the same dates and weights in-browser."""
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            data_dir = root / "data"
+            strategy_dir = root / "strategies"
+            data_dir.mkdir()
+            strategy_dir.mkdir()
+            rows = ["Date,Open,High,Low,Close,Volume"]
+            closes = [100, 101, 99, 95, 94, 93, 110, 111]
+            for day, close in enumerate(closes, start=2):
+                date = f"2024-01-{day:02d}"
+                rows.append(f"{date},{close},{close},{close},{close},1")
+            for ticker in ("QQQ", "BIL"):
+                (data_dir / f"{ticker}.csv").write_text(
+                    "\n".join(rows) + "\n", encoding="utf-8"
+                )
+            definition = {
+                "strategy": {"id": "stateful", "name": "Stateful", "version": 1},
+                "assets": {"required": ["QQQ", "BIL"]},
+                "state": {
+                    "mode": {
+                        "initial": "BULL",
+                        "check": "daily",
+                        "rules": [
+                            {"when": "QQQ.Close < 98", "set": "BEAR", "confirm": 2},
+                            {"otherwise": True, "set": "BULL", "confirm": 2},
+                        ],
+                    }
+                },
+                "target": [
+                    {
+                        "when": "state.mode == 'BEAR'",
+                        "weights": {"QQQ": "0%", "BIL": "100%"},
+                    },
+                    {"weights": {"QQQ": "100%", "BIL": "0%"}},
+                ],
+                "rebalance": [{"when": "changed(state.mode)", "check": "daily", "days": 2}],
+            }
+            (strategy_dir / "stateful.yaml").write_text(
+                yaml.safe_dump(definition, sort_keys=False), encoding="utf-8"
+            )
+            expected = Backtest(
+                DeclarativeStrategy(definition), data_dir=data_dir,
+                tickers=["QQQ", "BIL"],
+            ).run()
+            output = export_html(
+                root / "offline.html", data_dir=data_dir, strategy_dir=strategy_dir
+            )
+            probe = """<script>(async()=>{try{const h=runWithData(definitions[0],await loadData());document.body.dataset.offlineHistory=JSON.stringify(h.map(row=>({date:row.date,weights:row.weights})));}catch(e){document.body.dataset.offlineError=e.message;}})();</script></html>"""
+            output.write_text(
+                output.read_text(encoding="utf-8").replace("</html>", probe),
+                encoding="utf-8",
+            )
+            edge = shutil.which("msedge") or r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
+            result = subprocess.run(
+                [
+                    edge, "--headless=new", "--disable-gpu",
+                    "--disable-software-rasterizer",
+                    f"--user-data-dir={root / 'edge-profile'}",
+                    "--virtual-time-budget=3000", "--dump-dom", output.as_uri(),
+                ],
+                capture_output=True, text=True, encoding="utf-8",
+                errors="replace", timeout=30, check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr[-1000:])
+            self.assertNotIn("data-offline-error=", result.stdout)
+            marker = 'data-offline-history="'
+            self.assertIn(marker, result.stdout)
+            encoded = result.stdout.split(marker, 1)[1].split('"', 1)[0]
+            actual = json.loads(encoded.replace("&quot;", '"'))
+            self.assertEqual(
+                [item["date"] for item in actual],
+                [str(date.date()) for date in expected.index],
+            )
+            for browser_row, (_, python_row) in zip(actual, expected.iterrows()):
+                python_weights = ast.literal_eval(python_row["Weights"])
+                self.assertEqual(set(browser_row["weights"]), set(python_weights))
+                for ticker, weight in python_weights.items():
+                    self.assertAlmostEqual(
+                        browser_row["weights"][ticker], weight, places=10
+                    )
+
+
+if __name__ == "__main__":
+    unittest.main()

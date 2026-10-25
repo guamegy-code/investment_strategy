@@ -5,7 +5,6 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from config import RESULT_DIR
 from .discrete_hazard import (
     HAZARD_PROFILES,
     first_breach_days,
@@ -24,6 +23,7 @@ from .weekly_path_tail import (
     PATH_THRESHOLD,
     suppress_overlapping_warnings,
 )
+from result_paths import research_result_path
 
 
 MODELS = ("PATH_HAZARD_CONTROL", "EPISODE_ONSET_HAZARD")
@@ -214,8 +214,8 @@ def run_episode_onset_hazard_validation():
     samples = _common_samples(data)
     metrics = _metric_rows(samples)
     selection = _development_selection(metrics)
-    metrics.to_csv(RESULT_DIR / "episode_onset_hazard_metrics.csv", index=False)
-    selection.to_csv(RESULT_DIR / "episode_onset_hazard_selection.csv", index=False)
+    metrics.to_csv(research_result_path("episode_onset_hazard_metrics.csv"), index=False)
+    selection.to_csv(research_result_path("episode_onset_hazard_selection.csv"), index=False)
     return {"metrics": metrics, "selection": selection}
 
 

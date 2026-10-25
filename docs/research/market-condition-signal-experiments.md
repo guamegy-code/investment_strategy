@@ -15,8 +15,8 @@
 | HYG/LQD 약세를 BULL→CAUTION 필수 확인으로 사용 | CAGR -0.207%p, MDD -4.989%p | CAGR -0.852%p | 기각 |
 
 표에서 MDD 변화가 양수이면 낙폭이 얕아졌다는 뜻입니다. 정확한 결과는
-`results/vxn_state_gate_*.csv`와
-`results/credit_entry_gate_*.csv`에서 생성됩니다.
+`results/research/vxn/vxn_state_gate_*.csv`와
+`results/research/credit/credit_entry_gate_*.csv`에서 생성됩니다.
 
 ## VXN 후속 강건성 검정
 
@@ -44,7 +44,7 @@
 
 결정: 이 VXN BULL→CAUTION 게이트를 생산 및 조합 실험에서 제외합니다.
 이는 시험한 구현을 기각한 것이며 미래의 모든 VXN 용도를 부정한 것은
-아닙니다. 재현 보고서: `results/vxn_robustness_*.csv`.
+아닙니다. 재현 보고서: `results/research/vxn/vxn_robustness_*.csv`.
 
 ## 공통 시점정보 데이터 계약
 
@@ -69,7 +69,7 @@
 건너뜁니다. 가져오기·검증 골격은 향후 사용을 위해 비활성 상태로 남깁니다.
 시장폭 결과를 근거로 사용하지 않았으며 생산 전략도 변경하지 않았습니다.
 
-필수 파일: `data_probability_signals/NASDAQ_ABOVE_200MA.csv`.
+필수 파일: `data/research/probability_signals/NASDAQ_ABOVE_200MA.csv`.
 
 ### 데이터 출처와 가져오기
 
@@ -134,7 +134,7 @@ CNN의 7개 차원 중 4개만 포함합니다.
 결정: 4개 요소 재구성을 기각하고 전략 백테스트나 생산 변경을 하지 않습니다.
 다시 시도하려면 누락된 3개 요소의 시점정보 데이터 또는 독립적으로 정당화된
 새 설계, 새 방법론 버전과 새 홀드아웃이 필요합니다. 보고서:
-`results/cnn_reconstruction_*.csv`. 재현 코드:
+`results/research/cnn/cnn_reconstruction_*.csv`. 재현 코드:
 `validation/cnn_fear_greed_reconstruction.py`.
 
 ## 기각: CNN 공식 지수의 BEAR→RECOVERY 사용
@@ -162,7 +162,7 @@ CNN 공식 시계열을 2021-02-08~2026-07-31에 직접 시험했습니다. 모�
 QQQ 20거래일 평균 최대 낙폭은 -8.21%에서 최대 -8.63%로 악화됐습니다.
 
 결정: CNN 공식 이력은 짧고 드문 BEAR 상태와의 정렬도 약해 생산 규칙을
-정당화하지 못합니다. 보고서: `results/cnn_official_*.csv`. 재현 코드:
+정당화하지 못합니다. 보고서: `results/research/cnn/cnn_official_*.csv`. 재현 코드:
 `validation/cnn_official_recovery_gates.py`.
 
 ## 차단: 누락된 CNN 구성요소 3개
@@ -200,7 +200,7 @@ QQQ 120일 낙폭 -10% 이하의 세 장기 차원으로 인과적 신호를 만
 BEAR→RECOVERY 사건 4개는 그대로이고 날짜만 일부 앞당겼습니다. 가장 큰
 최근 변화는 2022-06-03 대신 2022-05-31에 진입한 것으로, 이후 QQQ 20일
 수익률은 -7.76%, 전방 최대 낙폭은 -13.67%였습니다. 보고서:
-`results/extreme_fear_recovery_*.csv`. 재현 코드:
+`results/research/extreme/extreme_fear_recovery_*.csv`. 재현 코드:
 `validation/extreme_fear_recovery.py`.
 
 결정: 직접 극단공포 조기 회복 경로를 기각합니다. 기존 QQQ 회복 확인이
@@ -234,7 +234,7 @@ RECOVERY의 QQQ 비중에만 사용했습니다. 기준 RECOVERY 비중은 50%�
 이전과 이후 효과가 반대이며 갈등을 해결할 독립적인 세 번째 사건이 없습니다.
 
 결정: 생산 및 조합 실험에서 기각합니다. 보고서:
-`results/recovery_risk_tier_*.csv`. 재현 코드:
+`results/research/recovery/recovery_risk_tier_*.csv`. 재현 코드:
 `validation/recovery_risk_tiers.py`. 생산 YAML은 변경하지 않았습니다.
 
 ## 승격 기준

@@ -5,7 +5,6 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from config import RESULT_DIR
 from .constrained_hazard_threshold import _hazard_sample, build_candidate_thresholds
 from .path_tail_targets import PERIODS, _load_feature_data
 from .precision_thresholds import _wilson_interval
@@ -15,6 +14,7 @@ from .weekly_path_tail import (
     _episode_metrics,
     suppress_overlapping_warnings,
 )
+from result_paths import research_result_path
 
 
 SELECTED_THRESHOLD = "Q85"
@@ -179,9 +179,9 @@ def run_two_stage_hazard_validation():
     metrics = _metric_rows(sample, predictions)
     selection = select_development_filter(metrics)
     promotion = _promotion_report(metrics, selection)
-    metrics.to_csv(RESULT_DIR / "two_stage_hazard_metrics.csv", index=False)
-    selection.to_csv(RESULT_DIR / "two_stage_hazard_selection.csv", index=False)
-    promotion.to_csv(RESULT_DIR / "two_stage_hazard_promotion.csv", index=False)
+    metrics.to_csv(research_result_path("two_stage_hazard_metrics.csv"), index=False)
+    selection.to_csv(research_result_path("two_stage_hazard_selection.csv"), index=False)
+    promotion.to_csv(research_result_path("two_stage_hazard_promotion.csv"), index=False)
     return {"metrics": metrics, "selection": selection, "promotion": promotion}
 
 

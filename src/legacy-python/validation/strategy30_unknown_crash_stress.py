@@ -17,6 +17,7 @@ from backtest import Backtest
 from config import COMMISSION, SLIPPAGE
 from indicators import Indicator
 from strategy_dsl import DeclarativeStrategy, load_strategy_definition
+from result_paths import research_result_path
 
 
 EVENT_START = pd.Timestamp("2024-01-02")
@@ -161,8 +162,8 @@ def main():
                                    "Tier": event["tier"], "QQQTarget": event["target"]})
                 print(row, flush=True)
     RESULT_DIR.mkdir(parents=True, exist_ok=True)
-    pd.DataFrame(summaries).to_csv(RESULT_DIR / "strategy30_unknown_crash_stress_summary.csv", index=False)
-    pd.DataFrame(alerts).to_csv(RESULT_DIR / "strategy30_unknown_crash_stress_alerts.csv", index=False)
+    pd.DataFrame(summaries).to_csv(research_result_path("strategy30_unknown_crash_stress_summary.csv"), index=False)
+    pd.DataFrame(alerts).to_csv(research_result_path("strategy30_unknown_crash_stress_alerts.csv"), index=False)
 
 
 if __name__ == "__main__":

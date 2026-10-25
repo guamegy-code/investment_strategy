@@ -26,20 +26,20 @@ import yfinance as yf
 from backtest import Backtest
 from config import (
     COMMISSION,
+    CROSS_ASSET_ROTATION_DATA_DIR as ROTATION_DATA_DIR,
     DATA_DIR,
     GENERAL_COMPARISON_START_DATE,
     PROJECT_ROOT,
-    RESULT_DIR,
     SLIPPAGE,
 )
 from indicators import Indicator
 from performance import Performance
 from strategy_dsl import DeclarativeStrategy, load_strategy_definition
+from result_paths import research_result_path
 
 
 ROOT = Path(__file__).resolve().parents[3]
 SOURCE = ROOT / "strategies" / "15_band_7030_tdf_state_bil.yaml"
-ROTATION_DATA_DIR = PROJECT_ROOT / "data_cross_asset_rotation"
 START_DATE = GENERAL_COMPARISON_START_DATE
 
 QQQ = "QQQ"
@@ -708,7 +708,7 @@ def run_state_conditioned_cross_asset_rotation_validation(
         "state_conditioned_cross_asset_rotation_decision": decision,
     }
     for name, report in reports.items():
-        report.to_csv(RESULT_DIR / f"{name}.csv", index=False)
+        report.to_csv(research_result_path(f"{name}.csv"), index=False)
     return reports
 
 

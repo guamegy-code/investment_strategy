@@ -21,7 +21,7 @@ HY OAS는 **시장 현황을 설명하는 별도 신용 경보**로 유용할 �
 - 안내 문서의 Wayback URL은 이 환경에서 차단됐다. 장기 입력은 [과거 FRED 형식 CSV의 외부 보관본](https://github.com/mhidper/talvi/blob/dd7561088360f3b8d7890d0e728c1d10c916399d/data/indicadores/BAMLH0A0HYM2.csv)을 `tmp/BAMLH0A0HYM2_historical.csv`에만 보관했다. 1996-12-31~2025-06-11의 숫자 관측값 7,426개다. 제3자 보관본이므로 원본성 한계가 있다.
 - 기존 로컬 FRED 최근 CSV `tmp/BAMLH0A0HYM2.csv`는 2023-09-26~2026-09-24의 787개 관측값이다. 겹치는 448개 숫자 관측값은 전부 같았다. 별도 [오래된 보관본](https://github.com/csaladenes/eco-archive/blob/3e2674491969a6e14f7e0a707f8e23861724e033/BAMLH0A0HYM2.csv)과도 겹치는 6,322개 숫자 관측값이 전부 같았다. 결합 결과는 1996-12-31~2026-09-24의 날짜 중복 없는 7,765개 관측값이다. 중복 날짜에는 최근 CSV 값을 우선했다. 원시 ICE CSV는 Git의 `tmp/` 무시 규칙 밖으로 내보내지 않는다.
 - 주식 종가 전에 신용값이 공개됐다고 가정하지 않는다. 먼저 QQQ 거래일에 전일 관측값을 채운 뒤 기본 1거래일 지연한다. 0·2거래일도 계산했다. 이는 실제 발표 시각을 복원한 검증은 아니다.
-- 재현: `uv run python src/legacy-python/validation/strategy28_hy_oas_review.py` 및 `uv run python src/legacy-python/validation/strategy28_hy_oas_diagnostics.py`. 네 가지 핵심 결과는 `results/strategy28_hy_oas_{summary,events,transitions,rolling}.csv`, 독립 신용 경보는 `results/strategy28_hy_oas_credit_alerts.csv`에 있다. 실행 환경에서 실시간 FRED 접근이 막히면 로더는 위 로컬 최근 CSV를 사용하며 종료일을 경고한다.
+- 재현: `uv run python src/legacy-python/validation/strategy28_hy_oas_review.py` 및 `uv run python src/legacy-python/validation/strategy28_hy_oas_diagnostics.py`. 네 가지 핵심 결과는 `results/research/strategy28/strategy28_hy_oas_{summary,events,transitions,rolling}.csv`, 독립 신용 경보는 `results/research/strategy28/strategy28_hy_oas_credit_alerts.csv`에 있다. 실행 환경에서 실시간 FRED 접근이 막히면 로더는 위 로컬 최근 CSV를 사용하며 종료일을 경고한다.
 
 #### 비교 설계
 
@@ -105,7 +105,7 @@ HY OAS가 2018·2020·2025에는 먼저 신용 스트레스를 보여줬지만 2
 
 신용 스프레드 확대·축소는 각각 신용 위험 악화·완화의 관찰값이다. 이를 QQQ의 즉각적인 급락·급등이나 향후 수익률로 동일시할 수 없다. 특히 `z <= -2`는 과거 대비 급격한 신용 완화를 뜻할 뿐 상승 매수 신호의 검증이 아니다. 단기 변화량을 운영 규칙에 넣으려면 사전에 정한 임계값으로 전체 전략 백테스트, 거짓 경보·거래 비용, 구간 밖 재현을 평가해야 한다.
 
-재현: `uv run --offline python src/legacy-python/validation/strategy30_credit_change_review.py`. 세부 날짜와 각 구간의 신호 일수는 `results/strategy30_credit_change_lag1.csv`에 저장된다. 운영 YAML은 수정하지 않았다.
+재현: `uv run --offline python src/legacy-python/validation/strategy30_credit_change_review.py`. 세부 날짜와 각 구간의 신호 일수는 `results/research/strategy30/strategy30_credit_change_lag1.csv`에 저장된다. 운영 YAML은 수정하지 않았다.
 
 
 ---
@@ -164,7 +164,7 @@ HY OAS가 2018·2020·2025에는 먼저 신용 스트레스를 보여줬지만 2
 
 **판단:** 현 자료로는 HY OAS가 운영 30번의 BAA10Y 규칙을 개선한다는 근거가 부족하다. 시장 설명용 신용 지표로 BAA10Y 옆에 표시하는 연구는 가능하지만 주문·배분 규칙은 그대로 둔다. 다른 진입 조건이나 HY 고유의 해제 조건을 설계하려면 이 결과와 분리된 사전 지정 구간, 발표 시각 확인, 거짓 경보 비용을 포함한 검증이 필요하다. 닷컴·금융위기 수치는 합성 CAPE/BIL 대체 자료를 사용한 스트레스 검증이며 실제 투자 가능 성과가 아니다.
 
-재현: `uv run python src/legacy-python/validation/strategy30_hy_oas_review.py --krw --output-stem strategy30_hy_oas_krw` 및 `uv run python src/legacy-python/validation/strategy30_hy_oas_review.py`. 민감도는 `--lags`, `--cost`, `--hy-level`, `--hy-change`로 지정한다. 결과 CSV는 `results/strategy30_hy_oas*`에 저장되며 원시 ICE 데이터는 Git에 추가하지 않는다.
+재현: `uv run python src/legacy-python/validation/strategy30_hy_oas_review.py --krw --output-stem strategy30_hy_oas_krw` 및 `uv run python src/legacy-python/validation/strategy30_hy_oas_review.py`. 민감도는 `--lags`, `--cost`, `--hy-level`, `--hy-change`로 지정한다. 결과 CSV는 `results/research/strategy30/strategy30_hy_oas*`에 저장되며 원시 ICE 데이터는 Git에 추가하지 않는다.
 
 ---
 

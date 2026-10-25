@@ -16,10 +16,12 @@ import yfinance as yf
 
 from attribution import RetirementAllocationAttribution
 from backtest import Backtest
-from config import PROJECT_ROOT, RESULT_DIR
+from config import PROJECT_ROOT
+from config import PROBABILITY_SIGNALS_DATA_DIR as SIGNAL_DIR
 from indicators import Indicator
 from performance import Performance
 from strategy_dsl import DeclarativeStrategy, load_strategy_definition
+from result_paths import research_result_path
 
 
 SOURCE = (
@@ -27,7 +29,6 @@ SOURCE = (
     / "strategies"
     / "14_profit_band_tdf2050_gate_spy_tdf100_no_bnd.yaml"
 )
-SIGNAL_DIR = PROJECT_ROOT / "data_probability_signals"
 VXN_PATH = SIGNAL_DIR / "VXN.csv"
 VXN_SYMBOL = "^VXN"
 
@@ -352,7 +353,7 @@ def run_vxn_state_gate_validation(refresh_data=False):
         "vxn_state_gate_transition_comparison": comparison,
     }
     for name, report in reports.items():
-        report.to_csv(RESULT_DIR / f"{name}.csv", index=False)
+        report.to_csv(research_result_path(f"{name}.csv"), index=False)
     return reports
 
 

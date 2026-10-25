@@ -9,9 +9,11 @@ import numpy as np
 import pandas as pd
 import requests
 
-from config import DATA_DIR, PROJECT_ROOT, RESULT_DIR
+from config import DATA_DIR
+from config import PROBABILITY_SIGNALS_DATA_DIR as SIGNAL_DIR
 from indicators import Indicator
 from .point_in_time_signals import load_point_in_time_signal
+from result_paths import research_result_path
 
 
 CNN_BASE_URL = (
@@ -29,10 +31,9 @@ CNN_HEADERS = {
     "Accept": "application/json, text/plain, */*",
     "Accept-Language": "en-US,en;q=0.9",
 }
-SIGNAL_DIR = PROJECT_ROOT / "data_probability_signals"
 OFFICIAL_PATH = SIGNAL_DIR / "CNN_FEAR_GREED.csv"
 RECONSTRUCTED_PATH = SIGNAL_DIR / "RECONSTRUCTED_FEAR_GREED_4C.csv"
-RAW_AUDIT_PATH = RESULT_DIR / "cnn_fear_greed_raw.json"
+RAW_AUDIT_PATH = research_result_path("cnn_fear_greed_raw.json")
 OFFICIAL_VERSION = "cnn-fear-greed-official-2021-v1"
 RECONSTRUCTED_VERSION = "reconstructed-fear-greed-4c-v1"
 TRAIN_END = pd.Timestamp("2023-12-31")
@@ -307,7 +308,7 @@ def run_reconstruction_audit(refresh_official=True):
     components = build_four_component_proxy()
     reports = reconstruction_reports(official, components)
     for name, report in reports.items():
-        report.to_csv(RESULT_DIR / f"{name}.csv", index=False)
+        report.to_csv(research_result_path(f"{name}.csv"), index=False)
     return reports
 
 

@@ -6,7 +6,7 @@ from math import exp
 import pandas as pd
 
 from backtest import Backtest
-from config import EXTENDED_DATA_DIR, RESULT_DIR
+from config import EXTENDED_DATA_DIR
 from .continuous_allocation import (
     EXECUTION_DAYS,
     REBALANCE_BAND,
@@ -22,6 +22,7 @@ from strategy import (
     RetirementAllocationStrategy,
     STATIC_70_BND10_BIL10_GLD10,
 )
+from result_paths import research_result_path
 
 
 @dataclass(frozen=True)
@@ -254,7 +255,7 @@ def run_momentum_ranking_validation():
         "momentum_ranking_weights": _allocation_report(results),
     }
     for name, report in reports.items():
-        report.to_csv(RESULT_DIR / f"{name}.csv", index=False)
+        report.to_csv(research_result_path(f"{name}.csv"), index=False)
     return reports
 
 

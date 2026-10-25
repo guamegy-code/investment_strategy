@@ -14,7 +14,7 @@ import pandas as pd
 
 from attribution import RetirementAllocationAttribution
 from backtest import Backtest
-from config import PROJECT_ROOT, RESULT_DIR
+from config import PROJECT_ROOT
 from performance import Performance
 from strategy_dsl import DeclarativeStrategy, load_strategy_definition
 from .cnn_fear_greed_reconstruction import (
@@ -23,6 +23,7 @@ from .cnn_fear_greed_reconstruction import (
     fetch_official,
 )
 from .point_in_time_signals import load_point_in_time_signal
+from result_paths import research_result_path
 
 
 SOURCE = (
@@ -280,7 +281,7 @@ def run_cnn_official_recovery_validation(refresh_official=False):
         "cnn_official_episode_transitions": episode_transitions,
     }
     for name, report in reports.items():
-        report.to_csv(RESULT_DIR / f"{name}.csv", index=False)
+        report.to_csv(research_result_path(f"{name}.csv"), index=False)
     return reports
 
 

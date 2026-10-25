@@ -26,6 +26,7 @@ from strategy_dsl import DeclarativeStrategy, load_strategy_definition  # noqa: 
 from strategy28_failed_dip_regime import CURRENT, DOTCOM, GFC, ROOT, RESULT_DIR, build_data  # noqa: E402
 from strategy28_hy_oas_review import attach_credit_features, rolling_metrics  # noqa: E402
 from strategy30_31_yaml_parity import STRATEGY30, add_credit_observation  # noqa: E402
+from result_paths import research_result_path
 
 HY = "BAMLH0A0HYM2"
 VARIANTS = ("BASE30", "HY_ENTRY", "BAA_OR_HY", "BAA_AND_HY", "FULL_HY")
@@ -194,7 +195,7 @@ def main():
     RESULT_DIR.mkdir(exist_ok=True)
     for suffix, rows in (("summary", summary), ("transitions", transitions),
                          ("events", events), ("rolling", rolling)):
-        pd.DataFrame(rows).to_csv(RESULT_DIR / f"{args.output_stem}_{suffix}.csv", index=False)
+        pd.DataFrame(rows).to_csv(research_result_path(f"{args.output_stem}_{suffix}.csv"), index=False)
 
 
 if __name__ == "__main__":

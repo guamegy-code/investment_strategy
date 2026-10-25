@@ -9,7 +9,7 @@ import pandas as pd
 
 from attribution import RetirementAllocationAttribution
 from chart import draw_chart
-from config import END_DATE, FX_RATE_TICKERS, RESULT_DIR, START_DATE
+from config import END_DATE, FX_RATE_TICKERS, PROJECT_ROOT, RESULT_DIR, START_DATE, STRATEGY_CACHE_DIR
 from downloader import ensure_data_files
 from general_comparison import write_general_comparison_reports
 from runner import Runner
@@ -24,8 +24,8 @@ from strategy_runtime import (
 )
 
 
-STRATEGY_DIRECTORY = RESULT_DIR.parent / "strategies"
-STRATEGY_CACHE_DIRECTORY = RESULT_DIR / ".strategy-cache"
+STRATEGY_DIRECTORY = PROJECT_ROOT / "strategies"
+STRATEGY_CACHE_DIRECTORY = STRATEGY_CACHE_DIR
 RESULT_CACHE = StrategyResultDiskCache(STRATEGY_CACHE_DIRECTORY)
 MODULE_DIRECTORY = Path(__file__).resolve().parent
 BACKTEST_ENGINE_FILES = tuple(
@@ -99,9 +99,10 @@ def save_results(results, *, all_results=None):
         result for result in all_results
         if strategy_display_name(result["strategy"]).startswith("STATIC_")
     ]
-    pd.DataFrame([result["summary"] for result in static_results]).to_csv(
-        RESULT_DIR / "static_benchmark_comparison.csv", index=False
-    )
+    if static_results:
+        pd.DataFrame([result["summary"] for result in static_results]).to_csv(
+            RESULT_DIR / "static_benchmark_comparison.csv", index=False
+        )
 
 
 def load_active_strategies():

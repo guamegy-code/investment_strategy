@@ -20,20 +20,23 @@ import numpy as np
 import pandas as pd
 
 from backtest import Backtest
-from config import COMMISSION, DATA_DIR, PROJECT_ROOT, RESULT_DIR, SLIPPAGE
+from config import COMMISSION, DATA_DIR, PROJECT_ROOT, SLIPPAGE
+from config import (
+    CROSS_ASSET_ROTATION_DATA_DIR as SOURCE_DATA_DIR,
+    CROSS_SECTIONAL_MOMENTUM_DATA_DIR as OUTPUT_DATA_DIR,
+    MULTI_MARKET_DATA_DIR as MULTIMARKET_DATA_DIR,
+    RISK_ASSET_DATA_DIR as RISK_DATA_DIR,
+)
 from indicators import Indicator
 from performance import Performance
 from validation.state_conditioned_cross_asset_rotation import (
     Strategy15KrwSchedule,
     build_strategy15_schedule,
 )
+from result_paths import research_result_path
 
 
 START_DATE = "2013-01-04"
-SOURCE_DATA_DIR = PROJECT_ROOT / "data_cross_asset_rotation"
-MULTIMARKET_DATA_DIR = PROJECT_ROOT / "data_multimarket"
-RISK_DATA_DIR = PROJECT_ROOT / "data_risk_assets"
-OUTPUT_DATA_DIR = PROJECT_ROOT / "data_cross_sectional_momentum"
 LOCK_PATH = PROJECT_ROOT / "validation" / "cross_sectional_risk_momentum_lock.json"
 
 QQQ = "QQQ"
@@ -501,7 +504,7 @@ def run_cross_sectional_risk_momentum_validation(*, refresh_data: bool = False) 
         "cross_sectional_risk_momentum_decision": decision,
     }
     for name, report in reports.items():
-        report.to_csv(RESULT_DIR / f"{name}.csv", index=False)
+        report.to_csv(research_result_path(f"{name}.csv"), index=False)
     return reports
 
 

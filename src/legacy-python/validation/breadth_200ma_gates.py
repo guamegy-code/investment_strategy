@@ -11,7 +11,7 @@ import pandas as pd
 
 from attribution import RetirementAllocationAttribution
 from backtest import Backtest
-from config import DATA_DIR, PROJECT_ROOT, RESULT_DIR
+from config import DATA_DIR, PROBABILITY_SIGNALS_DATA_DIR, PROJECT_ROOT
 from performance import Performance
 from strategy_dsl import DeclarativeStrategy, load_strategy_definition
 from .point_in_time_signals import (
@@ -19,6 +19,7 @@ from .point_in_time_signals import (
     materialize_as_of,
     to_ohlcv_signal,
 )
+from result_paths import research_result_path
 
 
 SOURCE = (
@@ -26,11 +27,7 @@ SOURCE = (
     / "strategies"
     / "14_profit_band_tdf2050_gate_spy_tdf100_no_bnd.yaml"
 )
-SIGNAL_PATH = (
-    PROJECT_ROOT
-    / "data_probability_signals"
-    / "NASDAQ_ABOVE_200MA.csv"
-)
+SIGNAL_PATH = PROBABILITY_SIGNALS_DATA_DIR / "NASDAQ_ABOVE_200MA.csv"
 SOURCE_SYMBOL = "$NAA200R"
 METHODOLOGY_VERSION = "stockcharts-naa200r-eod-v1"
 BREADTH_TICKER = "BREADTH200"
@@ -303,7 +300,7 @@ def run_breadth_validation():
     results = [_run_profile(profile) for profile in PROFILES]
     reports = _reports(results, manifest)
     for name, report in reports.items():
-        report.to_csv(RESULT_DIR / f"{name}.csv", index=False)
+        report.to_csv(research_result_path(f"{name}.csv"), index=False)
     return reports
 
 

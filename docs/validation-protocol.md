@@ -13,7 +13,7 @@
 생산 전략 실행과 원시 데이터는 더 긴 이력을 보존할 수 있습니다. 이 규칙은
 "어느 전략이 더 나은가"를 판단하는 일반 비교 보고서에만 적용합니다.
 
-일반 비교 결과는 `results/general_strategy_comparison.csv`에 기록합니다.
+일반 비교 결과는 `results/backtests/general_strategy_comparison.csv`에 기록합니다.
 
 ## 예외 검증
 
@@ -25,7 +25,7 @@
 - 특정 사건 또는 상품 상장 이후만을 대상으로 하는 검증
 
 일반 전략 중 필수 데이터가 늦게 시작하는 전략은 일반 비교표에서 제외하고
-`results/general_strategy_comparison_exceptions.csv`에 실제 시작일과 제외 사유를
+`results/backtests/general_strategy_comparison_exceptions.csv`에 실제 시작일과 제외 사유를
 기록합니다. 예외 전략끼리 비교할 때에는 별도의 공통 가용 구간을 사용해야 합니다.
 
 ## 기간 분할과 롤링

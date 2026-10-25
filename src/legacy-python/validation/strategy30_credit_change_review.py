@@ -14,10 +14,11 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from config import DATA_DIR, RESULT_DIR  # noqa: E402
+from config import DATA_DIR, RESEARCH_RESULT_DIR as RESULT_DIR  # noqa: E402
 from downloader import (  # noqa: E402
     _align_macro_to_qqq_sessions, _load_fred_series, _load_hy_oas_observations,
 )
+from result_paths import research_result_path
 
 ROOT = Path(__file__).resolve().parents[3]
 EVENTS = {
@@ -96,7 +97,7 @@ def main() -> None:
                     })
     RESULT_DIR.mkdir(exist_ok=True)
     pd.DataFrame(rows).to_csv(
-        RESULT_DIR / f"strategy30_credit_change_lag{args.lag}.csv", index=False
+        research_result_path(f"strategy30_credit_change_lag{args.lag}.csv"), index=False
     )
 
 

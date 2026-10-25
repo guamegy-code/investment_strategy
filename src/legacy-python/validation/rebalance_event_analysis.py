@@ -6,12 +6,13 @@ import numpy as np
 import pandas as pd
 
 from backtest import Backtest
-from config import DATA_DIR, END_DATE, RESULT_DIR, START_DATE
+from config import DATA_DIR, END_DATE, START_DATE
 from strategy import (
     ASYMMETRIC_TREND_BAND_ADD_DEFENSE2,
     RetirementAllocationStrategy,
     STATIC_RETIREMENT_7030,
 )
+from result_paths import research_result_path
 
 
 HORIZONS = (5, 21, 63)
@@ -675,12 +676,12 @@ def run_rebalance_event_analysis():
     contexts = _context_summary(events)
     episodes = _episode_comparison(results, events)
     risk_cap = _risk_cap_summary(results)
-    events.to_csv(RESULT_DIR / "rebalance_event_details.csv", index=False)
-    summary.to_csv(RESULT_DIR / "rebalance_event_summary.csv", index=False)
-    contexts.to_csv(RESULT_DIR / "rebalance_context_comparison.csv", index=False)
-    episodes.to_csv(RESULT_DIR / "rebalance_episode_comparison.csv", index=False)
-    risk_cap.to_csv(RESULT_DIR / "rebalance_risk_cap_summary.csv", index=False)
-    (RESULT_DIR / "rebalance_improvement_ideas.md").write_text(
+    events.to_csv(research_result_path("rebalance_event_details.csv"), index=False)
+    summary.to_csv(research_result_path("rebalance_event_summary.csv"), index=False)
+    contexts.to_csv(research_result_path("rebalance_context_comparison.csv"), index=False)
+    episodes.to_csv(research_result_path("rebalance_episode_comparison.csv"), index=False)
+    risk_cap.to_csv(research_result_path("rebalance_risk_cap_summary.csv"), index=False)
+    (research_result_path("rebalance_improvement_ideas.md")).write_text(
         _idea_report(summary, events, episodes, risk_cap), encoding="utf-8"
     )
     return {

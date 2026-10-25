@@ -8,9 +8,10 @@ import numpy as np
 import pandas as pd
 
 from backtest import Backtest
-from config import EXTENDED_DATA_DIR, RESULT_DIR
+from config import EXTENDED_DATA_DIR
 from performance import Performance
 from strategy import BaseStrategy, STATIC_RETIREMENT_7030
+from result_paths import research_result_path
 
 
 FEATURE_COLUMNS = (
@@ -423,10 +424,10 @@ def run_probabilistic_allocation_validation(config=DEFAULT_CONFIG):
     ])
     windows = _window_summary(results)
     overall, calibration = _probability_diagnostics(results[-1][4], config)
-    summary.to_csv(RESULT_DIR / "probabilistic_allocation_summary.csv", index=False)
-    windows.to_csv(RESULT_DIR / "probabilistic_allocation_windows.csv", index=False)
-    overall.to_csv(RESULT_DIR / "probability_diagnostics.csv", index=False)
-    calibration.to_csv(RESULT_DIR / "probability_calibration.csv", index=False)
+    summary.to_csv(research_result_path("probabilistic_allocation_summary.csv"), index=False)
+    windows.to_csv(research_result_path("probabilistic_allocation_windows.csv"), index=False)
+    overall.to_csv(research_result_path("probability_diagnostics.csv"), index=False)
+    calibration.to_csv(research_result_path("probability_calibration.csv"), index=False)
     return {
         "summary": summary,
         "windows": windows,

@@ -76,6 +76,6 @@
 
 - 코드: `validation/state_sufficiency.py`
 - 실행: `PYTHONPATH=src/legacy-python python -m validation.state_sufficiency`
-- 산출물: `results/state_sufficiency_forecasts.csv`, `state_sufficiency_metrics.csv`,
+- 산출물: `results/research/state/state_sufficiency_forecasts.csv`, `state_sufficiency_metrics.csv`,
   `state_sufficiency_incremental.csv`, `state_sufficiency_gate.csv`,
   `state_sufficiency_decision.csv`, `state_sufficiency_state_mix.csv`

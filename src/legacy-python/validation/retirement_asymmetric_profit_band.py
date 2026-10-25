@@ -8,7 +8,7 @@ import io
 import pandas as pd
 
 from backtest import Backtest
-from config import DATA_DIR, RESULT_DIR, START_DATE
+from config import DATA_DIR, START_DATE
 from experimental_strategies import (
     RetirementAllocationAsymmetricProfitBandStrategy,
     RetirementAllocationProfitBandVXUSStrategy,
@@ -18,6 +18,7 @@ from strategy import (
     RetirementAllocationVXUSStrategy,
     RetirementAllocationStrategy,
 )
+from result_paths import research_result_path
 
 
 COMMON_END_DATE = "2026-07-31"
@@ -117,10 +118,10 @@ def run_retirement_asymmetric_profit_band_validation():
     fixed = _fixed_report()
     rolling = _rolling_report()
     fixed.to_csv(
-        RESULT_DIR / "retirement_asymmetric_profit_band_fixed.csv", index=False
+        research_result_path("retirement_asymmetric_profit_band_fixed.csv"), index=False
     )
     rolling.to_csv(
-        RESULT_DIR / "retirement_asymmetric_profit_band_rolling.csv", index=False
+        research_result_path("retirement_asymmetric_profit_band_rolling.csv"), index=False
     )
     return {"fixed": fixed, "rolling": rolling}
 

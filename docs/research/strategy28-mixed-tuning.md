@@ -61,4 +61,4 @@ QQQ > EMA55, QQQ/SPY 20일 상대수익률 > 0, BAA10Y 20일 변화 ≤ 0, SPY >
 
 닷컴 검증에는 S&P 500 CAPE로 대체한 밸류에이션 점수와 2007년 이전 합성 BIL 수익이 포함된다. 신용 시계열 지연은 발표 시각을 가정한 민감도이지 실제 빈티지 자료 검증이 아니다. 이 조건에서 30번을 만든다면 65%·20% 진입 및 기존 해제 조건을 유지하고, 심화 방어 중 재매수 제한만 추가하는 안을 우선 후보로 삼을 수 있다.
 
-재현: `python src/legacy-python/validation/strategy28_mixed_tuning.py`. 결과는 `results/strategy28_mixed_tuning_{summary,events,transitions}.csv`에 저장된다. 연구용 FRED 입력 `tmp/BAA10Y.csv`는 저장소에 포함하지 않는다.
+재현: `python src/legacy-python/validation/strategy28_mixed_tuning.py`. 결과는 `results/research/strategy28/strategy28_mixed_tuning_{summary,events,transitions}.csv`에 저장된다. 연구용 FRED 입력 `tmp/BAA10Y.csv`는 저장소에 포함하지 않는다.

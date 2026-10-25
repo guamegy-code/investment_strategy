@@ -16,9 +16,10 @@ from typing import Any, Mapping
 import pandas as pd
 
 from backtest import Backtest
-from config import COMMISSION, RESULT_DIR, SLIPPAGE
+from config import COMMISSION, SLIPPAGE
 from performance import Performance
 from strategy_dsl import DeclarativeStrategy, load_strategy_definition
+from result_paths import research_result_path
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -222,7 +223,7 @@ def run_search() -> pd.DataFrame:
     report["MDDImprovement"] = report["MDD"] - report["BaselineMDD"]
     report["SharpeGap"] = report["Sharpe"] - report["BaselineSharpe"]
     report["CalmarGap"] = report["Calmar"] - report["BaselineCalmar"]
-    report.to_csv(RESULT_DIR / "strategy26_warning_dip_search.csv", index=False)
+    report.to_csv(research_result_path("strategy26_warning_dip_search.csv"), index=False)
     return report
 
 
@@ -374,7 +375,7 @@ def run_robustness():
         "strategy26_warning_dip_events.csv": events,
     }
     for filename, report in reports.items():
-        report.to_csv(RESULT_DIR / filename, index=False)
+        report.to_csv(research_result_path(filename), index=False)
     return rolling_summary, sensitivity, policies, stress, events
 
 

@@ -200,4 +200,4 @@ WARNING 표본이 적은 문제를 보완하기 위해 밸류에이션 조건과
 신호·상태·목표 비중을 그대로 사용하고 실제 국내 상장 상품으로만 치환한다.
 
 재현 코드는 `src/legacy-python/validation/strategy26_warning_dip_buyer.py`에 있으며 결과는
-`results/strategy26_warning_dip_*.csv`에 저장한다.
+`results/research/strategy26/strategy26_warning_dip_*.csv`에 저장한다.

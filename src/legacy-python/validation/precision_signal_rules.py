@@ -5,7 +5,6 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from config import RESULT_DIR
 from .precision_thresholds import (
     PERIODS,
     _load_forecast_sample,
@@ -13,6 +12,7 @@ from .precision_thresholds import (
     build_causal_thresholds,
 )
 from .probability_accuracy import classification_metrics
+from result_paths import research_result_path
 
 
 SELECTED_THRESHOLDS = ("EXPANDING_Q90", "EXPANDING_Q95")
@@ -129,8 +129,8 @@ def run_precision_signal_rule_validation():
     predictions = _rule_predictions(sample, thresholds)
     metrics = _metrics(sample, predictions)
     events = _events(sample, predictions)
-    metrics.to_csv(RESULT_DIR / "precision_signal_rule_metrics.csv", index=False)
-    events.to_csv(RESULT_DIR / "precision_signal_rule_events.csv", index=False)
+    metrics.to_csv(research_result_path("precision_signal_rule_metrics.csv"), index=False)
+    events.to_csv(research_result_path("precision_signal_rule_events.csv"), index=False)
     return {"metrics": metrics, "events": events}
 
 

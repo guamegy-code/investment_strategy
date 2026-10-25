@@ -7,7 +7,6 @@ from dataclasses import replace
 import numpy as np
 import pandas as pd
 
-from config import RESULT_DIR
 from .multi_horizon_probability import TAIL_CONFIG
 from .path_tail_targets import PERIODS, _load_feature_data, forward_path_outcomes
 from .precision_thresholds import PROFILE, _wilson_interval, expanding_quantile
@@ -22,6 +21,7 @@ from .weekly_path_tail import (
     _episode_metrics,
     suppress_overlapping_warnings,
 )
+from result_paths import research_result_path
 
 
 CLASS_WEIGHTS = (1.0, 2.0, 4.0, 8.0)
@@ -170,9 +170,9 @@ def run_weighted_path_objective_validation():
     samples = _common_samples(data)
     metrics = _metric_rows(samples)
     selection = _selection(metrics)
-    metrics.to_csv(RESULT_DIR / "weighted_path_objective_metrics.csv", index=False)
+    metrics.to_csv(research_result_path("weighted_path_objective_metrics.csv"), index=False)
     selection.to_csv(
-        RESULT_DIR / "weighted_path_objective_selection.csv", index=False
+        research_result_path("weighted_path_objective_selection.csv"), index=False
     )
     return {"metrics": metrics, "selection": selection}
 

@@ -11,7 +11,6 @@ from config import (
     COMMISSION,
     EXTENDED_DATA_DIR,
     PROJECT_ROOT,
-    RESULT_DIR,
     SLIPPAGE,
 )
 from .extended_data import ASSETS, build_extended_data
@@ -19,6 +18,7 @@ from .oos import _future_with_anchor, verify_lock as verify_production_lock
 from performance import Performance
 from runner import Runner
 from strategy import AllocationState, RetirementAllocationLegacyStrategy
+from result_paths import research_result_path
 
 
 LOCK_PATH = PROJECT_ROOT / "validation" / "shadow_strict_recovery_lock.json"
@@ -208,10 +208,10 @@ def update_shadow_oos(refresh_data=False):
         else _empty_daily_frame()
     )
     comparison = _comparison_frame(daily)
-    status.to_csv(RESULT_DIR / "shadow_strict_recovery_status.csv", index=False)
-    daily.to_csv(RESULT_DIR / "shadow_strict_recovery_daily.csv", index=False)
+    status.to_csv(research_result_path("shadow_strict_recovery_status.csv"), index=False)
+    daily.to_csv(research_result_path("shadow_strict_recovery_daily.csv"), index=False)
     comparison.to_csv(
-        RESULT_DIR / "shadow_strict_recovery_comparison.csv", index=False
+        research_result_path("shadow_strict_recovery_comparison.csv"), index=False
     )
     return status, daily, comparison
 

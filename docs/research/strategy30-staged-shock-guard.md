@@ -47,4 +47,4 @@
 
 가격 급락이 발생한 첫 거래일의 손실은 종가 신호로 피할 수 없다. 이 경보를 실제로 도입하려면 평상시 수익률을 얼마까지 희생할 수 있는지 먼저 정해야 한다. [AQR의 위험 완화 연구](https://www.aqr.com/-/media/AQR/Documents/Alternative-Thinking/AQR-Alternative-Thinking---Key-Design-Choices-when-Building-a-Risk-Mitigating-Portfolio.pdf?hash=43D2CF59742FB29906A368F8AE472831&sc_lang=en)도 짧은 가격 신호가 잦은 방향 전환에 취약할 수 있다고 설명한다. 이 연구가 여기의 특정 문턱값을 입증하는 것은 아니다.
 
-재현: `python src/legacy-python/validation/strategy30_staged_shock_probe.py`, 같은 파일에 `--gated-only`, `--short-only` 옵션. 결과는 `results/strategy30_staged_shock{,_gated,_short}_{summary,transitions}.csv`에 생성된다. 모든 변경은 연구 코드·문서에 한정된다.
+재현: `python src/legacy-python/validation/strategy30_staged_shock_probe.py`, 같은 파일에 `--gated-only`, `--short-only` 옵션. 결과는 `results/research/strategy30/strategy30_staged_shock{,_gated,_short}_{summary,transitions}.csv`에 생성된다. 모든 변경은 연구 코드·문서에 한정된다.

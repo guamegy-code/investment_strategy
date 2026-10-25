@@ -16,13 +16,14 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from config import RESULT_DIR
+from config import RESEARCH_RESULT_DIR as RESULT_DIR
 from downloader import _load_fred_series, _load_hy_oas_observations
 from strategy28_failed_dip_regime import CURRENT, DOTCOM, GFC, ROOT
 from strategy30_31_yaml_parity import add_credit_observation
 from strategy30_hy_oas_review import STRATEGY30, prepare, run_one
 from strategy30_unknown_crash_stress import SCENARIOS, EVENT_START, EVENT_END, inject
 from strategy_dsl import load_strategy_definition
+from result_paths import research_result_path
 
 HY = "BAMLH0A0HYM2"
 VARIANTS = ("BASE30", "MARKET", "FAST_CREDIT", "MARKET_FAST",
@@ -211,7 +212,7 @@ def main():
                          ("transitions", transitions), ("stress", stress)):
         if rows:
             pd.DataFrame(rows).to_csv(
-                RESULT_DIR / f"{args.output_stem}_{suffix}.csv", index=False
+                research_result_path(f"{args.output_stem}_{suffix}.csv"), index=False
             )
 
 

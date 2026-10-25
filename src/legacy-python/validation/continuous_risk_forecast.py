@@ -8,11 +8,11 @@ import numpy as np
 import pandas as pd
 
 from backtest import Backtest
-from config import RESULT_DIR
 from performance import Performance
 from strategy import BaseStrategy, STATIC_RETIREMENT_7030
 from .path_tail_targets import PERIODS, _load_feature_data
 from .precision_thresholds import PROFILE
+from result_paths import research_result_path
 
 
 HORIZON_DAYS = 21
@@ -382,10 +382,10 @@ def run_continuous_risk_forecast_validation():
     selection = _development_selection(metrics)
     diagnostics = _forecast_diagnostics(prepared, active_start)
     promotion = _promotion_report(metrics, selection)
-    metrics.to_csv(RESULT_DIR / "continuous_risk_forecast_metrics.csv", index=False)
-    selection.to_csv(RESULT_DIR / "continuous_risk_forecast_selection.csv", index=False)
-    diagnostics.to_csv(RESULT_DIR / "continuous_risk_forecast_diagnostics.csv", index=False)
-    promotion.to_csv(RESULT_DIR / "continuous_risk_forecast_promotion.csv", index=False)
+    metrics.to_csv(research_result_path("continuous_risk_forecast_metrics.csv"), index=False)
+    selection.to_csv(research_result_path("continuous_risk_forecast_selection.csv"), index=False)
+    diagnostics.to_csv(research_result_path("continuous_risk_forecast_diagnostics.csv"), index=False)
+    promotion.to_csv(research_result_path("continuous_risk_forecast_promotion.csv"), index=False)
     return {
         "metrics": metrics,
         "selection": selection,

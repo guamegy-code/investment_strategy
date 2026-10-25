@@ -5,7 +5,6 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from config import RESULT_DIR
 from .discrete_hazard import HAZARD_PROFILES, walk_forward_hazard_probabilities
 from .path_tail_targets import PERIODS, _load_feature_data, forward_path_outcomes
 from .precision_thresholds import _wilson_interval, expanding_quantile
@@ -19,6 +18,7 @@ from .weekly_path_tail import (
     _episode_metrics,
     suppress_overlapping_warnings,
 )
+from result_paths import research_result_path
 
 
 QUANTILE_GRID = tuple(np.arange(0.50, 1.00, 0.05).round(2))
@@ -135,12 +135,12 @@ def run_constrained_hazard_threshold_validation():
         if len(selected)
         else metrics.iloc[0:0].copy()
     )
-    metrics.to_csv(RESULT_DIR / "constrained_hazard_threshold_metrics.csv", index=False)
+    metrics.to_csv(research_result_path("constrained_hazard_threshold_metrics.csv"), index=False)
     selection.to_csv(
-        RESULT_DIR / "constrained_hazard_threshold_selection.csv", index=False
+        research_result_path("constrained_hazard_threshold_selection.csv"), index=False
     )
     fixed_metrics.to_csv(
-        RESULT_DIR / "constrained_hazard_threshold_fixed.csv", index=False
+        research_result_path("constrained_hazard_threshold_fixed.csv"), index=False
     )
     return {"metrics": metrics, "selection": selection, "fixed": fixed_metrics}
 

@@ -7,7 +7,7 @@ from dataclasses import dataclass, replace
 import numpy as np
 import pandas as pd
 
-from config import EXTENDED_DATA_DIR, RESULT_DIR
+from config import EXTENDED_DATA_DIR
 from strategy import STATIC_RETIREMENT_7030
 from .enhanced_probability_features import EnhancedProbabilityBacktest, SIGNAL_TICKERS
 from .multi_horizon_probability import TAIL_CONFIG
@@ -19,6 +19,7 @@ from .precision_thresholds import (
 )
 from .probability_accuracy import classification_metrics
 from .probabilistic_allocation import walk_forward_event_probabilities
+from result_paths import research_result_path
 
 
 @dataclass(frozen=True)
@@ -187,8 +188,8 @@ def run_path_tail_target_validation():
     samples = _common_samples(data)
     metrics = _metric_rows(samples)
     selection = _development_selection(metrics)
-    metrics.to_csv(RESULT_DIR / "path_tail_target_metrics.csv", index=False)
-    selection.to_csv(RESULT_DIR / "path_tail_target_selection.csv", index=False)
+    metrics.to_csv(research_result_path("path_tail_target_metrics.csv"), index=False)
+    selection.to_csv(research_result_path("path_tail_target_selection.csv"), index=False)
     return {"metrics": metrics, "selection": selection}
 
 

@@ -133,10 +133,10 @@ MDD 1%p 개선당 CAGR 희생은 약 0.236%p에서 0.139%p로 줄어 앙상블 �
 ## 재현 코드와 보고서
 
 - `validation/state_continuous_ensemble.py`
-- `results/state_continuous_ensemble_summary.csv`
-- `results/state_continuous_ensemble_relative.csv`
-- `results/state_continuous_ensemble_rolling_summary.csv`
-- `results/state_continuous_ensemble_activity_summary.csv`
-- `results/state_continuous_ensemble_state_relative.csv`
-- `results/state_continuous_ensemble_stress_relative.csv`
-- `results/state_continuous_ensemble_decision.csv`
+- `results/research/state/state_continuous_ensemble_summary.csv`
+- `results/research/state/state_continuous_ensemble_relative.csv`
+- `results/research/state/state_continuous_ensemble_rolling_summary.csv`
+- `results/research/state/state_continuous_ensemble_activity_summary.csv`
+- `results/research/state/state_continuous_ensemble_state_relative.csv`
+- `results/research/state/state_continuous_ensemble_stress_relative.csv`
+- `results/research/state/state_continuous_ensemble_decision.csv`

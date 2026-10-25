@@ -2,7 +2,7 @@
 
 import pandas as pd
 
-from config import COMMISSION, EXTENDED_DATA_DIR, RESULT_DIR, SLIPPAGE
+from config import COMMISSION, EXTENDED_DATA_DIR, SLIPPAGE
 from .extended_data import ASSETS
 from .extended_stress import _window_report
 from runner import Runner
@@ -10,6 +10,7 @@ from strategy import (
     RetirementAllocationStrategy,
     STATIC_70_BND10_BIL10_GLD10,
 )
+from result_paths import research_result_path
 
 
 COST_MULTIPLIERS = (1, 2, 3)
@@ -144,12 +145,12 @@ def run_execution_stress():
     comparison = _comparison(summary)
     criteria = _criteria(comparison)
     crisis = pd.concat(crisis_rows, ignore_index=True)
-    summary.to_csv(RESULT_DIR / "execution_stress_summary.csv", index=False)
+    summary.to_csv(research_result_path("execution_stress_summary.csv"), index=False)
     comparison.to_csv(
-        RESULT_DIR / "execution_stress_comparison.csv", index=False
+        research_result_path("execution_stress_comparison.csv"), index=False
     )
-    criteria.to_csv(RESULT_DIR / "execution_stress_criteria.csv", index=False)
-    crisis.to_csv(RESULT_DIR / "execution_stress_windows.csv", index=False)
+    criteria.to_csv(research_result_path("execution_stress_criteria.csv"), index=False)
+    crisis.to_csv(research_result_path("execution_stress_windows.csv"), index=False)
     return comparison, criteria, crisis
 
 

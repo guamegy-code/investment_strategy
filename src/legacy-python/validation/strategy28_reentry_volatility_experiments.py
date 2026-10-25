@@ -25,9 +25,10 @@ MODULE_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(MODULE_DIR))
 
 from backtest import Backtest  # noqa: E402
-from config import COMMISSION, DATA_DIR, EXTENDED_DATA_DIR, RESULT_DIR, SLIPPAGE  # noqa: E402
+from config import COMMISSION, DATA_DIR, EXTENDED_DATA_DIR, RESEARCH_RESULT_DIR as RESULT_DIR, SLIPPAGE  # noqa: E402
 from performance import Performance  # noqa: E402
 from strategy_dsl import DeclarativeStrategy, load_strategy_definition  # noqa: E402
+from result_paths import research_result_path
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -400,17 +401,17 @@ def main() -> None:
 
     RESULT_DIR.mkdir(exist_ok=True)
     pd.DataFrame(summary_rows).to_csv(
-        RESULT_DIR / "strategy28_reentry_volatility_summary.csv", index=False
+        research_result_path("strategy28_reentry_volatility_summary.csv"), index=False
     )
     pd.DataFrame(event_rows).to_csv(
-        RESULT_DIR / "strategy28_reentry_volatility_events.csv", index=False
+        research_result_path("strategy28_reentry_volatility_events.csv"), index=False
     )
     pd.DataFrame(stress_rows).to_csv(
-        RESULT_DIR / "strategy28_reentry_volatility_stress.csv", index=False
+        research_result_path("strategy28_reentry_volatility_stress.csv"), index=False
     )
     rolling = rolling_comparison(current_runs)
     rolling.to_csv(
-        RESULT_DIR / "strategy28_reentry_volatility_rolling.csv", index=False
+        research_result_path("strategy28_reentry_volatility_rolling.csv"), index=False
     )
     rolling.groupby(["Years", "Label"], as_index=False).agg(
         Windows=("Window", "count"),
@@ -420,10 +421,10 @@ def main() -> None:
         AverageMDDImprovement=("MDDImprovement", "mean"),
         CalmarWins=("CalmarGap", lambda values: int((values > 0).sum())),
     ).to_csv(
-        RESULT_DIR / "strategy28_reentry_volatility_rolling_summary.csv", index=False
+        research_result_path("strategy28_reentry_volatility_rolling_summary.csv"), index=False
     )
     pd.DataFrame(transition_rows).to_csv(
-        RESULT_DIR / "strategy28_reentry_volatility_transitions.csv", index=False
+        research_result_path("strategy28_reentry_volatility_transitions.csv"), index=False
     )
 
 

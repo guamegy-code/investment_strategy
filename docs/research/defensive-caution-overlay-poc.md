@@ -119,14 +119,14 @@ CAGR 차이 -0.355%p, MDD 개선 +0.812%p였습니다. 사전 스트레스 기�
 ## 재현 코드와 보고서
 
 - `validation/defensive_caution_overlay.py`
-- `results/defensive_caution_summary.csv`
-- `results/defensive_caution_relative.csv`
-- `results/defensive_caution_rolling_summary.csv`
-- `results/defensive_caution_rolling3_summary.csv`
-- `results/defensive_caution_episode_summary.csv`
-- `results/defensive_caution_activity_summary.csv`
-- `results/defensive_caution_stress_relative.csv`
-- `results/defensive_caution_decision.csv`
+- `results/research/defensive/defensive_caution_summary.csv`
+- `results/research/defensive/defensive_caution_relative.csv`
+- `results/research/defensive/defensive_caution_rolling_summary.csv`
+- `results/research/defensive/defensive_caution_rolling3_summary.csv`
+- `results/research/defensive/defensive_caution_episode_summary.csv`
+- `results/research/defensive/defensive_caution_activity_summary.csv`
+- `results/research/defensive/defensive_caution_stress_relative.csv`
+- `results/research/defensive/defensive_caution_decision.csv`
 
 ## 2026-08-29 후속: 전략 15 접목
 
@@ -177,5 +177,5 @@ CAGR은 모든 구간에서 낮았습니다. 비용 5배에서 원안의 CAGR �
 
 따라서 전략 15 YAML과 생산 실행 규칙은 변경하지 않습니다. 재현 코드는
 `validation/strategy15_defensive_caution_overlay.py`, 단위 테스트는
-`tests/test_strategy15_defensive_caution_overlay.py`, 세부 보고서는
-`results/strategy15_defensive_caution_*.csv`입니다.
+`tests/research/test_strategy15_defensive_caution_overlay.py`, 세부 보고서는
+`results/research/strategy15/strategy15_defensive_caution_*.csv`입니다.

@@ -8,7 +8,7 @@ import io
 import pandas as pd
 
 from backtest import Backtest
-from config import DATA_DIR, RESULT_DIR, START_DATE
+from config import DATA_DIR, START_DATE
 from experimental_strategies import (
     RetirementAllocationProfitBandStrategy,
     RetirementAllocationProfitBandVXUSStrategy,
@@ -25,6 +25,7 @@ from strategy import (
     _SafeBlendMixin,
     _VXUSSubstitutionMixin,
 )
+from result_paths import research_result_path
 
 
 COMMON_END_DATE = "2026-07-31"
@@ -317,12 +318,12 @@ def run_validation():
     fixed = _report(FIXED_WINDOWS)
     rolling = _report(_rolling_windows())
     comparison = _rolling_comparison(rolling)
-    fixed.to_csv(RESULT_DIR / "retirement_safe_blend_profit_band_fixed.csv", index=False)
+    fixed.to_csv(research_result_path("retirement_safe_blend_profit_band_fixed.csv"), index=False)
     rolling.to_csv(
-        RESULT_DIR / "retirement_safe_blend_profit_band_rolling.csv", index=False
+        research_result_path("retirement_safe_blend_profit_band_rolling.csv"), index=False
     )
     comparison.to_csv(
-        RESULT_DIR / "retirement_safe_blend_profit_band_comparison.csv", index=False
+        research_result_path("retirement_safe_blend_profit_band_comparison.csv"), index=False
     )
     return fixed, comparison
 

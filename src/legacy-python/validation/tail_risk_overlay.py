@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 
 from backtest import Backtest
-from config import EXTENDED_DATA_DIR, RESULT_DIR
+from config import EXTENDED_DATA_DIR
 from strategy import BaseStrategy, STATIC_RETIREMENT_7030
 from .multi_horizon_probability import (
     TAIL_CONFIG,
@@ -25,6 +25,7 @@ from .probabilistic_allocation import (
     _window_summary,
     walk_forward_event_probabilities,
 )
+from result_paths import research_result_path
 
 
 @dataclass(frozen=True)
@@ -261,12 +262,12 @@ def run_tail_risk_overlay_validation():
     activation = _activation_report(tail_results)
     defense_events = _defense_event_report(tail_results[0][4])
 
-    summary.to_csv(RESULT_DIR / "tail_risk_overlay_summary.csv", index=False)
-    windows.to_csv(RESULT_DIR / "tail_risk_overlay_windows.csv", index=False)
-    diagnostics.to_csv(RESULT_DIR / "tail_risk_overlay_diagnostics.csv", index=False)
-    activation.to_csv(RESULT_DIR / "tail_risk_overlay_activation.csv", index=False)
+    summary.to_csv(research_result_path("tail_risk_overlay_summary.csv"), index=False)
+    windows.to_csv(research_result_path("tail_risk_overlay_windows.csv"), index=False)
+    diagnostics.to_csv(research_result_path("tail_risk_overlay_diagnostics.csv"), index=False)
+    activation.to_csv(research_result_path("tail_risk_overlay_activation.csv"), index=False)
     defense_events.to_csv(
-        RESULT_DIR / "tail_risk_overlay_defense_events.csv", index=False
+        research_result_path("tail_risk_overlay_defense_events.csv"), index=False
     )
     return {
         "summary": summary,

@@ -7,7 +7,7 @@ import pandas as pd
 import yfinance as yf
 
 from backtest import Backtest
-from config import EXTENDED_DATA_DIR, PROJECT_ROOT, RESULT_DIR
+from config import EXTENDED_DATA_DIR, MULTI_MARKET_DATA_DIR
 from .continuous_allocation import (
     WINDOWS,
     _allocation_report,
@@ -21,10 +21,10 @@ from strategy import (
     RetirementAllocationStrategy,
     STATIC_70_BND10_BIL10_GLD10,
 )
+from result_paths import research_result_path
 
 
 CONFIRMATION_ASSETS = ("SPY", "IWM")
-MULTI_MARKET_DATA_DIR = PROJECT_ROOT / "data_multimarket"
 MULTI_MARKET_TICKERS = ASSETS + CONFIRMATION_ASSETS
 
 
@@ -228,7 +228,7 @@ def run_multi_market_validation(refresh_data=False):
         "multi_market_weights": _allocation_report(results),
     }
     for name, report in reports.items():
-        report.to_csv(RESULT_DIR / f"{name}.csv", index=False)
+        report.to_csv(research_result_path(f"{name}.csv"), index=False)
     return reports
 
 

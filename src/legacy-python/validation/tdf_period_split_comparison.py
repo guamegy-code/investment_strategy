@@ -8,11 +8,11 @@ from performance import Performance
 from strategy_dsl import load_strategy_definition
 from validation.tdf_bnd_improvement_candidates import run
 from validation.tdf_state_allocation_grid import allocation_definition
+from result_paths import research_result_path
 
 
 ROOT = Path(__file__).resolve().parents[2]
 SOURCE = ROOT / "strategies" / "06_profit_band_tdf2050.yaml"
-RESULT_DIR = ROOT / "results"
 
 
 def period_metrics(history, start, end):
@@ -59,7 +59,7 @@ def main():
             },
         })
     summary = pd.DataFrame(rows)
-    summary.to_csv(RESULT_DIR / "tdf_period_split_comparison.csv", index=False)
+    summary.to_csv(research_result_path("tdf_period_split_comparison.csv"), index=False)
     display = summary.copy()
     for column in display.columns:
         if column != "Candidate":

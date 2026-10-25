@@ -64,8 +64,8 @@ Strategy 16은 같은 QQQ/TDF 상태별 비중을 유지하고 BIL 슬리브만 
 ## 재현
 
 - 구현: `src/legacy-python/validation/state_conditioned_cross_asset_rotation.py`
-- 단위 검증: `tests/test_state_conditioned_cross_asset_rotation.py`
-- 생성 보고서: `results/state_conditioned_cross_asset_rotation_*.csv`
+- 단위 검증: `tests/research/test_state_conditioned_cross_asset_rotation.py`
+- 생성 보고서: `results/research/state/state_conditioned_cross_asset_rotation_*.csv`
 
 ## 2026-08-29 과매매 안정화 재검증
 

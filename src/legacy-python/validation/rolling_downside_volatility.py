@@ -5,7 +5,6 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from config import RESULT_DIR
 from strategy import BaseStrategy, STATIC_RETIREMENT_7030
 from .continuous_risk_forecast import (
     ContinuousForecastStrategy,
@@ -19,6 +18,7 @@ from .continuous_risk_forecast import (
     walk_forward_continuous_risk,
 )
 from .path_tail_targets import PERIODS, _load_feature_data
+from result_paths import research_result_path
 
 
 MODEL_NAME = "ROLLING_HAR_DOWNSIDE_VOL_50_70"
@@ -292,10 +292,10 @@ def run_rolling_downside_volatility_validation():
     development = _development_gate(metrics)
     later = _later_gate(metrics, development)
     diagnostics = _diagnostics(new_prepared, active_start)
-    metrics.to_csv(RESULT_DIR / "rolling_downside_volatility_metrics.csv", index=False)
-    development.to_csv(RESULT_DIR / "rolling_downside_volatility_development.csv", index=False)
-    later.to_csv(RESULT_DIR / "rolling_downside_volatility_later.csv", index=False)
-    diagnostics.to_csv(RESULT_DIR / "rolling_downside_volatility_diagnostics.csv", index=False)
+    metrics.to_csv(research_result_path("rolling_downside_volatility_metrics.csv"), index=False)
+    development.to_csv(research_result_path("rolling_downside_volatility_development.csv"), index=False)
+    later.to_csv(research_result_path("rolling_downside_volatility_later.csv"), index=False)
+    diagnostics.to_csv(research_result_path("rolling_downside_volatility_diagnostics.csv"), index=False)
     return {
         "metrics": metrics,
         "development": development,

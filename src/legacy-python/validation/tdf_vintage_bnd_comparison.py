@@ -23,7 +23,8 @@ from validation.tdf_bil_retirement_insight import definition_for
 
 
 ROOT = Path(__file__).resolve().parents[2]
-RESULT_DIR = ROOT / "results"
+from config import RESEARCH_RESULT_DIR as RESULT_DIR
+from result_paths import research_result_path
 BASE_CONFIG = {
     "canonical_qqq": 0.70,
     "recovery_qqq": 0.50,
@@ -228,8 +229,8 @@ def main():
         pd.DataFrame(robustness), on="Candidate"
     ).sort_values(["BothWins", "Calmar", "CAGR"], ascending=False)
     RESULT_DIR.mkdir(exist_ok=True)
-    summary.to_csv(RESULT_DIR / "tdf_vintage_bnd_comparison.csv", index=False)
-    rolling.to_csv(RESULT_DIR / "tdf_vintage_bnd_rolling.csv", index=False)
+    summary.to_csv(research_result_path("tdf_vintage_bnd_comparison.csv"), index=False)
+    rolling.to_csv(research_result_path("tdf_vintage_bnd_rolling.csv"), index=False)
 
     display = summary.head(15).copy()
     for column in (

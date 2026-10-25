@@ -7,7 +7,7 @@ from functools import reduce
 import numpy as np
 import pandas as pd
 
-from config import EXTENDED_DATA_DIR, RESULT_DIR
+from config import EXTENDED_DATA_DIR
 from strategy import STATIC_RETIREMENT_7030
 from .external_probability_features import (
     ALL_TICKERS,
@@ -25,6 +25,7 @@ from .multi_horizon_probability import (
     TAIL_RETURN_THRESHOLD,
 )
 from .probabilistic_allocation import FEATURE_COLUMNS, walk_forward_event_probabilities
+from result_paths import research_result_path
 
 
 ACCURACY_PROFILES = (
@@ -269,9 +270,9 @@ def run_probability_accuracy_validation():
         ),
         ignore_index=True,
     )
-    metrics.to_csv(RESULT_DIR / "probability_accuracy_metrics.csv", index=False)
+    metrics.to_csv(research_result_path("probability_accuracy_metrics.csv"), index=False)
     calibration.to_csv(
-        RESULT_DIR / "probability_accuracy_calibration.csv", index=False
+        research_result_path("probability_accuracy_calibration.csv"), index=False
     )
     return {"metrics": metrics, "calibration": calibration}
 

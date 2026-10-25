@@ -75,6 +75,8 @@ Cloudflare Worker에서 수행합니다.
 
 ```text
 strategies/       기본 YAML 전략
+data/             로컬 시장 데이터
+data/research/    용도별 연구 데이터셋 (Git 제외)
 src/web/          정적 웹페이지 소스
 dist/web/         배포용 정적 웹 산출물
 data-proxy/       가격 프록시 및 알림 평가 Cloudflare Worker

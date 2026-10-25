@@ -16,6 +16,7 @@ from strategy28_failed_dip_regime import (
     build_data, event_result, summarize,
 )
 from strategy28_dotcom_fast_tier import FastTierOverlay
+from result_paths import research_result_path
 
 
 class CrashMix(FastTierOverlay):
@@ -156,13 +157,13 @@ def main():
 
     RESULT_DIR.mkdir(exist_ok=True)
     pd.DataFrame(summary_rows).to_csv(
-        RESULT_DIR / "strategy28_crash_overlay_mix_summary.csv", index=False
+        research_result_path("strategy28_crash_overlay_mix_summary.csv"), index=False
     )
     pd.DataFrame(event_rows).to_csv(
-        RESULT_DIR / "strategy28_crash_overlay_mix_events.csv", index=False
+        research_result_path("strategy28_crash_overlay_mix_events.csv"), index=False
     )
     pd.DataFrame(transitions).to_csv(
-        RESULT_DIR / "strategy28_crash_overlay_mix_transitions.csv", index=False
+        research_result_path("strategy28_crash_overlay_mix_transitions.csv"), index=False
     )
 
 

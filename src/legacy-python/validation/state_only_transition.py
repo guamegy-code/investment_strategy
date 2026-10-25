@@ -8,7 +8,7 @@ import io
 import pandas as pd
 
 from backtest import Backtest
-from config import DATA_DIR, END_DATE, RESULT_DIR, START_DATE
+from config import DATA_DIR, END_DATE, START_DATE
 from experimental_strategies import StateOnlyTransitionRetirementStrategy
 from performance import Performance
 from strategy import (
@@ -16,6 +16,7 @@ from strategy import (
     RetirementAllocationStrategy,
     STATIC_RETIREMENT_7030,
 )
+from result_paths import research_result_path
 
 
 FIXED_WINDOWS = (
@@ -208,12 +209,12 @@ def run_state_only_transition_validation():
     fixed = _window_report(FIXED_WINDOWS)
     rolling = _window_report(_rolling_windows())
     comparison = _comparison(fixed, rolling)
-    fixed.to_csv(RESULT_DIR / "state_only_transition_fixed.csv", index=False)
-    rolling.to_csv(RESULT_DIR / "state_only_transition_rolling.csv", index=False)
+    fixed.to_csv(research_result_path("state_only_transition_fixed.csv"), index=False)
+    rolling.to_csv(research_result_path("state_only_transition_rolling.csv"), index=False)
     comparison.to_csv(
-        RESULT_DIR / "state_only_transition_comparison.csv", index=False
+        research_result_path("state_only_transition_comparison.csv"), index=False
     )
-    (RESULT_DIR / "state_only_transition_validation.md").write_text(
+    (research_result_path("state_only_transition_validation.md")).write_text(
         _markdown_report(fixed, comparison), encoding="utf-8"
     )
     return {"fixed": fixed, "rolling": rolling, "comparison": comparison}

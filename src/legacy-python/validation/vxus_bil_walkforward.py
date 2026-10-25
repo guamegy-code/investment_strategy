@@ -3,10 +3,11 @@
 import pandas as pd
 
 from backtest import Backtest
-from config import DATA_DIR, END_DATE, RESULT_DIR, START_DATE
+from config import DATA_DIR, END_DATE, START_DATE
 from performance import Performance
 from strategy import RetirementAllocationStrategy
 from .walkforward import WalkForwardProfileComparison
+from result_paths import research_result_path
 
 
 BIL_SUBSTITUTION_SHARES = (0.0, 0.25, 0.50, 0.75, 1.0)
@@ -146,7 +147,7 @@ def run_vxus_bil_walkforward():
         _selection_frequency(reports["vxus_bil_walkforward_selected"])
     )
     for name, report in reports.items():
-        report.to_csv(RESULT_DIR / f"{name}.csv", index=False)
+        report.to_csv(research_result_path(f"{name}.csv"), index=False)
     return reports
 
 

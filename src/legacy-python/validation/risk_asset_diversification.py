@@ -5,13 +5,13 @@ import pandas as pd
 import yfinance as yf
 
 from backtest import Backtest
-from config import EXTENDED_DATA_DIR, PROJECT_ROOT, RESULT_DIR
+from config import EXTENDED_DATA_DIR, PROJECT_ROOT, RISK_ASSET_DATA_DIR
 from indicators import Indicator
 from performance import Performance
 from strategy import RetirementAllocationStrategy
+from result_paths import research_result_path
 
 
-RISK_ASSET_DATA_DIR = PROJECT_ROOT / "data_risk_assets"
 CANDIDATES = ("QQQ", "VTV", "VXUS", "USMV")
 BACKTEST_TICKERS = (*CANDIDATES, "BND", "BIL")
 TEST_START = "2012-01-03"
@@ -319,7 +319,7 @@ def run_risk_asset_diversification(refresh_data=False):
         ),
     }
     for name, report in reports.items():
-        report.to_csv(RESULT_DIR / f"{name}.csv", index=False)
+        report.to_csv(research_result_path(f"{name}.csv"), index=False)
     return reports
 
 

@@ -5,7 +5,6 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from config import RESULT_DIR
 from .discrete_hazard import (
     BUCKET_END_DAYS,
     _metrics,
@@ -23,6 +22,7 @@ from .weekly_path_tail import (
     MINIMUM_THRESHOLD_HISTORY,
     PATH_THRESHOLD,
 )
+from result_paths import research_result_path
 
 
 BARRIERS = np.array((-0.03, -0.05, -0.08))
@@ -203,8 +203,8 @@ def run_ordinal_hazard_validation():
     samples = _common_samples(data)
     metrics = _metrics(samples)
     selection = _selection(metrics)
-    metrics.to_csv(RESULT_DIR / "ordinal_hazard_metrics.csv", index=False)
-    selection.to_csv(RESULT_DIR / "ordinal_hazard_selection.csv", index=False)
+    metrics.to_csv(research_result_path("ordinal_hazard_metrics.csv"), index=False)
+    selection.to_csv(research_result_path("ordinal_hazard_selection.csv"), index=False)
     return {"metrics": metrics, "selection": selection}
 
 

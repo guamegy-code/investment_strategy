@@ -18,7 +18,7 @@ from typing import Any, Mapping
 import pandas as pd
 
 from backtest import Backtest
-from config import COMMISSION, RESULT_DIR, SLIPPAGE
+from config import COMMISSION, SLIPPAGE
 from strategy_dsl import DeclarativeStrategy, load_strategy_definition
 from validation.defensive_caution_overlay import (
     START_DATE,
@@ -34,6 +34,7 @@ from validation.state_conditioned_continuous_overlay import (
     _performance_report,
     _relative_report,
 )
+from result_paths import research_result_path
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -519,7 +520,7 @@ def run_strategy15_shock_buffer_validation():
         "strategy15_shock_buffer_decision": decision,
     }
     for name, report in reports.items():
-        report.to_csv(RESULT_DIR / f"{name}.csv", index=False)
+        report.to_csv(research_result_path(f"{name}.csv"), index=False)
     return reports
 
 

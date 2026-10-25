@@ -9,15 +9,16 @@ import pandas as pd
 
 from attribution import RetirementAllocationAttribution
 from backtest import Backtest
-from config import DATA_DIR, PROJECT_ROOT, RESULT_DIR
+from config import DATA_DIR, PROBABILITY_SIGNALS_DATA_DIR
 from performance import Performance
 from strategy_dsl import DeclarativeStrategy, load_strategy_definition
 from .cnn_official_recovery_gates import SOURCE
 from .cnn_fear_greed_reconstruction import causal_percentile
+from result_paths import research_result_path
 
 
 OBSERVATION = "FEAR"
-VXN_PATH = PROJECT_ROOT / "data_probability_signals" / "VXN.csv"
+VXN_PATH = PROBABILITY_SIGNALS_DATA_DIR / "VXN.csv"
 WINDOWS = {
     "FULL": (None, None),
     "DEVELOPMENT_PRE2021": (None, "2020-12-31"),
@@ -210,7 +211,7 @@ def run_extreme_fear_recovery_validation():
         "extreme_fear_recovery_transition_quality": _tagged(results, "quality"),
     }
     for name, report in reports.items():
-        report.to_csv(RESULT_DIR / f"{name}.csv", index=False)
+        report.to_csv(research_result_path(f"{name}.csv"), index=False)
     return reports
 
 

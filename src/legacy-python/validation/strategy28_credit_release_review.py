@@ -9,6 +9,7 @@ from strategy28_failed_dip_regime import (
     CURRENT, DOTCOM, GFC, EVENTS, ROOT, RESULT_DIR,
     build_data, event_result, run_one, transitions,
 )
+from result_paths import research_result_path
 
 
 def main() -> None:
@@ -50,10 +51,10 @@ def main() -> None:
                 print(rows[-1], flush=True)
 
     RESULT_DIR.mkdir(exist_ok=True)
-    pd.DataFrame(rows).to_csv(RESULT_DIR / "strategy28_credit_release_summary.csv", index=False)
-    pd.DataFrame(event_rows).to_csv(RESULT_DIR / "strategy28_credit_release_events.csv", index=False)
+    pd.DataFrame(rows).to_csv(research_result_path("strategy28_credit_release_summary.csv"), index=False)
+    pd.DataFrame(event_rows).to_csv(research_result_path("strategy28_credit_release_events.csv"), index=False)
     pd.DataFrame(transition_rows).to_csv(
-        RESULT_DIR / "strategy28_credit_release_transitions.csv", index=False
+        research_result_path("strategy28_credit_release_transitions.csv"), index=False
     )
 
 

@@ -131,4 +131,4 @@ QQQ 30%로 다시 축소했다. 이 구간은 수익에 기여했지만 단일 �
 - 1일 실행에서는 25번보다 CAGR과 MDD가 모두 좋지만, 2~3일 실행에서는 CAGR이 낮다.
 
 재현 코드는 `src/legacy-python/validation/strategy28_warning_dip_buyer.py`에 있으며 결과는
-`results/strategy28_*.csv`에 저장한다.
+`results/research/strategy28/strategy28_*.csv`에 저장한다.

@@ -7,7 +7,6 @@ from dataclasses import replace
 import numpy as np
 import pandas as pd
 
-from config import RESULT_DIR
 from .multi_horizon_probability import TAIL_CONFIG
 from .path_tail_targets import (
     PERIODS,
@@ -17,6 +16,7 @@ from .path_tail_targets import (
 from .precision_thresholds import PROFILE, _wilson_interval, expanding_quantile
 from .probability_accuracy import classification_metrics
 from .probabilistic_allocation import walk_forward_event_probabilities
+from result_paths import research_result_path
 
 
 HORIZON_DAYS = 21
@@ -183,9 +183,9 @@ def run_weekly_path_tail_validation():
     metrics = _metric_rows(sample)
     selection = _selection(metrics)
     signals = _signals(sample)
-    metrics.to_csv(RESULT_DIR / "weekly_path_tail_metrics.csv", index=False)
-    selection.to_csv(RESULT_DIR / "weekly_path_tail_selection.csv", index=False)
-    signals.to_csv(RESULT_DIR / "weekly_path_tail_signals.csv", index=False)
+    metrics.to_csv(research_result_path("weekly_path_tail_metrics.csv"), index=False)
+    selection.to_csv(research_result_path("weekly_path_tail_selection.csv"), index=False)
+    signals.to_csv(research_result_path("weekly_path_tail_signals.csv"), index=False)
     return {"metrics": metrics, "selection": selection, "signals": signals}
 
 

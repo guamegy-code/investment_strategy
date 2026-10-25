@@ -11,6 +11,7 @@ from strategy28_mixed_tuning import MixedTuning, apply_credit_lag
 from strategy30_unknown_crash_stress import SCENARIOS, EVENT_END, inject
 from backtest import Backtest
 from config import COMMISSION, SLIPPAGE
+from result_paths import research_result_path
 
 
 class SharedShockGuard(MixedTuning):
@@ -119,7 +120,7 @@ def main():
             rows.append(row)
             print(row, flush=True)
     RESULT_DIR.mkdir(parents=True, exist_ok=True)
-    pd.DataFrame(rows).to_csv(RESULT_DIR / "strategy30_shock_guard_probe_summary.csv", index=False)
+    pd.DataFrame(rows).to_csv(research_result_path("strategy30_shock_guard_probe_summary.csv"), index=False)
 
 
 if __name__ == "__main__":

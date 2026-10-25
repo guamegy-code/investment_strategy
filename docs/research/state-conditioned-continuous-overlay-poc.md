@@ -123,10 +123,10 @@ Calmar 차이 +0.0065였습니다. 비용 증가는 결론을 뒤집지 않았�
 ## 재현 코드와 보고서
 
 - `validation/state_conditioned_continuous_overlay.py`
-- `results/state_conditioned_overlay_summary.csv`
-- `results/state_conditioned_overlay_relative.csv`
-- `results/state_conditioned_overlay_rolling_summary.csv`
-- `results/state_conditioned_overlay_episode_summary.csv`
-- `results/state_conditioned_overlay_signal_summary.csv`
-- `results/state_conditioned_overlay_stress_relative.csv`
-- `results/state_conditioned_overlay_decision.csv`
+- `results/research/state/state_conditioned_overlay_summary.csv`
+- `results/research/state/state_conditioned_overlay_relative.csv`
+- `results/research/state/state_conditioned_overlay_rolling_summary.csv`
+- `results/research/state/state_conditioned_overlay_episode_summary.csv`
+- `results/research/state/state_conditioned_overlay_signal_summary.csv`
+- `results/research/state/state_conditioned_overlay_stress_relative.csv`
+- `results/research/state/state_conditioned_overlay_decision.csv`

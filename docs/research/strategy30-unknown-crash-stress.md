@@ -61,4 +61,4 @@
 
 이 경로들은 2024년 실제 상승장 가격에 결정적 배율을 곱한 스트레스 상황이다. 샘플의 빈도·시장 확률·다음 위기의 예상 낙폭으로 해석하지 않는다. 2024년의 기존 기술지표는 재계산했지만 밸류에이션과 현금 수익은 고정했고, 해외 ETF와 실제 연금 상품의 체결 차이도 포함하지 않았다. [연준의 스트레스 테스트 설명](https://www.federalreserve.gov/publications/2026-stress-test-scenarios.htm)처럼 가상 경로는 예측보다 취약점 파악에 쓰는 것이 적절하다.
 
-재현: `python src/legacy-python/validation/strategy30_unknown_crash_stress.py`, `python src/legacy-python/validation/strategy30_floor_probe.py`, `python src/legacy-python/validation/strategy30_shock_guard_probe.py`. 결과는 `results/strategy30_*_summary.csv`에 저장된다.
+재현: `python src/legacy-python/validation/strategy30_unknown_crash_stress.py`, `python src/legacy-python/validation/strategy30_floor_probe.py`, `python src/legacy-python/validation/strategy30_shock_guard_probe.py`. 결과는 `results/research/strategy30/strategy30_*_summary.csv`에 저장된다.

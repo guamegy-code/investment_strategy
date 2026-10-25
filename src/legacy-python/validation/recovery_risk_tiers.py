@@ -8,7 +8,6 @@ from dataclasses import dataclass
 import pandas as pd
 
 from attribution import RetirementAllocationAttribution
-from config import RESULT_DIR
 from performance import Performance
 from strategy_dsl import DeclarativeStrategy, load_strategy_definition
 from .extreme_fear_recovery import (
@@ -17,6 +16,7 @@ from .extreme_fear_recovery import (
     ExtremeFearBacktest,
     build_extreme_fear_signal,
 )
+from result_paths import research_result_path
 
 
 WINDOWS = {
@@ -181,7 +181,7 @@ def run_recovery_risk_tier_validation():
         "recovery_risk_tier_transition_quality": _tagged(results, "quality"),
     }
     for name, report in reports.items():
-        report.to_csv(RESULT_DIR / f"{name}.csv", index=False)
+        report.to_csv(research_result_path(f"{name}.csv"), index=False)
     return reports
 
 

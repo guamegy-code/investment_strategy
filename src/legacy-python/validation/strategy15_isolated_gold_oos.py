@@ -9,13 +9,13 @@ from pathlib import Path
 
 import pandas as pd
 
-from config import RESULT_DIR
 from performance import Performance
 from validation.strategy15_isolated_gold_overlay import (
     PROFILES,
     STRESS_SCENARIOS,
     _run_scenario,
 )
+from result_paths import research_result_path
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -120,10 +120,10 @@ def update_isolated_gold_oos() -> pd.DataFrame:
             })
         status_rows.append(row)
     status = pd.DataFrame(status_rows)
-    status.to_csv(RESULT_DIR / "strategy15_isolated_gold_oos_status.csv", index=False)
+    status.to_csv(research_result_path("strategy15_isolated_gold_oos_status.csv"), index=False)
     if daily_frames:
         pd.concat(daily_frames, ignore_index=True).to_csv(
-            RESULT_DIR / "strategy15_isolated_gold_oos_daily.csv", index=False
+            research_result_path("strategy15_isolated_gold_oos_daily.csv"), index=False
         )
     return status
 

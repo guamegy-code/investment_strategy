@@ -9,7 +9,8 @@ import numpy as np
 import pandas as pd
 import yfinance as yf
 
-from config import EXTENDED_DATA_DIR, PROJECT_ROOT, RESULT_DIR
+from config import EXTENDED_DATA_DIR, PROJECT_ROOT
+from config import PROBABILITY_SIGNALS_DATA_DIR as EXTERNAL_DATA_DIR
 from indicators import Indicator
 from performance import Performance
 from strategy import STATIC_RETIREMENT_7030
@@ -18,9 +19,9 @@ from .multi_horizon_probability import TAIL_CONFIG, TAIL_RETURN_THRESHOLD
 from .multi_market import MultiMarketBacktest, MULTI_MARKET_TICKERS
 from .probabilistic_allocation import FEATURE_COLUMNS, _summary, walk_forward_event_probabilities
 from .tail_risk_overlay import PROFILES as TAIL_PROFILES, TailRiskOverlayStrategy
+from result_paths import research_result_path
 
 
-EXTERNAL_DATA_DIR = PROJECT_ROOT / "data_probability_signals"
 EXTERNAL_SYMBOLS = {
     "VIX": "^VIX",
     "VIX3M": "^VIX3M",
@@ -285,11 +286,11 @@ def run_external_probability_validation(refresh_data=False):
         for profile in EXTERNAL_ABLATION_PROFILES
     )
     diagnostics = pd.DataFrame(diagnostic_rows)
-    manifest.to_csv(RESULT_DIR / "external_signal_manifest.csv", index=False)
-    summary.to_csv(RESULT_DIR / "external_probability_summary.csv", index=False)
-    windows.to_csv(RESULT_DIR / "external_probability_windows.csv", index=False)
+    manifest.to_csv(research_result_path("external_signal_manifest.csv"), index=False)
+    summary.to_csv(research_result_path("external_probability_summary.csv"), index=False)
+    windows.to_csv(research_result_path("external_probability_windows.csv"), index=False)
     diagnostics.to_csv(
-        RESULT_DIR / "external_probability_diagnostics.csv", index=False
+        research_result_path("external_probability_diagnostics.csv"), index=False
     )
     return {
         "manifest": manifest,

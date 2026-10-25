@@ -18,9 +18,10 @@ from typing import Any, Mapping
 import pandas as pd
 
 from backtest import Backtest
-from config import COMMISSION, RESULT_DIR, SLIPPAGE
+from config import COMMISSION, SLIPPAGE
 from performance import Performance
 from strategy_dsl import DeclarativeStrategy, load_strategy_definition
+from result_paths import research_result_path
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -482,7 +483,7 @@ def run_isolated_gold_overlay_validation() -> dict[str, pd.DataFrame]:
         "strategy15_isolated_gold_stress": pd.DataFrame(stress_rows),
     }
     for name, report in reports.items():
-        report.to_csv(RESULT_DIR / f"{name}.csv", index=False)
+        report.to_csv(research_result_path(f"{name}.csv"), index=False)
     return reports
 
 

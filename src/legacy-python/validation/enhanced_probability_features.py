@@ -7,7 +7,7 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-from config import EXTENDED_DATA_DIR, RESULT_DIR
+from config import EXTENDED_DATA_DIR
 from strategy import STATIC_RETIREMENT_7030
 from .multi_horizon_probability import (
     TAIL_CONFIG,
@@ -24,6 +24,7 @@ from .tail_risk_overlay import (
     PROFILES as TAIL_PROFILES,
     TailRiskOverlayStrategy,
 )
+from result_paths import research_result_path
 
 
 SIGNAL_TICKERS = MULTI_MARKET_TICKERS
@@ -341,16 +342,16 @@ def run_enhanced_probability_validation():
     diagnostic_windows = pd.DataFrame(diagnostic_window_rows)
 
     summary.to_csv(
-        RESULT_DIR / "enhanced_probability_summary.csv", index=False
+        research_result_path("enhanced_probability_summary.csv"), index=False
     )
     windows.to_csv(
-        RESULT_DIR / "enhanced_probability_windows.csv", index=False
+        research_result_path("enhanced_probability_windows.csv"), index=False
     )
     diagnostics.to_csv(
-        RESULT_DIR / "enhanced_probability_diagnostics.csv", index=False
+        research_result_path("enhanced_probability_diagnostics.csv"), index=False
     )
     diagnostic_windows.to_csv(
-        RESULT_DIR / "enhanced_probability_diagnostic_windows.csv", index=False
+        research_result_path("enhanced_probability_diagnostic_windows.csv"), index=False
     )
     return {
         "summary": summary,

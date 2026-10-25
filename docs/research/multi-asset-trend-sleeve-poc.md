@@ -75,5 +75,5 @@ MDD 감소와 CAGR 하락의 교환이 다시 나타났다. 연구용 롱/숏은
 
 - 구현: `src/legacy-python/validation/multi_asset_trend_sleeve.py`
 - 잠금: `validation/multi_asset_trend_sleeve_lock.json`
-- 테스트: `tests/test_multi_asset_trend_sleeve.py`
-- 결과: `results/multi_asset_trend_*.csv`
+- 테스트: `tests/research/test_multi_asset_trend_sleeve.py`
+- 결과: `results/research/multi/multi_asset_trend_*.csv`

@@ -7,7 +7,7 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-from config import EXTENDED_DATA_DIR, RESULT_DIR
+from config import EXTENDED_DATA_DIR
 from performance import Performance
 from strategy import BaseStrategy, STATIC_RETIREMENT_7030
 from .enhanced_probability_features import EnhancedProbabilityBacktest, SIGNAL_TICKERS
@@ -16,6 +16,7 @@ from .precision_thresholds import (
     PROFILE,
     expanding_quantile,
 )
+from result_paths import research_result_path
 
 
 @dataclass(frozen=True)
@@ -234,9 +235,9 @@ def run_precision_portfolio_validation():
         for profile in PROFILES
     )
     summary, windows, decisions = _reports(results)
-    summary.to_csv(RESULT_DIR / "precision_portfolio_summary.csv", index=False)
-    windows.to_csv(RESULT_DIR / "precision_portfolio_windows.csv", index=False)
-    decisions.to_csv(RESULT_DIR / "precision_portfolio_decisions.csv", index=False)
+    summary.to_csv(research_result_path("precision_portfolio_summary.csv"), index=False)
+    windows.to_csv(research_result_path("precision_portfolio_windows.csv"), index=False)
+    decisions.to_csv(research_result_path("precision_portfolio_decisions.csv"), index=False)
     return {"summary": summary, "windows": windows, "decisions": decisions}
 
 

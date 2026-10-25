@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import pandas as pd
 
-from config import RESULT_DIR
 from strategy import STATIC_RETIREMENT_7030
 from .continuous_risk_forecast import (
     ContinuousForecastStrategy,
@@ -16,6 +15,7 @@ from .continuous_risk_forecast import (
     walk_forward_continuous_risk,
 )
 from .path_tail_targets import _load_feature_data
+from result_paths import research_result_path
 
 
 MONTHLY_MODEL = "CONTINUOUS_RISK_MONTHLY_STRESS_150"
@@ -108,11 +108,11 @@ def run_weekly_continuous_risk_validation():
     metrics = _performance_rows(results, active_start)
     development = _development_gate(metrics)
     later = _later_comparison(metrics, development)
-    metrics.to_csv(RESULT_DIR / "weekly_continuous_risk_metrics.csv", index=False)
+    metrics.to_csv(research_result_path("weekly_continuous_risk_metrics.csv"), index=False)
     development.to_csv(
-        RESULT_DIR / "weekly_continuous_risk_development.csv", index=False
+        research_result_path("weekly_continuous_risk_development.csv"), index=False
     )
-    later.to_csv(RESULT_DIR / "weekly_continuous_risk_later.csv", index=False)
+    later.to_csv(research_result_path("weekly_continuous_risk_later.csv"), index=False)
     return {"metrics": metrics, "development": development, "later": later}
 
 

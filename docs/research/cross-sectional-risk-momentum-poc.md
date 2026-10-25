@@ -75,5 +75,5 @@ ETF 수준보다 더 아래로 내려간 시점별 구성종목 선택은 이 �
 
 - 구현: `src/legacy-python/validation/cross_sectional_risk_momentum.py`
 - 잠금: `validation/cross_sectional_risk_momentum_lock.json`
-- 테스트: `tests/test_cross_sectional_risk_momentum.py`
-- 결과: `results/cross_sectional_risk_momentum_*.csv`
+- 테스트: `tests/research/test_cross_sectional_risk_momentum.py`
+- 결과: `results/research/cross/cross_sectional_risk_momentum_*.csv`

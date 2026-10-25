@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 import pandas as pd
 
-from config import EXTENDED_DATA_DIR, RESULT_DIR
+from config import EXTENDED_DATA_DIR
 from performance import Performance
 from strategy import RetirementAllocationStrategy
 from .risk_asset_diversification import (
@@ -14,6 +14,7 @@ from .risk_asset_diversification import (
     _max_underwater_days,
     download_candidate_data,
 )
+from result_paths import research_result_path
 
 
 BACKTEST_TICKERS = ("QQQ", "BND", "BIL", "USMV")
@@ -185,7 +186,7 @@ def run_usmv_defensive_substitution(refresh_data=False):
         "usmv_substitution_activity": _activity_report(results),
     }
     for name, report in reports.items():
-        report.to_csv(RESULT_DIR / f"{name}.csv", index=False)
+        report.to_csv(research_result_path(f"{name}.csv"), index=False)
     return reports
 
 

@@ -16,13 +16,14 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from config import RESULT_DIR  # noqa: E402
+from config import RESEARCH_RESULT_DIR as RESULT_DIR  # noqa: E402
 from downloader import _load_fred_series, _load_hy_oas_observations  # noqa: E402
 from indicators import Indicator  # noqa: E402
 from strategy28_failed_dip_regime import CURRENT, DOTCOM, GFC, ROOT  # noqa: E402
 from strategy30_hy_oas_review import STRATEGY30, prepare, run_one  # noqa: E402
 from strategy30_signal_combination_review import event_metrics  # noqa: E402
 from strategy_dsl import load_strategy_definition  # noqa: E402
+from result_paths import research_result_path
 
 VARIANTS = ("BASE30", "FIN_LEAD", "FIN_PERSIST", "BAA_THEN_XLF", "BAA_AND_XLF",
             "FIN35", "FIN_PRELEAD", "FIN_PRELEAD_WINDOW")
@@ -224,7 +225,7 @@ def main():
     for suffix, rows in (("summary", summaries), ("events", events),
                          ("transitions", transitions), ("signals", signal_dates)):
         if rows:
-            pd.DataFrame(rows).to_csv(RESULT_DIR / f"{args.output_stem}_{suffix}.csv",
+            pd.DataFrame(rows).to_csv(research_result_path(f"{args.output_stem}_{suffix}.csv"),
                                       index=False)
 
 

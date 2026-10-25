@@ -30,8 +30,16 @@
     ]
   },
   "code_sha256": {
-    "src/legacy-python/validation/strategy15_isolated_gold_overlay.py": "B13F2162D34C112F66A6D316DC0D70558183848D28D99491DF0D2F91D6EC0227",
-    "tests/test_strategy15_isolated_gold_overlay.py": "4A527C67A9767922783826692B8BFC4F15B66A1838099C54AF983EB2C71018C6"
+    "src/legacy-python/validation/strategy15_isolated_gold_overlay.py": "58A6B2AF77EB04ECED3864C5AE0E4CE118EB3F69ED4C354A446AEC89498EA335",
+    "tests/research/test_strategy15_isolated_gold_overlay.py": "57F07188987F7AB8E913959E22E6132A3FC619868C5304C48A34D60E66D5720C"
   },
-  "methodology_note": "All observations through the cutoff are retrospective. Only dates on or after oos_start count as forward evidence. Do not retune the signal, weight, confirmation, or hold parameters before the OOS review."
+  "methodology_note": "All observations through the cutoff are retrospective. Only dates on or after oos_start count as forward evidence. Do not retune the signal, weight, confirmation, or hold parameters before the OOS review.",
+  "layout_migration": {
+    "date": "2026-10-25",
+    "reason": "Result routing and test directory relocation only; candidate parameters, cutoff and evaluation rules unchanged.",
+    "previous_code_sha256": {
+      "src/legacy-python/validation/strategy15_isolated_gold_overlay.py": "B13F2162D34C112F66A6D316DC0D70558183848D28D99491DF0D2F91D6EC0227",
+      "tests/test_strategy15_isolated_gold_overlay.py": "4A527C67A9767922783826692B8BFC4F15B66A1838099C54AF983EB2C71018C6"
+    }
+  }
 }

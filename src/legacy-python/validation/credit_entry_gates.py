@@ -13,9 +13,10 @@ import pandas as pd
 
 from attribution import RetirementAllocationAttribution
 from backtest import Backtest
-from config import PROJECT_ROOT, RESULT_DIR
+from config import PROJECT_ROOT
 from performance import Performance
 from strategy_dsl import DeclarativeStrategy, load_strategy_definition
+from result_paths import research_result_path
 
 
 SOURCE = (
@@ -250,7 +251,7 @@ def run_credit_entry_validation():
         "credit_entry_gate_transition_comparison": comparison,
     }
     for name, report in reports.items():
-        report.to_csv(RESULT_DIR / f"{name}.csv", index=False)
+        report.to_csv(research_result_path(f"{name}.csv"), index=False)
     return reports
 
 

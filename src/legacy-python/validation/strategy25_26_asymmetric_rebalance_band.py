@@ -17,9 +17,10 @@ from typing import Any, Mapping
 import pandas as pd
 
 from backtest import Backtest
-from config import COMMISSION, RESULT_DIR, SLIPPAGE
+from config import COMMISSION, SLIPPAGE
 from performance import Performance
 from strategy_dsl import DeclarativeStrategy, load_strategy_definition
+from result_paths import research_result_path
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -308,19 +309,19 @@ def run_validation():
     rolling_summary = _rolling_summary(rolling)
     cost_stress = _cost_stress_report()
     fixed.to_csv(
-        RESULT_DIR / "strategy25_26_asymmetric_rebalance_band_fixed.csv",
+        research_result_path("strategy25_26_asymmetric_rebalance_band_fixed.csv"),
         index=False,
     )
     rolling.to_csv(
-        RESULT_DIR / "strategy25_26_asymmetric_rebalance_band_rolling.csv",
+        research_result_path("strategy25_26_asymmetric_rebalance_band_rolling.csv"),
         index=False,
     )
     rolling_summary.to_csv(
-        RESULT_DIR / "strategy25_26_asymmetric_rebalance_band_rolling_summary.csv",
+        research_result_path("strategy25_26_asymmetric_rebalance_band_rolling_summary.csv"),
         index=False,
     )
     cost_stress.to_csv(
-        RESULT_DIR / "strategy25_26_asymmetric_rebalance_band_cost_stress.csv",
+        research_result_path("strategy25_26_asymmetric_rebalance_band_cost_stress.csv"),
         index=False,
     )
     return fixed, rolling_summary, cost_stress

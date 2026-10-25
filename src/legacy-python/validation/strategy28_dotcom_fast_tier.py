@@ -12,6 +12,7 @@ from strategy28_failed_dip_regime import (
 )
 from backtest import Backtest
 from config import COMMISSION, SLIPPAGE
+from result_paths import research_result_path
 
 
 class FastTierOverlay(FailedDipOverlay):
@@ -202,13 +203,13 @@ def main():
 
     RESULT_DIR.mkdir(exist_ok=True)
     pd.DataFrame(summary_rows).to_csv(
-        RESULT_DIR / "strategy28_dotcom_fast_tier_summary.csv", index=False
+        research_result_path("strategy28_dotcom_fast_tier_summary.csv"), index=False
     )
     pd.DataFrame(events).to_csv(
-        RESULT_DIR / "strategy28_dotcom_fast_tier_events.csv", index=False
+        research_result_path("strategy28_dotcom_fast_tier_events.csv"), index=False
     )
     pd.DataFrame(transitions).to_csv(
-        RESULT_DIR / "strategy28_dotcom_fast_tier_transitions.csv", index=False
+        research_result_path("strategy28_dotcom_fast_tier_transitions.csv"), index=False
     )
 
 

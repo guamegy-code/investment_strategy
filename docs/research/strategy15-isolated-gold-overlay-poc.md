@@ -46,8 +46,8 @@ GLD를 함께 비교해 금의 분산효과와 타이밍 신호의 증분효과�
 ## 재현
 
 - 구현: `src/legacy-python/validation/strategy15_isolated_gold_overlay.py`
-- 테스트: `tests/test_strategy15_isolated_gold_overlay.py`
-- 결과: `results/strategy15_isolated_gold_*.csv`
+- 테스트: `tests/research/test_strategy15_isolated_gold_overlay.py`
+- 결과: `results/research/strategy15/strategy15_isolated_gold_*.csv`
 
 전방 검증을 위해 `validation/strategy15_isolated_gold_oos_lock.json`에
 조건부 GLD 5% 후보와 고정 GLD 5% 음성 대조군을 고정했다. 잠금일 이전 결과는

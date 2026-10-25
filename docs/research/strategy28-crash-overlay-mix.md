@@ -78,9 +78,9 @@ SPY 120일 고점 대비 -8% 이하, Baa 스프레드 20일 확대 0.30%p 이상
 
 재현: `src/legacy-python/validation/strategy28_dotcom_fast_tier.py`,
 `src/legacy-python/validation/strategy28_crash_overlay_mix.py`.
-결과: `results/strategy28_dotcom_fast_tier_*.csv`,
-`results/strategy28_crash_overlay_mix_*.csv`,
-`results/strategy28_systemic_bridge_*.csv`.
+결과: `results/research/strategy28/strategy28_dotcom_fast_tier_*.csv`,
+`results/research/strategy28/strategy28_crash_overlay_mix_*.csv`,
+`results/research/strategy28/strategy28_systemic_bridge_*.csv`.
 
 방법론 참고: [NBER, Volatility Managed Portfolios](https://www.nber.org/papers/w22208),
 [Federal Reserve, 금융위기 때 금융 여건 변화](https://www.federalreserve.gov/monetarypolicy/mpr_20080227_part2.htm).

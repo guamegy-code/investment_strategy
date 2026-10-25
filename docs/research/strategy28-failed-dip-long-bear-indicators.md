@@ -119,14 +119,14 @@ QQQ 목표가 높을 때만 65%로 제한하고, QQQ가 EMA200 위, EMA55가 EMA
 과최적화 위험이 크다. 별도의 사전 고정 구간과 다른 시장을 검증하기 전에는 운영 전략에 적용하지 않는다.
 
 해제 조건 재현: `src/legacy-python/validation/strategy28_credit_release_review.py`.
-산출물: `results/strategy28_credit_release_summary.csv`,
-`results/strategy28_credit_release_events.csv`,
-`results/strategy28_credit_release_transitions.csv`.
+산출물: `results/research/strategy28/strategy28_credit_release_summary.csv`,
+`results/research/strategy28/strategy28_credit_release_events.csv`,
+`results/research/strategy28/strategy28_credit_release_transitions.csv`.
 
 재현 스크립트: `src/legacy-python/validation/strategy28_failed_dip_regime.py`
 
-산출물: `results/strategy28_failed_dip_summary.csv`, `results/strategy28_failed_dip_events.csv`,
-`results/strategy28_failed_dip_transitions.csv`, `results/strategy28_failed_dip_rolling_summary.csv`.
+산출물: `results/research/strategy28/strategy28_failed_dip_summary.csv`, `results/research/strategy28/strategy28_failed_dip_events.csv`,
+`results/research/strategy28/strategy28_failed_dip_transitions.csv`, `results/research/strategy28/strategy28_failed_dip_rolling_summary.csv`.
 
 외부 입력은 FRED `BAA10Y` 일별 자료이며 원자료는 저장소에 추가하지 않았다.
 

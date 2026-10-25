@@ -11,10 +11,11 @@ import pandas as pd
 
 from attribution import RetirementAllocationAttribution
 from backtest import Backtest
-from config import EXTENDED_DATA_DIR, RESULT_DIR
+from config import EXTENDED_DATA_DIR
 from .extended_data import ASSETS
 from performance import Performance
 from strategy import RetirementAllocationStrategy
+from result_paths import research_result_path
 
 
 @dataclass(frozen=True)
@@ -404,7 +405,7 @@ def run_bear_entry_validation():
         "bear_entry_candidate_transition_quality": transition_quality,
     }
     for name, report in reports.items():
-        report.to_csv(RESULT_DIR / f"{name}.csv", index=False)
+        report.to_csv(research_result_path(f"{name}.csv"), index=False)
     return reports
 
 

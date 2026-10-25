@@ -16,6 +16,7 @@ from strategy28_mixed_tuning import MixedTuning, apply_credit_lag
 from strategy30_unknown_crash_stress import SCENARIOS, EVENT_END, inject
 from backtest import Backtest
 from config import COMMISSION, SLIPPAGE
+from result_paths import research_result_path
 
 
 PROFILES = {
@@ -203,8 +204,8 @@ def main(*, gated_only=False, short_only=False):
                 print(row, flush=True)
     RESULT_DIR.mkdir(parents=True, exist_ok=True)
     suffix = "_short" if short_only else "_gated" if gated_only else ""
-    pd.DataFrame(rows).to_csv(RESULT_DIR / f"strategy30_staged_shock{suffix}_summary.csv", index=False)
-    pd.DataFrame(transitions).to_csv(RESULT_DIR / f"strategy30_staged_shock{suffix}_transitions.csv", index=False)
+    pd.DataFrame(rows).to_csv(research_result_path(f"strategy30_staged_shock{suffix}_summary.csv"), index=False)
+    pd.DataFrame(transitions).to_csv(research_result_path(f"strategy30_staged_shock{suffix}_transitions.csv"), index=False)
 
 
 if __name__ == "__main__":

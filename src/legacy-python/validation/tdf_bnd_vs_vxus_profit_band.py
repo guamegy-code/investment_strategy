@@ -15,7 +15,8 @@ from validation.tdf_bnd_improvement_candidates import cap_caution_profit_band
 
 
 ROOT = Path(__file__).resolve().parents[2]
-RESULT_DIR = ROOT / "results"
+from config import RESEARCH_RESULT_DIR as RESULT_DIR
+from result_paths import research_result_path
 SOURCES = {
     "RetirementAllocationProfitBandVXUS": (
         ROOT / "strategies" / "04_profit_band_vxus.yaml"
@@ -117,9 +118,9 @@ def main():
     )
     rolling = pd.DataFrame(rolling_rows)
     RESULT_DIR.mkdir(exist_ok=True)
-    summary.to_csv(RESULT_DIR / "tdf_bnd_vs_vxus_profit_band.csv", index=False)
+    summary.to_csv(research_result_path("tdf_bnd_vs_vxus_profit_band.csv"), index=False)
     rolling.to_csv(
-        RESULT_DIR / "tdf_bnd_vs_vxus_profit_band_rolling.csv", index=False
+        research_result_path("tdf_bnd_vs_vxus_profit_band_rolling.csv"), index=False
     )
 
     display = summary.copy()

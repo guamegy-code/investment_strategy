@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 
 from attribution import RetirementAllocationAttribution
-from config import COMMISSION, RESULT_DIR, SLIPPAGE
+from config import COMMISSION, SLIPPAGE
 from performance import Performance
 from strategy_dsl import DeclarativeStrategy
 from .vxn_state_gates import (
@@ -19,6 +19,7 @@ from .vxn_state_gates import (
     candidate_definition,
     download_vxn,
 )
+from result_paths import research_result_path
 
 
 THRESHOLDS = (-2.5, 0.0, 2.5, 5.0, 7.5, 10.0, 12.5)
@@ -766,7 +767,7 @@ def run_vxn_robustness():
         "vxn_robustness_stress": stress,
     }
     for name, report in reports.items():
-        report.to_csv(RESULT_DIR / f"{name}.csv", index=False)
+        report.to_csv(research_result_path(f"{name}.csv"), index=False)
     return reports
 
 

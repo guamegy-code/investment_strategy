@@ -10,8 +10,8 @@
 
 - 기간: 2000-03-10~2005-12-30. QQQ가 1999-03-10에 시작하므로 장기 지표의
   준비가 끝나는 2000년 3월부터 재생했다.
-- 가격: `data_extended/QQQ.csv`, `data/SPY.csv`, `data_extended/BIL.csv`.
-  2007년 이전 BIL은 `^IRX` 금리 기반 합성 대용치다(`data_extended/manifest.csv`).
+- 가격: `data/research/extended/QQQ.csv`, `data/SPY.csv`, `data/research/extended/BIL.csv`.
+  2007년 이전 BIL은 `^IRX` 금리 기반 합성 대용치다(`data/research/extended/manifest.csv`).
 - 밸류에이션: `data/shiller_cape.csv`의 월별 `PE10`. 해당 월의 값은 다음 달
   1일부터 적용한 1개월 지연 및 그다음 달 1일부터 적용한 2개월 지연을 비교했다.
   월중에는 전월의 사용 가능 값을 유지했다.
@@ -52,9 +52,9 @@ Shiller CAPE는 S&P 500 지표이고, 현존 파일은 과거 발표 당시의 �
 현재 자료만으로 28번의 운영 규칙 변경을 정당화할 수 없다.
 
 재현: `.venv/Scripts/python.exe src/legacy-python/validation/strategy28_dotcom_cape_proxy.py`
-결과: `results/strategy28_dotcom_cape_proxy.csv`,
-`results/strategy28_dotcom_cape_daily.csv`,
-`results/strategy28_dotcom_cape_events_lag1.csv`,
-`results/strategy28_dotcom_cape_events_lag2.csv`.
+결과: `results/research/strategy28/strategy28_dotcom_cape_proxy.csv`,
+`results/research/strategy28/strategy28_dotcom_cape_daily.csv`,
+`results/research/strategy28/strategy28_dotcom_cape_events_lag1.csv`,
+`results/research/strategy28/strategy28_dotcom_cape_events_lag2.csv`.
 
 원자료: [Robert Shiller Data](https://shillerdata.com/).

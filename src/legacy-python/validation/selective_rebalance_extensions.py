@@ -8,7 +8,7 @@ import io
 import pandas as pd
 
 from backtest import Backtest
-from config import DATA_DIR, RESULT_DIR, START_DATE
+from config import DATA_DIR, START_DATE
 from performance import Performance
 from strategy import (
     RetirementAllocationLegacyStrategy,
@@ -20,6 +20,7 @@ from strategy import (
     STATIC_RETIREMENT_7030,
     VXUSSubstitutionStrategy,
 )
+from result_paths import research_result_path
 
 
 COMMON_END_DATE = "2026-07-31"
@@ -189,15 +190,15 @@ def run_selective_extension_validation():
     rolling = _window_report(_rolling_windows())
     comparison = _pair_comparison(fixed, rolling)
     fixed.to_csv(
-        RESULT_DIR / "selective_rebalance_extensions_fixed.csv", index=False
+        research_result_path("selective_rebalance_extensions_fixed.csv"), index=False
     )
     rolling.to_csv(
-        RESULT_DIR / "selective_rebalance_extensions_rolling.csv", index=False
+        research_result_path("selective_rebalance_extensions_rolling.csv"), index=False
     )
     comparison.to_csv(
-        RESULT_DIR / "selective_rebalance_extensions_comparison.csv", index=False
+        research_result_path("selective_rebalance_extensions_comparison.csv"), index=False
     )
-    (RESULT_DIR / "selective_rebalance_extensions.md").write_text(
+    (research_result_path("selective_rebalance_extensions.md")).write_text(
         _markdown_report(fixed, comparison), encoding="utf-8"
     )
     return {"fixed": fixed, "rolling": rolling, "comparison": comparison}

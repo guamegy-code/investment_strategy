@@ -17,6 +17,7 @@ from strategy28_failed_dip_regime import (
 )
 from backtest import Backtest
 from config import COMMISSION, SLIPPAGE
+from result_paths import research_result_path
 
 
 class MixedTuning(FastTierOverlay):
@@ -219,9 +220,9 @@ def main():
                                       "NoTopupDays": strategy.no_topup_suppressions})
                     print(summaries[-1], flush=True)
     RESULT_DIR.mkdir(parents=True, exist_ok=True)
-    pd.DataFrame(summaries).to_csv(RESULT_DIR / "strategy28_mixed_tuning_summary.csv", index=False)
-    pd.DataFrame(events).to_csv(RESULT_DIR / "strategy28_mixed_tuning_events.csv", index=False)
-    pd.DataFrame(transitions).to_csv(RESULT_DIR / "strategy28_mixed_tuning_transitions.csv", index=False)
+    pd.DataFrame(summaries).to_csv(research_result_path("strategy28_mixed_tuning_summary.csv"), index=False)
+    pd.DataFrame(events).to_csv(research_result_path("strategy28_mixed_tuning_events.csv"), index=False)
+    pd.DataFrame(transitions).to_csv(research_result_path("strategy28_mixed_tuning_transitions.csv"), index=False)
 
 
 if __name__ == "__main__":
