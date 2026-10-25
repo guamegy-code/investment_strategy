@@ -1,0 +1,9 @@
+#!/bin/sh
+root=$(git rev-parse --show-toplevel) || exit 1
+if [ -x "$root/.venv/Scripts/python.exe" ]; then
+    exec "$root/.venv/Scripts/python.exe" "$root/.githooks/check_commit_messages.py" "$1"
+fi
+if [ -x "$root/.venv/bin/python" ]; then
+    exec "$root/.venv/bin/python" "$root/.githooks/check_commit_messages.py" "$1"
+fi
+exec python "$root/.githooks/check_commit_messages.py" "$1"
