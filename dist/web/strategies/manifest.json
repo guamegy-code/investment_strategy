@@ -1,7 +1,7 @@
 {
   "version": 1,
   "hidden_strategy_ids": [],
-  "enabled_bundle": "enabled.43c85f90fa18.json",
+  "enabled_bundle": "enabled.d832d0335a0e.json",
   "results": {
     "profit-band-tdf2050": "../results/profit-band-tdf2050.260199001a21.json.gz",
     "buy-3dip-bil": "../results/buy-3dip-bil.c0599d5e2522.json.gz",
@@ -268,13 +268,13 @@
     {
       "id": "band-7030-tdf-valuation-credit-guard-no-topup",
       "path": "31_band_7030_tdf_valuation_credit_guard_no_topup.yaml",
-      "version": 3,
+      "version": 2,
       "enabled": true
     },
     {
       "id": "band-7030-tdf-valuation-credit-guard-no-topup-kodex-koact",
       "path": "31P_band_7030_tdf_valuation_credit_guard_no_topup_kodex_koact.yaml",
-      "version": 3,
+      "version": 2,
       "enabled": true
     },
     {
@@ -286,6 +286,18 @@
     {
       "id": "qqq-guarded-reentry-buy-acceleration",
       "path": "33_qqq_guarded_reentry_buy_acceleration.yaml",
+      "version": 1,
+      "enabled": true
+    },
+    {
+      "id": "band-7030-tdf-credit-guard-reentry",
+      "path": "34_band_7030_tdf_credit_guard_reentry.yaml",
+      "version": 1,
+      "enabled": true
+    },
+    {
+      "id": "band-7030-tdf-credit-guard-reentry-kodex-koact",
+      "path": "34P_band_7030_tdf_credit_guard_reentry_kodex_koact.yaml",
       "version": 1,
       "enabled": true
     }

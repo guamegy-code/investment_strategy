@@ -26,6 +26,7 @@ ROOT = adaptive.PROJECT_ROOT
 PATH = ROOT/'strategies/31_band_7030_tdf_valuation_credit_guard_no_topup.yaml'
 OUT = ROOT/'results/research/qqq/strategy31_reentry'
 BASE_REVISION = 'd5b3ac1'
+DEPLOYED = ROOT/'strategies/34_band_7030_tdf_credit_guard_reentry.yaml'
 
 
 def baseline_definition():
@@ -66,6 +67,27 @@ def combined_definition(base):
     d['rebalance'][0]['when'] = d['rebalance'][0]['when'].replace(' or changed(state.financial_guard)', '')
     d['notifications']['states'] = {'guarded_reentry': deepcopy(personal['notifications']['states']['guarded_reentry']), **d['notifications']['states']}
     return d
+
+
+def selected_definition(base):
+    """The selected rules are published as 34, preserving 31 as the baseline.
+
+    Historical output filenames retain v3 as the research variant label.
+    """
+    candidate = combined_definition(base)
+    candidate['state']['trend_mode'] = deepcopy(base['state']['trend_mode'])
+    candidate['state'].pop('recovery_turn_days')
+    deployed = load_strategy_definition(DEPLOYED)
+
+    def normalize(value):
+        if isinstance(value, str): return ' '.join(value.split())
+        if isinstance(value, list): return [normalize(item) for item in value]
+        if isinstance(value, dict): return {key: normalize(item) for key, item in value.items()}
+        return value
+
+    assert normalize({k: v for k, v in candidate.items() if k != 'strategy'}) == normalize(
+        {k: v for k, v in deployed.items() if k != 'strategy'}), '34 differs from the selected research rules'
+    return candidate
 
 
 def run(data, definition, base, settings, improved, fixtures=False, buy_only=False, reentry_only=False):
@@ -156,8 +178,7 @@ def main():
     if args.reentry_only:
         OUT = OUT/'reentry_only'
         OUT.mkdir(parents=True, exist_ok=True)
-        candidate['state']['trend_mode'] = deepcopy(base['state']['trend_mode'])
-        candidate['state'].pop('recovery_turn_days')
+        candidate = selected_definition(base)
     results = []
     for period in adaptive.LOCK['periods']:
         proxies = ['ACTUAL_COMPONENTS'] if period == 'CURRENT' else ['SPY', 'QQQ']

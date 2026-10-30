@@ -17,12 +17,12 @@ const contexts = [
   return [name, context];
 });
 const yaml = parseYaml(readFileSync(new URL('strategies/33_qqq_guarded_reentry_buy_acceleration.yaml', root), 'utf8'));
-const retirement = parseYaml(readFileSync(new URL('strategies/31_band_7030_tdf_valuation_credit_guard_no_topup.yaml', root), 'utf8'));
+const retirement = parseYaml(readFileSync(new URL('strategies/34_band_7030_tdf_credit_guard_reentry.yaml', root), 'utf8'));
 const cases = ['current', 'dotcom_proxy', 'gfc_proxy'].map(period => ({
   period, yaml, file: `strategy33/${period}_fixture.json`,
 }));
 for (const [period, proxies] of (process.argv.includes('--retirement') ? [['current', ['actual_components']], ['dotcom_proxy', ['spy', 'qqq']], ['gfc_proxy', ['spy', 'qqq']]] : []))
-  for (const proxy of proxies) cases.push({period: `31 ${period} ${proxy}`, yaml: retirement,
+  for (const proxy of proxies) cases.push({period: `34 ${period} ${proxy}`, yaml: retirement,
     file: `strategy31_reentry/reentry_only/${period}_${proxy}_main_v3_fixture.json`});
 const normalized = value => typeof value === 'string' ? value.trim().replace(/\s+/g, ' ')
   : Array.isArray(value) ? value.map(normalized)
@@ -35,11 +35,12 @@ for (const [name, context] of contexts) {
     const fixture = JSON.parse(readFileSync(new URL(`results/research/qqq/${file}`, root), 'utf8'));
     const def = structuredClone(chosen);
     def.parameters = fixture.definition.parameters;
-    // The selected retirement variant omits the unused BUY diagnostic counter.
-    if (period.startsWith('31 ')) {
+    // Archived retirement fixtures used the research label 31 v3; their rules
+    // are now published independently as 34 v1, without the unused BUY counter.
+    if (period.startsWith('34 ')) {
       delete fixture.definition.state.recovery_turn_days;
       for (const row of fixture.rows) delete row.state.recovery_turn_days;
-      fixture.definition.strategy.name = def.strategy.name;
+      fixture.definition.strategy = structuredClone(def.strategy);
     }
     assert.deepEqual(normalized(def), normalized(fixture.definition), 'Worker YAML parser must reproduce Python definition');
     const runtime = new context.Runtime(def);

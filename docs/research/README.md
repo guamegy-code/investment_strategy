@@ -8,7 +8,7 @@
 ## 최신 채택
 
 - [33번: 방어 유지·제한 재진입·회복 가속](strategy33-deployment-review-2026-10-29.md)
-- [31·31P version 3: 제한 재진입만 채택](strategy31-reentry-review-2026-10-29.md)
+- [34·34P: 31번 기반 제한 재진입](strategy31-reentry-review-2026-10-29.md)
 
 ## 기반: 30·31·32번의 급락 방어
 

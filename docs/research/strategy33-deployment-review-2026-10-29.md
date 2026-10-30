@@ -51,11 +51,13 @@ node tests/web/strategy33_parity.mjs
 
 ## 배포 확인
 
-2026-10-30 공개 Pages의 33번·31번·31P YAML, 전략 번들 버전, 웹 코드가
+2026-10-30 공개 Pages의 33번·31번·31P·34번·34P YAML, 전략 번들 버전, 웹 코드가
 로컬 검증본과 일치함을 확인했다. Worker 가격 API는 HTTP 200으로 응답했다.
-Pages 배포: `de0719f5`, Worker 버전: `cc23e772-5b16-44d0-94ad-20fe5915d3e7`.
+31·31P는 기존 version 2, 퇴직연금 개선안은 별도 34·34P version 1이다.
+Pages 배포: `05b664e0`, Worker 버전: `cc23e772-5b16-44d0-94ad-20fe5915d3e7`.
 운영 사이트: <https://investment-strategy-3zy.pages.dev>.
 
-최종 관련 검사: 연구 Python 76개, DSL·상품 매핑·33번·정적 빌드 Python
-93개(환경 조건으로 2개 건너뜀), 웹 43개, Worker 69개가 통과했다.
+관련 검사: 연구 Python 76개·웹 43개가 통과했고, 34번 분리 후 DSL·상품 매핑·
+31 원본 보존·33/34번·정적 빌드 Python 96개(환경 조건으로 2개 건너뜀),
+Worker 70개가 통과했다. 일별 상태·목표·매매 신호 일치 검증도 유지했다.
 전체 Python 탐색에는 폴더 정리 때 기록된 기존 실패 8건이 남아 있다.
