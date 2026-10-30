@@ -1,0 +1,12 @@
+{
+  "declared_on": "2026-10-27",
+  "status": "Post-result diagnostic, not a predeclared promotion candidate",
+  "question": "Does the weekly price-gated improvement exceed simply increasing QQQ by the same amount in eligible soft-defense states?",
+  "period": "CURRENT",
+  "source": 30,
+  "profiles": ["RULE10", "RULE_HALF"],
+  "change": "Remove weekly entry and EMA20/ROC5 entry-maintenance gate only; continuously apply the same increment whenever all original hard-block rules permit it",
+  "unchanged": "Original source feedback, hard guards, amended-target execution bands, friction, and execution delays",
+  "scenarios": ["MAIN", "COST3", "DELAY1"],
+  "interpretation": "Attribute timing versus exposure; cannot promote a newly discovered static control from this post-hoc comparison"
+}

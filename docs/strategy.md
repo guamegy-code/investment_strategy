@@ -64,8 +64,10 @@
 | `29P_band_7030_tdf_valuation_warning_dip_buyer_kodex_koact.yaml` | `band-7030-tdf-valuation-warning-dip-buyer-kodex-koact` | 예 | 29의 QQQ·TDF·BIL을 국내 상품에 매핑 |
 | `30_qqq_valuation_credit_guard_no_topup.yaml` | `qqq-valuation-credit-guard-no-topup` | 예 | 28에 신용·상대약세 2단계 경보와 심화 방어 중 QQQ 재매수 제한을 추가 |
 | `30P_qqq_valuation_credit_guard_no_topup_kodex_koact.yaml` | `qqq-valuation-credit-guard-no-topup-kodex-koact` | 예 | 30의 QQQ·BIL을 28P와 같은 국내 상품에 매핑 |
-| `31_band_7030_tdf_valuation_credit_guard_no_topup.yaml` | `band-7030-tdf-valuation-credit-guard-no-topup` | 예 | 29의 퇴직연금 70/30 구조에 30의 신용 방어 신호를 적용 |
+| `31_band_7030_tdf_valuation_credit_guard_no_topup.yaml` | `band-7030-tdf-valuation-credit-guard-no-topup` | 예 | 퇴직연금 70/30 신용 방어 + v3 제한 재진입 |
 | `31P_band_7030_tdf_valuation_credit_guard_no_topup_kodex_koact.yaml` | `band-7030-tdf-valuation-credit-guard-no-topup-kodex-koact` | 예 | 31의 QQQ·TDF·BIL을 29P와 같은 국내 상품에 매핑 |
+| `32_qqq_valuation_financial_credit_guard_no_topup.yaml` | `qqq-valuation-financial-credit-guard-no-topup` | 예 | 개인연금 QQQ에 금융주 선행·신용 조건부 방어 |
+| `33_qqq_guarded_reentry_buy_acceleration.yaml` | `qqq-guarded-reentry-buy-acceleration` | 예 | 32의 방어 유지 + 제한 재진입·회복 확인 가속 |
 
 다음 파일들은 독립 규칙이 아니라 `source` 전략의 신호·상태·리밸런싱·알림 규칙을 그대로 사용해 실제
 상품만 바꾸는 매핑입니다. 자세한 매핑은 [국내 상품 매핑](#국내-상품-매핑)에 있습니다.
@@ -384,6 +386,24 @@ CAPE 대체 밸류에이션과 1거래일 늦춘 신용 관측값을 썼습니�
 방어는 금융위기 사례에서만 작동했고 조건은 해당 구간을 보며 조정됐습니다.
 따라서 독립 검증된 개선으로 해석하지 않습니다. 자세한 조건과 한계는
 [통합 검토 기록](research/strategy32-conditional-defense-review-2026-09-30.md)에 있습니다.
+
+### 33 — 방어 유지·제한 재진입·회복 확인 가속
+
+[33번](../strategies/33_qqq_guarded_reentry_buy_acceleration.yaml)은 32번의 모든 방어와
+밸류에이션 고점 기억을 보존한다. 주 첫 거래일에 종가>EMA20·ROC5>0이고 강제 방어가
+없으면 남은 BIL 절반을 QQQ에 추가한다. 가격 조건 실패·방어 재개 시 매일 종료한다.
+20일 QQQ 초과수익률(QQQ−BIL)>0, 252일 초과수익률<0이 2일 연속이면
+기존 추세 회복·상승 복귀 확인만 3일에서 1일로 줄인다. 매도·밸류에이션 해제는 그대로다.
+[채택과 검증 기록](research/strategy33-deployment-review-2026-10-29.md).
+
+### 31·31P version 3 — 퇴직연금 제한 재진입
+
+31번에도 같은 주간 가격 회복 조건으로 BIL 대기분 절반을 재투입한다.
+QQQ/TDF/BIL 목표는 WARNING 50/30/20→60/30/10, RECOVERY 60/30/10→65/30/5다.
+TDF 목표와 QQQ 목표 상한 70%를 보존하며 모든 기존 강제 방어가 우선한다.
+시작·종료 및 활성 중 목표 변경·기존 비중 괴리 기준으로 매매한다.
+31P 상품 매핑은 그대로다. 33번의 회복 확인 가속은 퇴직연금 성과가 나빠져 제외했다.
+[분리 비교와 채택 근거](research/strategy31-reentry-review-2026-10-29.md).
 
 ## VXUS 수익 밴드 계열
 

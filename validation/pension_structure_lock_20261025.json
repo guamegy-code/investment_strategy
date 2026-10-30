@@ -1,0 +1,49 @@
+{
+  "lock_version": 1,
+  "locked_on": "2026-10-25",
+  "scope": "Personal pension Strategy 30/32 component ablation and independent QQQ/BIL sleeves",
+  "historical_exposure": "These histories have already been examined in earlier research. This fixes the current experiment before running it; it does not establish an unseen test set.",
+  "variants": ["BASE30", "BASE32", "DROP_VALUATION", "DROP_DIP_BUY", "DROP_CREDIT", "DROP_STRUCTURAL", "DROP_TREND", "SMA_SLEEVES", "EXCESS_SLEEVES", "BUY_HOLD"],
+  "ablation_reference": "Strategy 30",
+  "ablation_states": {
+    "DROP_VALUATION": {"defense_mode": "NORMAL"},
+    "DROP_DIP_BUY": {"stage": 0},
+    "DROP_CREDIT": {"credit_guard": "FALSE", "deep_guard": "FALSE"},
+    "DROP_STRUCTURAL": {"structural_bear_mode": "FALSE"},
+    "DROP_TREND": {"trend_mode": "BULL", "structural_bear_mode": "FALSE"}
+  },
+  "independent_sleeves": {
+    "horizons": [20, 60, 120],
+    "initial_capital_each": "one third",
+    "capital_rebalancing_between_sleeves": false,
+    "SMA_SLEEVES": "Each sleeve holds QQQ if close exceeds its trailing arithmetic moving average; otherwise BIL.",
+    "EXCESS_SLEEVES": "Each sleeve holds QQQ if its horizon total return exceeds BIL's; otherwise BIL.",
+    "signal_review": "daily close",
+    "trade_trigger": "own binary signal changes only",
+    "order_execution": "next open",
+    "shorting": false,
+    "leverage": false
+  },
+  "periods": {
+    "CURRENT": ["2012-01-03", "2026-07-31"],
+    "DOTCOM_PROXY": ["2000-03-10", "2005-12-30"],
+    "GFC_PROXY": ["2007-01-03", "2011-12-30"]
+  },
+  "current_subperiods": [["2012-01-03", "2016-12-30"], ["2017-01-01", "2020-12-31"], ["2021-01-01", "2023-12-31"], ["2024-01-01", "2026-07-31"]],
+  "cost": {"commission": 0.00015, "slippage": 0.00020},
+  "macro_lag_sessions": 1,
+  "comparison_calendar": "All candidates use the calendar available to the baseline on the same dataset.",
+  "historical_followup_screen": {
+    "reference": "BASE30",
+    "current_cagr_gain_min_exclusive": 0.0,
+    "current_mdd_deterioration_max": 0.005,
+    "current_subperiod_positive_cagr_gain_count_min": 2,
+    "proxy_mdd_deterioration_max": 0.02,
+    "cost3_cagr_gain_min_exclusive": 0.0,
+    "delay1_cagr_gain_min_exclusive": 0.0,
+    "krw_translation_cagr_gain_min_exclusive": 0.0,
+    "meaning": "Passing is a historical follow-up candidate, not production approval. Actual Korean pension instruments and forward observations remain necessary."
+  },
+  "stress_plan": "Run cost 3x, one extra execution session, and KRW translation for BASE30 plus candidates clearing current CAGR/MDD screen. If none clears it, test the highest-CAGR ablation and highest-CAGR independent family as diagnostics without changing this screen.",
+  "no_parameter_search": true
+}

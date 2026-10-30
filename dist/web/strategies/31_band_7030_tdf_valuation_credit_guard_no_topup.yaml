@@ -1,7 +1,7 @@
 strategy:
   id: band-7030-tdf-valuation-credit-guard-no-topup
-  name: 70/30 TDF Valuation Credit Guard No Top-up (31) [BIL]
-  version: 2
+  name: 70/30 TDF Credit Guard Guarded Reentry (31) [BIL]
+  version: 3
   dsl_version: 1
   enabled: true
 
@@ -10,6 +10,8 @@ strategy:
 # 상대약세와 신용 악화가 확인되면 QQQ 비중을 더 낮춘다. 심화 방어가 지속되는 동안에는
 # 가격 하락으로 줄어든 QQQ 비중을 다시 채우지 않는다.
 # 하락 추세·구조적 약세·밸류에이션 방어·회복 상태는 하락 매수보다 우선한다.
+# v3: 주 첫 거래일의 가격 회복 시 BIL 대기분 절반을 재투입한다.
+# TDF 목표는 그대로 두고 QQQ 목표는 70% 이내로 제한한다. 회복 확인 가속은 적용하지 않는다.
 assets:
   required: [QQQ, TDF2050_PROXY, BIL]
   observations: [SPY, BAA10Y]
@@ -281,7 +283,65 @@ state:
           and not variables.structural_bear
         set: 'FALSE'
 
+  # 모든 기존 방어 목표를 먼저 계산하고, 방어가 없을 때만 제한 재진입한다.
+  native_qqq_target:
+    initial: 0.7
+    rules:
+      - when: state.trend_mode == 'BEAR'
+        set: 0.0
+      - when: state.trend_mode != 'BEAR' and state.structural_bear_mode == 'TRUE'
+        set: 0.0
+      - when: state.deep_guard == 'TRUE' and state.defense_mode == 'DEFENSE' and previous(state.deep_guard) == 'TRUE'
+        set: =min(20%, portfolio.weight.QQQ)
+      - when: state.deep_guard == 'TRUE' and state.defense_mode == 'DEFENSE'
+        set: 0.2
+      - when: state.deep_guard == 'TRUE' and previous(state.deep_guard) == 'TRUE'
+        set: =min(20%, portfolio.weight.QQQ)
+      - when: state.deep_guard == 'TRUE'
+        set: 0.2
+      - when: state.defense_mode == 'DEFENSE'
+        set: 0.3
+      - when: state.credit_guard == 'TRUE'
+        set: 0.4
+      - when: state.trend_mode == 'RECOVERY'
+        set: 0.6
+      - when: state.stage == 3
+        set: 0.7
+      - when: state.stage == 2
+        set: 0.7
+      - when: state.stage == 1
+        set: 0.7
+      - when: state.defense_mode == 'WARNING'
+        set: 0.5
+      - otherwise: true
+        set: 0.7
+  reentry_week:
+    initial: 0
+    check: weekly
+    rules:
+      - otherwise: true
+        set: =state.reentry_week + 1
+  guarded_reentry:
+    initial: 'FALSE'
+    rules:
+      - when: state.trend_mode == 'BEAR' or state.defense_mode == 'DEFENSE' or state.credit_guard == 'TRUE' or state.deep_guard == 'TRUE' or state.structural_bear_mode == 'TRUE' or state.native_qqq_target <= 0 or state.native_qqq_target >= 0.69999999 or not (QQQ.close > QQQ.ema20 and QQQ.roc5 > 0)
+        set: 'FALSE'
+      - when: changed(state.reentry_week)
+        set: 'TRUE'
+  reentry_target:
+    initial: 0.7
+    rules:
+      - when: state.guarded_reentry == 'TRUE'
+        set: =state.native_qqq_target + (0.7 - state.native_qqq_target) * 0.5
+      - otherwise: true
+        set: =state.native_qqq_target
+
 target:
+  - when: state.guarded_reentry == 'TRUE'
+    weights:
+      QQQ: "state.reentry_target"
+      TDF2050_PROXY: 30%
+      BIL: "70% - state.reentry_target"
   # 위에서부터 먼저 일치하는 목표가 적용된다.
   - when: state.trend_mode == 'BEAR'
     weights: {QQQ: 0%, TDF2050_PROXY: 20%, BIL: 80%}
@@ -331,6 +391,16 @@ notifications:
   # 아래 label·message는 실제 사용자 알림에 사용된다. 주석은 전송되지 않는다.
   schedule: weekly
   states:
+    guarded_reentry:
+      label: 제한 재진입
+      values: {'FALSE': 대기, 'TRUE': 남은 현금 절반 투입}
+      alerts:
+        - on: changed
+          to: 'TRUE'
+          kind: update
+        - on: changed
+          to: 'FALSE'
+          kind: resolved
     credit_guard:
       label: 상대약세·신용 경보
       values: {'FALSE': 정상, 'TRUE': 1차 방어}
@@ -436,12 +506,12 @@ notifications:
       reset_message: 목표 비중 괴리 주의 해제
 
 rebalance:
-  # 방어 상태가 바뀌거나 목표 괴리 7.5%p·QQQ 부족 4%p에 도달하면 매매를 검토한다.
-  # 상태 변경만 있고 매매할 비중 차이가 없으면 리밸런싱 알림은 보내지 않는다.
+  # 재진입 중에는 목표 변경·비중 괴리를, 종료 시에는 원래 방어 매매와 종료를 반영한다.
   - check: daily
     when: >
-      changed(state.credit_guard)
-      or changed(state.deep_guard)
+      changed(state.guarded_reentry)
+      or (state.guarded_reentry == 'TRUE' and abs(state.reentry_target - previous(state.reentry_target)) > 0.0000000001)
+      or (state.guarded_reentry == 'FALSE' and (changed(state.credit_guard) or changed(state.deep_guard)))
       or target_deviation() >= 7.5%
       or weight_deviation('QQQ') <= -4%
 

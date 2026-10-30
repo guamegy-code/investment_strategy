@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "locked_on": "2026-10-26",
+  "purpose": "QQQ/BIL action attribution before selecting a learning model",
+  "periods": {
+    "CURRENT": ["2012-01-03", "2026-07-31"],
+    "DOTCOM_PROXY": ["2000-03-10", "2005-12-30"],
+    "GFC_PROXY": ["2007-01-03", "2011-12-30"]
+  },
+  "strategies": [30, 32],
+  "commission": 0.00015,
+  "slippage": 0.00020,
+  "horizons_sessions": [21, 63],
+  "capital": 100000000,
+  "target_episode": "Contiguous completed-close QQQ targets below 1; execution window starts the next open and ends at the open execution of the first full-target return, including that day's close. Open episodes are censored.",
+  "action_labels": "At every actual noninitial QQQ trade, clone the account immediately before the open. Compare FOLLOW_BASE against HOLD (no trades) and HALF_ADJUST (halfway between actual pretrade weight and submitted target), then hold shares to the fixed horizon. For buys also compare FULL_REENTRY. No liquidation fee at the common terminal mark.",
+  "weekly_reentry_labels": "First available session of each ISO week whose completed-close target is below 1 and actual stock weight below 0.999. Starting from those close holdings, buy at the next open, then hold shares for 21/63 sessions: HOLD, HALF_REENTRY, FULL_REENTRY; compare FOLLOW_BASE from the identical starting account.",
+  "measurement": "Action labels start at the execution open, have H execution-session closes, and require all H future observations; unavailable labels are explicitly censored. Eligibility and episode membership use only information available at decision time.",
+  "attribution": "Daily account changes split into overnight allocation, intraday allocation and friction against a matched initial buy-and-hold QQQ account. Initial entries match; subsequent contributions divided by that day's passive QQQ NAV telescope to terminal relative wealth.",
+  "diagnostic_only": true,
+  "limits": ["Fixed-horizon action labels are not a fitted or tradable timing strategy", "Future original orders are followed only by the baseline comparator, not replayed onto a changed portfolio", "Counterfactual one-shot policies intentionally hold through subsequent signals; deployment would require hard-guard-compatible closed-loop validation", "Labels overlap and belong to a few market episodes; daily/weekly rows are not independent samples", "Original periods have already been repeatedly examined", "Old crisis CAPE and BIL histories are proxies", "No parameter search or model training in this stage"]
+}

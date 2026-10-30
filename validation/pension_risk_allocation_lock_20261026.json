@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "locked_on": "2026-10-26",
+  "purpose": "Closed-loop product-risk allocation and account drawdown budgets; historical research, not production",
+  "profiles": ["BASE", "MONTHLY50", "RISK_BALANCE", "CPPI_CAP", "EQUITY50", "CPPI_ONLY"],
+  "risk_mix": {"review": "first local session each month using previous completed close", "volatility_lookback": 63, "alternative_share_cap": 0.5, "missing_history_share": 0.5, "rule": "min(0.5, sigma_core/(sigma_core+sigma_alternative)); two-asset equal variance-risk contributions before the cap"},
+  "cppi": {"drawdown_budget": 0.2, "multiplier": 5.0, "trade_band": 0.025, "rule": "min(1,max(0,5*(NAV-0.8*running_peak)/NAV)); previous close only, no borrowing or floor reset"},
+  "cases": {
+    "DOMESTIC": {"period": "CURRENT", "start": "2025-02-25", "end": "2026-07-31", "core": "379810.KS", "alternative": "0015B0.KS", "cash": "488770.KS", "currency": "KRW"},
+    "LONG_ONEQ": {"period": "CURRENT", "start": "2012-01-04", "end": "2026-07-31", "core": "QQQ", "alternative": "ONEQ", "cash": "BIL", "currency": "USD"},
+    "LONG_IWF": {"period": "CURRENT", "start": "2012-01-04", "end": "2026-07-31", "core": "QQQ", "alternative": "IWF", "cash": "BIL", "currency": "USD"},
+    "LONG_XLK": {"period": "CURRENT", "start": "2012-01-04", "end": "2026-07-31", "core": "QQQ", "alternative": "XLK", "cash": "BIL", "currency": "USD"},
+    "DOTCOM_XLK": {"period": "PROXY", "start": "2000-03-13", "end": "2005-12-30", "core": "QQQ", "alternative": "XLK", "cash": "BIL_PROXY", "currency": "USD"},
+    "GFC_ONEQ": {"period": "PROXY", "start": "2007-01-04", "end": "2011-12-30", "core": "QQQ", "alternative": "ONEQ", "cash": "BIL_PROXY", "currency": "USD"},
+    "GFC_IWF": {"period": "PROXY", "start": "2007-01-04", "end": "2011-12-30", "core": "QQQ", "alternative": "IWF", "cash": "BIL_PROXY", "currency": "USD"},
+    "GFC_XLK": {"period": "PROXY", "start": "2007-01-04", "end": "2011-12-30", "core": "QQQ", "alternative": "XLK", "cash": "BIL_PROXY", "currency": "USD"}
+  },
+  "source_warm_start": {"CURRENT": "2012-01-03", "DOTCOM": "2000-03-10", "GFC": "2007-01-03"},
+  "source_32_checks": ["DOMESTIC", "GFC_XLK"],
+  "initialization": "Warm source state with a hypothetical USD QQQ/BIL account up to the last US close strictly before case start, then start a fresh product account. This is not the user's actual account history.",
+  "source_feedback": "Evaluate original 30/32 YAML through ProductMappedStrategy on actual simulated holdings. Each US session is evaluated once, using product closes available by that US close.",
+  "execution": "Source dates and risk-policy dates strictly precede execution session; at most one composed order per decision session. Extra delay is one full local session; queued targets retain their original information, not a refreshed target on the due date.",
+  "mix_only": "Preserve cash-ETF units; change only the stock basket, keeping its execution-open value apart from friction.",
+  "commission": 0.00015,
+  "slippage": 0.00020,
+  "numerical_capital": 100000000,
+  "cost_stress": 3.0,
+  "delay_stress": 1,
+  "historical_followup_screen": {"long_positive_cagr_cases_min": 2, "long_mdd_deterioration_max": 0.005, "reference": "BASE for allocation/CAP; CPPI_ONLY must also beat BASE for replacement eligibility", "short_domestic_sample": "implementation evidence, never independent promotion proof"},
+  "conditional_stress": {"start": "2025-09-01", "alternative_only_factors": {"IDIO_SLOW": [[0,1.0],[10,0.6],[30,0.6],[70,1.0]], "IDIO_V": [[0,1.0],[10,0.6],[20,1.0]]}, "meaning": "Scale only alternative ETF OHLC. Keep US market and credit observations unchanged deliberately; conditional idiosyncratic-loss tests, not a joint market forecast."},
+  "no_parameter_search": true,
+  "limitations": ["Long alternative ETFs are scenarios, not KoAct pre-inception returns", "Old crisis valuation and cash use previously documented proxies", "Adjusted OHLC assumes immediate reinvestment and fractional shares", "Quotes and corporate actions have not been independently reconciled with official NAV", "All historical periods have been examined previously", "Drawdown floor is an allocation target, not a guaranteed loss bound"]
+}

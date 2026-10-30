@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "locked_on": "2026-10-28",
+  "scope": "Small early valuation sale and fast invalidation, with native defenses and valuation memory preserved",
+  "hypothesis": "Selling only half the native-to-30% gap and restoring the native target when its pending defense confirmation breaks may reduce the opportunity cost of false early selling.",
+  "periods": {"CURRENT": ["2012-01-03", "2026-07-31"], "DOTCOM_PROXY": ["2000-03-10", "2005-12-30"], "GFC_PROXY": ["2007-01-03", "2011-12-30"]},
+  "sources": [30, 32],
+  "profiles": {
+    "REFERENCE": {"enabled": false, "fraction": 1.0, "fast_release": false},
+    "FULL_SLOW": {"enabled": true, "fraction": 1.0, "fast_release": false},
+    "HALF_SLOW": {"enabled": true, "fraction": 0.5, "fast_release": false},
+    "FULL_FAST": {"enabled": true, "fraction": 1.0, "fast_release": true},
+    "HALF_FAST": {"enabled": true, "fraction": 0.5, "fast_release": true}
+  },
+  "reference": "Archived REENTRY_BUY / memory REFERENCE: guarded residual-cash-half reentry plus conditional BUY acceleration",
+  "control": "FULL_SLOW must reproduce the archived MEMORY_VAL policy in all six cases, not just improve upon its failed return",
+  "entry": "Identical to qqq_memory_sell: after native evaluation, defense_mode WARNING, pending native DEFENSE candidate >=2 consecutive sessions, existing 20/252-day down disagreement >=2 sessions. No new sell signal or faster trend BEAR entry.",
+  "sizing": {
+    "native_cap": 0.30,
+    "formula": "native QQQ - fraction * max(native QQQ - 0.30, 0). Recompute from today's native target, not recursively from yesterday's reduced target.",
+    "half_examples": "Native 100% -> 65%, native 70% -> 50%, native 20% -> unchanged 20%. Native DEFENSE confirmation immediately hands over to its full native target, e.g. 30%.",
+    "reason": "Half is a single predeclared reduction of the previous sale; no size grid or fitted risk budget. This is not the old 21/63-session fixed-hold HALF_ADJUST experiment."
+  },
+  "release": {
+    "slow": "Identical to archived MEMORY_VAL: while native WARNING, recovery_score>=4 and QQQ close>EMA20 for two consecutive sessions; native departure from WARNING releases or hands off immediately.",
+    "fast": "In addition to slow release, while native WARNING, release on the first completed close whose native pending DEFENSE candidate is absent or has a different desired value. Check only after an entry day, so entry and invalidation cannot occur together. A lost down-disagreement alone does not release the overlay.",
+    "execution": "Release decision restores today's native target through the same next-open order clock, not today's close. On release, Method 1 additions still require their ordinary weekly gate. Native defense and all other guard priorities take precedence.",
+    "rearming": "No added cooldown: reentry requires the same native >=2-day candidate and >=2-day disagreement again. All repeat entries and their costs are reported."
+  },
+  "preserved": ["All native state rules and pending counters", "Native valuation peak updates", "Credit/deep/financial/structural guards and deep no-top-up", "Actual changed holdings passed to the source", "No Method 1 addition during early selling", "Existing 7.5pp deviation/4pp underweight bands and order deadlines"],
+  "cost": {"commission": 0.00015, "slippage": 0.00020, "capital": 100000000},
+  "scenarios": {"MAIN": {"cost": 1.0, "delay": 0}, "COST3": {"cost": 3.0, "delay": 0}, "DELAY1": {"cost": 1.0, "delay": 1}, "COST3_DELAY1": {"cost": 3.0, "delay": 1}},
+  "matrix": "60 runs: 30 MAIN runs (3 periods x 2 sources x 5 profiles) and 30 CURRENT stress runs (3 stresses x 2 sources x 5 profiles). Prefix rerun all 30 MAIN paths.",
+  "gate": {"reference": "same-source REFERENCE", "current_cagr_gain": ">0", "current_mdd_deterioration_max": 0.005, "all_three_stress_cagr_gain": ">0", "each_proxy_mdd_deterioration_max": 0.02, "subperiods": [["2012-01-03", "2016-12-30"], ["2017-01-01", "2020-12-31"], ["2021-01-01", "2023-12-31"], ["2024-01-01", "2026-07-31"]], "concentration": "Report all years and events; concentration alone is not a rejection", "meaning": "Historical incremental evidence, not production adoption or guaranteed future performance"},
+  "limitations": ["Hypothesis designed after seeing prior failures", "All periods previously inspected", "Old-crisis CAPE/cash proxy and publication-time limitations inherited", "No new paid data, live fills, parameter sweep or learning model"],
+  "no_parameter_search": true
+}

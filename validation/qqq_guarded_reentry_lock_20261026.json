@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "locked_on": "2026-10-26",
+  "scope": "Method 1 follow-up: guarded limited reentry with actual source feedback, not adaptive signal speeds",
+  "periods": {"CURRENT": ["2012-01-03", "2026-07-31"], "DOTCOM_PROXY": ["2000-03-10", "2005-12-30"], "GFC_PROXY": ["2007-01-03", "2011-12-30"]},
+  "sources": [30, 32],
+  "profiles": ["BASE", "RULE10", "RULE_HALF", "MODEL10"],
+  "blocked": "No increment when trend BEAR, deep/credit/financial guard TRUE, structural bear TRUE, valuation DEFENSE, source target <=0 or >=1",
+  "entry": "First available session of each ISO week; completed QQQ close > EMA20 and ROC5 >0; no open overlay position. RULE profiles enter mechanically; MODEL10 requires positive predicted additional return.",
+  "maintenance": "Evaluate the original source daily on the changed actual holdings. Increment remains while price gate and safety conditions hold. Cancel on the first failed gate/hard guard/full source target. Future source orders are recalculated, never frozen and replayed.",
+  "size": {"RULE10": "min(1, source target +0.10)", "RULE_HALF": "source target +0.5*(1-source target)", "MODEL10": "same as RULE10"},
+  "orders": "During an active overlay rebalance for target change, entry/exit, or original 7.5% deviation/4% underweight bands evaluated against the amended target. Pure source overweight orders that disappear against the amended target do not cause daily churn. Inactive overlays follow the source unchanged.",
+  "branch_labels": "At eligible baseline decisions clone source state and actual account. Compare original continuation and a single RULE10 entry. Continue all daily original protections and actual holding feedback in each branch, without any further new overlay entry. Evaluate 21 sessions; censor incomplete outcomes. No future original orders are replayed.",
+  "model": {"horizon": 21, "features": ["QQQ_EMA200_DISTANCE", "QQQ_SPY_RELATIVE20", "CREDIT_CHANGE20_LAG1"], "ridge_alpha": 10.0, "min_completed_episodes": 4, "min_rows": 12, "weight": "each completed source defense episode has equal total training weight", "admission": "Both source episode end and branch outcome end strictly before current decision", "selection": "predicted incremental return >0; otherwise original source", "scope": "No fitting or pooling of old-crisis proxies; MODEL10 stays at BASE in proxy cases"},
+  "cost": {"commission": 0.00015, "slippage": 0.00020, "capital": 100000000},
+  "scenarios": {"MAIN": {"cost": 1.0, "delay": 0}, "COST3": {"cost": 3.0, "delay": 0}, "DELAY1": {"cost": 1.0, "delay": 1}},
+  "execution": "Completed close decision, next open; DELAY1 adds one session. Identical pending targets retain their deadline; different fresh targets replace pending ones. Initial investment follows the existing engine's next-open convention.",
+  "checks": ["BASE paths reproduce StableDelayBacktest under each scenario", "Hard-blocked decision targets exactly equal current source targets including no-top-up", "Source sees amended actual holdings", "Branch baseline agrees with original continuation", "Future truncation preserves preceding paths and forecasts"],
+  "followup_gate": {"reference": "same-source BASE", "main_cagr_gain": ">0", "main_mdd_deterioration_max": 0.005, "positive_subperiods_min": 2, "subperiods": [["2012-01-03", "2016-12-30"], ["2017-01-01", "2020-12-31"], ["2021-01-01", "2023-12-31"], ["2024-01-01", "2026-07-31"]], "cost3_and_delay1_cagr_gain": ">0", "proxy_mdd_deterioration_max": 0.02, "meaning": "historical follow-up only, not deployment; MODEL10 has no independently trained pre-2012 proxy model"},
+  "limitations": ["All periods have been seen before", "Only a few independent defense episodes", "Old crises use CAPE and cash proxies", "Daily adjusted-price/fractional-share cost model, not live fill or pension-product validation", "A hard guard is preserved at the decision close; actual fills wait for the same execution clock as the baseline"],
+  "no_parameter_search": true
+}

@@ -1,0 +1,19 @@
+{
+  "locked_on": "2026-10-26",
+  "stage": "Small action-value prediction feasibility check after attribution; no portfolio promotion",
+  "source": "CURRENT Strategy 30 only; Strategy 32 is an identical path and not extra evidence",
+  "policy": "HALF_REENTRY",
+  "horizons": [21, 63],
+  "features": ["QQQ_EMA200_DISTANCE", "QQQ_SPY_RELATIVE20", "CREDIT_CHANGE20_LAG1"],
+  "model": "Episode-balanced standardized Ridge; intercept unpenalized",
+  "alpha": 10.0,
+  "min_completed_training_episodes": 4,
+  "min_training_rows": 12,
+  "train_admission": "Both the fixed-horizon outcome and the original defense episode must have ended strictly before the prediction decision date",
+  "decision": "Use HALF_REENTRY if predicted incremental return net of defined transaction costs exceeds zero, otherwise FOLLOW_BASE",
+  "control": "FOLLOW_BASE (zero incremental return); unconditional HALF_REENTRY; expanding training mean with the same sample weights and decision threshold",
+  "evaluation": "Prediction RMSE versus expanding-mean forecast, incremental fixed-horizon decision payoff with equal weighting of test episodes, leave-one-test-episode-out sensitivity, no statistical significance claim",
+  "prefix_check": "Truncate labels, decisions, and features, and confirm all earlier predictions are identical",
+  "not_a_trading_backtest": "Overlapping hypothetical decisions cannot be compounded into a portfolio. Any apparent improvement needs subsequent closed-loop nonoverlapping position/capital/order validation.",
+  "historical_exposure": "All histories have already been examined; chronological fitting is not a newly unseen test set. This is a diagnostic without hyperparameter search."
+}

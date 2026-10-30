@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "locked_on": "2026-10-28",
+  "scope": "Separate early valuation selling from the native valuation state and peak-memory lifecycle, on the REENTRY_BUY benchmark",
+  "hypothesis": "An independent temporary 30% QQQ cap may retain benefits of earlier selling without resetting valuation memory or removing subsequent native defenses.",
+  "periods": {"CURRENT": ["2012-01-03", "2026-07-31"], "DOTCOM_PROXY": ["2000-03-10", "2005-12-30"], "GFC_PROXY": ["2007-01-03", "2011-12-30"]},
+  "sources": [30, 32],
+  "profiles": {
+    "REFERENCE": {"valuation_overlay": false, "trend_sell": false},
+    "MEMORY_VAL": {"valuation_overlay": true, "trend_sell": false},
+    "MEMORY_TREND": {"valuation_overlay": false, "trend_sell": true},
+    "MEMORY_BOTH": {"valuation_overlay": true, "trend_sell": true}
+  },
+  "reference": "Unchanged 2026-10-27 REENTRY_BUY: guarded residual-cash-half reentry plus conditional buy confirmation acceleration",
+  "coupled_control": "Archived COMBINED from 2026-10-27; verify original input hashes and retain all scenarios as descriptive comparator, not the adoption benchmark",
+  "valuation_overlay": {
+    "entry": "After today's native evaluation: defense_mode still WARNING, native pending defense_mode candidate is DEFENSE with >=2 consecutive qualifying sessions, and the existing 20/252-day down-disagreement streak is >=2 sessions. The native candidate enforces original rule priority and does not count the first NORMAL->WARNING session as a WARNING->DEFENSE confirmation.",
+    "cap": 0.30,
+    "target": "min(current native source QQQ target, 0.30), BIL is remainder. Existing lower protection/no-top-up targets win. This retains the native valuation-defense sizing/bands, not a new no-top-up rule for ordinary valuation defense.",
+    "release": "While native WARNING remains, release after recovery_score>=4 and QQQ close>EMA20 for two consecutive sessions. Release immediately when native defense_mode leaves WARNING, including handoff to native DEFENSE or native WARNING resolution to NORMAL. Loss of the entry disagreement alone does not release an active overlay.",
+    "memory": "Never mutate native defense_mode, valuation_peak, valuation_peak update rules, or their pending counters. Native six-session WARNING->DEFENSE and two-session DEFENSE->NORMAL continue independently. The overlay does not set NORMAL upon release.",
+    "reentry_priority": "While the early cap is active, cancel existing Method 1 additions and prohibit new ones. On release only the ordinary weekly entry rule may add risk. All source decisions see actual changed holdings.",
+    "orders": "While active or on release, evaluate final target change and the original 7.5pp deviation/4pp stock-underweight bands against the capped/final target. Ignore source overweight orders caused solely by the cap. Handoff to the same native target does not force a redundant reset. Otherwise delegate unchanged guarded-reentry orders."
+  },
+  "trend_sell": "Only in MEMORY_TREND/MEMORY_BOTH: retain prior adaptive BEAR confirmation 10->3 under down-disagreement. Do not accelerate native valuation state. All profiles keep prior adaptive buy confirmations.",
+  "cost": {"commission": 0.00015, "slippage": 0.00020, "capital": 100000000},
+  "scenarios": {"MAIN": {"cost": 1.0, "delay": 0}, "COST3": {"cost": 3.0, "delay": 0}, "DELAY1": {"cost": 1.0, "delay": 1}, "COST3_DELAY1": {"cost": 3.0, "delay": 1}},
+  "execution": "Unchanged completed-close/next-open and pending-order deadline rules from qqq_adaptive_speed. Fractional shares, adjusted OHLC, commission and slippage included. No extra day for initial allocation under delay stress.",
+  "gate": {"reference": "same-source REFERENCE", "current_cagr_gain": ">0", "current_mdd_deterioration_max": 0.005, "all_three_stress_cagr_gain": ">0", "each_proxy_mdd_deterioration_max": 0.02, "subperiods": [["2012-01-03", "2016-12-30"], ["2017-01-01", "2020-12-31"], ["2021-01-01", "2023-12-31"], ["2024-01-01", "2026-07-31"]], "concentration": "Report all windows/events; concentration alone is not a rejection criterion", "meaning": "Historical incremental support; no production deployment or assured future returns"},
+  "checks": ["REFERENCE reproduces archived REENTRY_BUY NAV, targets and actual holdings within 1e-12", "every profile's native valuation state and peak equals REFERENCE on every date", "credit/deep/financial/structural states equal reference", "final target never exceeds a hard-protected native target", "no addition during active early selling", "original native defense triggers are retained", "actual holdings feedback", "all MAIN profiles prefix invariance", "input/output hashes"],
+  "limitations": ["All historical periods were previously inspected", "The memory-preservation hypothesis was developed after observing the previous failure", "Old-crisis CAPE/cash proxies and publication-time limitations unchanged", "No parameter sweep, paid data, or live fills"],
+  "no_parameter_search": true
+}

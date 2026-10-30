@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "declared_on": "2026-10-27",
+  "scope": "Supplemental cost and latency checks of already predeclared sell-only/buy-only combinations",
+  "reason": "Initial MAIN results show a material difference between sell and buy acceleration. Evaluate the original directional ablations under the same three stresses, without changing any parameters or rules.",
+  "after_primary_results": true,
+  "profiles": ["REENTRY_SELL", "REENTRY_BUY"],
+  "scenarios": ["COST3", "DELAY1", "COST3_DELAY1"],
+  "period": "CURRENT",
+  "sources": [30, 32],
+  "comparison": "Same-source REENTRY in each scenario; apply original incremental criteria to each directional combination. MAIN and proxy results come from the predeclared original matrix.",
+  "no_parameter_change": true,
+  "limitation": "Follow-up validation on previously seen data; not independent evidence or an unreported redesign of the primary combined candidate. Report primary failure as well as directional results."
+}
