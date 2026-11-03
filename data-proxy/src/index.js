@@ -8,8 +8,10 @@ import {
   selectNotificationAlerts,
   strategySnapshot,
   strategyTickers,
+  rebuildNotificationBasis,
 } from "./strategy-runtime.js";
-import {addCompositeValuationScore} from "./composite-valuation.js";
+import {VALUATION_BASIS_VERSION, VALUATION_HISTORY_START, sharedValuationTable, applyValuationTable, calculationBasis} from './valuation-basis.js';
+import {previousUsEquitySession} from './us-market-calendar.js';
 
 const CACHE_SECONDS = 60 * 60 * 12;
 const MAX_TICKERS = 20;
@@ -22,7 +24,7 @@ const RECENT_CACHE_ROWS = 10;
 const TICKER_LABEL_CACHE_SECONDS = 60 * 60 * 24 * 30;
 const MARKET_REFRESH_RETRY_SECONDS = [5 * 60, 15 * 60, 30 * 60, 2 * 60 * 60];
 const COMPOSITE_VALUATION_TICKERS = new Set(["QQQ", "SPY", "BIL"]);
-const COMPOSITE_HISTORY_OPTIONS = {lookbackDays: 2200, tailRows: 1500};
+const COMPOSITE_HISTORY_OPTIONS = {historyStart: VALUATION_HISTORY_START, preserveAllHistory:true};
 const YAHOO_CHART_HOSTS = ["query1.finance.yahoo.com", "query2.finance.yahoo.com"];
 const YAHOO_HEADERS = {
   Accept: "application/json,text/plain,*/*",
@@ -276,6 +278,17 @@ function historicalObjectKey(ticker) {
 }
 
 async function loadHistoricalTicker(env, ticker, loadFallbackTicker = null) {
+  if(env.MARKET_DATA){
+    const metadata=JSON.parse(await env.MARKET_DATA.get(refreshMetadataKey(ticker))||'null');
+    if(metadata?.full_history_start && metadata.history_ready!==false){
+      const saved=JSON.parse(await env.MARKET_DATA.get(`notification-tail:${ticker}`)||'null');
+      if(saved?.length){
+        const rows=saved.map(row=>({date:row.Date,open:row.Open,high:row.High,low:row.Low,close:row.Close,volume:row.Volume,raw_close:row.RawClose,dividends:row.Dividends||0}));
+        rows.coverageStart=metadata.full_history_start;
+        return rows;
+      }
+    }
+  }
   const object = env.MARKET_HISTORY
     ? await env.MARKET_HISTORY.get(historicalObjectKey(ticker))
     : null;
@@ -370,8 +383,8 @@ export async function loadPriceRange(env, ctx, ticker, start, end, loadFallbackT
   else {
     const earliestSecond = Math.floor(Date.parse(earliest) / 1000);
     const latestSecond = Math.floor(Date.parse(latest) / 1000);
-    if (start < earliestSecond) segments.push([start, Math.min(end, earliestSecond)]);
-    const endDate = new Date(end * 1000).toISOString().slice(0, 10);
+    if (start < earliestSecond && !(baseRows.coverageStart && baseRows.coverageStart<=start)) segments.push([start, Math.min(end, earliestSecond)]);
+    const endDate = [new Date(end * 1000).toISOString().slice(0, 10),expectedCompletedSession(ticker)].sort()[0];
     if (latest < endDate) segments.push([Math.max(start, latestSecond), end]);
   }
   let fallbackRows = null;
@@ -477,7 +490,7 @@ function privateDefinitions(body, publicDefinitions) {
 function mergeRows(existing, incoming) {
   const merged = new Map((existing || []).map(row => [row.Date, row]));
   for (const row of incoming) merged.set(row.Date, row);
-  return addIndicators([...merged.values()].sort((left, right) => left.Date.localeCompare(right.Date)));
+  return [...merged.values()].sort((left, right) => left.Date.localeCompare(right.Date));
 }
 
 function zonedDateParts(now, timeZone) {
@@ -509,7 +522,7 @@ export function expectedCompletedSession(ticker, now = Date.now()) {
   const market = tickerMarket(ticker);
   const local = zonedDateParts(now, market === "KRX" ? "Asia/Seoul" : "America/New_York");
   const closeMinute = market === "KRX" ? 16 * 60 + 10 : 16 * 60 + 15;
-  return previousWeekday(local.date, local.minute >= closeMinute);
+  return market==='US'?previousUsEquitySession(local.date,local.minute>=closeMinute):previousWeekday(local.date, local.minute >= closeMinute);
 }
 
 function refreshMetadataKey(ticker) {
@@ -548,12 +561,87 @@ export function historyOptionsForTicker(ticker, hasCompositeValuation) {
     : {};
 }
 
+function valuationMonth(now=Date.now()){return new Date(now).toISOString().slice(0,7);}
+function valuationClosingSession(month){return expectedCompletedSession('QQQ',Date.parse(`${month}-01T00:00:00Z`)-1);}
+async function prepareValuation(env,data){
+  const month=valuationMonth(),table=env.VALUATION_DATA
+    ?await env.VALUATION_DATA.getByName('canonical-valuation').table()
+    :await sharedValuationTable(env,data,month,valuationClosingSession(month));
+  applyValuationTable(data,table);return table;
+}
+
+async function notificationProxy(env,data){
+  const components=Object.fromEntries(Object.keys(TDF2050_PROXY_COMPONENT_WEIGHTS).map(t=>[t,data[t]]));
+  return env.VALUATION_DATA?env.VALUATION_DATA.getByName('tdf-proxy').proxy(components):buildTdf2050Proxy(components);
+}
+
+function strategyData(definitions,definition,data,afterDate=null){
+  const calculation=calculationDefinition(definitions,definition);
+  return Object.fromEntries(strategyTickers(definitions,definition).map(ticker=>[ticker,
+    afterDate&&!calculation.valuation?.foreign_assets?.length?(data[ticker]||[]).filter(row=>row.Date>=afterDate):data[ticker]
+  ]));
+}
+
+function dataAtSnapshot(data,snapshot){
+  const prior=snapshot?.prices?.TDF2050_PROXY,overlap=data.TDF2050_PROXY?.find(row=>row.Date===snapshot.date);
+  if(!Number.isFinite(prior)||!overlap)return data;
+  const factor=prior/overlap.Close;
+  return {...data,TDF2050_PROXY:data.TDF2050_PROXY.map(row=>Object.fromEntries(Object.entries(row).map(([key,value])=>[key,typeof value==='number'&&key!=='Volume'?value*factor:value])))};
+}
+
+async function publicValuation(request,env){
+  if(env.VALUATION_DATA){
+    const table=await env.VALUATION_DATA.getByName('canonical-valuation').table(new URL(request.url).searchParams.get('refresh')==='1');
+    return response({...table,status:'ready'},200,{'Cache-Control':'public, max-age=300'});
+  }
+  return response({...await loadSharedValuation(env,new URL(request.url).searchParams.get('refresh')==='1'),status:'ready'},200,{'Cache-Control':'public, max-age=300'});
+}
+
+export async function loadSharedValuation(env,refresh=false){
+  const month=valuationMonth(),key=`valuation-table:${VALUATION_BASIS_VERSION}:${month}`;
+  const saved=JSON.parse(await env.MARKET_DATA.get(key)||'null');
+  const checkedKey=`valuation-checked:${month}`,checked=JSON.parse(await env.MARKET_DATA.get(checkedKey)||'null');
+  const session=expectedCompletedSession('QQQ');
+  if(saved&&checked?.session===session&&(!refresh||Date.now()-checked.at<60_000))return saved;
+  const refreshed=await refreshTickerSet(env,[...COMPOSITE_VALUATION_TICKERS],()=>({...COMPOSITE_HISTORY_OPTIONS,forceRefresh:refresh}));
+  const table=await prepareValuation(env,refreshed.data);
+  await env.MARKET_DATA.put(checkedKey,JSON.stringify({session,at:Date.now()}));
+  return table;
+}
+
+async function valuationStrategyData(env,definitions,definition){
+  const tickers=strategyTickers(definitions,definition),hasTdf=tickers.includes('TDF2050_PROXY')||tickers.some(t=>krwAdjustedBaseTicker(t)==='TDF2050_PROXY');
+  const direct=[...new Set([...tickers.filter(t=>t!=='TDF2050_PROXY'&&!krwAdjustedBaseTicker(t)),...(hasTdf?Object.keys(TDF2050_PROXY_COMPONENT_WEIGHTS):[])])];
+  const refreshed=await refreshTickerSet(env,direct,()=>({...COMPOSITE_HISTORY_OPTIONS,budget:{remaining:40}}));
+  if(Object.values(refreshed.freshness).some(item=>!item.history_ready))throw Error('recovery history incomplete');
+  const data=refreshed.data,table=await prepareValuation(env,data);
+  if(hasTdf)data.TDF2050_PROXY=buildTdf2050Proxy(data);
+  for(const ticker of tickers.filter(krwAdjustedBaseTicker))data[ticker]=buildKrwAdjustedRows(data[krwAdjustedBaseTicker(ticker)]||[],data['KRW=X']||[]);
+  return {data,table};
+}
+
+export async function initializeValuationState(env,definitions,definition){
+  const {data,table}=await valuationStrategyData(env,definitions,definition);
+  const snapshot=strategySnapshot(definitions,definition,strategyData(definitions,definition,data));
+  return {...snapshot,calculation_basis:await calculationBasis(table,snapshot.date)};
+}
+
+export async function recoverValuationState(env,definitions,definition,previous,basis){
+  const {data,table}=await valuationStrategyData(env,definitions,definition);
+  if((await calculationBasis(table,previous.date)).history_revision!==basis.history_revision)throw Error('valuation basis changed; retry recovery');
+  const aligned=dataAtSnapshot(data,previous);
+  return {snapshot:rebuildNotificationBasis(definitions,definition,aligned,previous,basis),data:strategyData(definitions,definition,aligned,previous.date)};
+}
+
 export async function refreshNotificationTicker(env, ticker, {
   lookbackDays = NOTIFICATION_LOOKBACK_DAYS,
   tailRows = NOTIFICATION_TAIL_ROWS,
   now = Date.now(),
   loadRows = loadTicker,
   budget = null,
+  historyStart = null,
+  preserveAllHistory = false,
+  forceRefresh = false,
 } = {}) {
   if (!env.MARKET_DATA) throw new Error("MARKET_DATA KV binding is not configured");
   const key = `notification-tail:${ticker}`;
@@ -565,22 +653,24 @@ export async function refreshNotificationTicker(env, ticker, {
   const metadata = JSON.parse(storedMetadata || "null");
   const latest = existing.reduce((date, row) => row.Date > date ? row.Date : date, "");
   const expectedSession = expectedCompletedSession(ticker, now);
-  const requiredStart = Math.floor((now - lookbackDays * 86400000) / 1000);
+  const requiredStart = Math.floor((historyStart ? Date.parse(historyStart) : now - lookbackDays * 86400000) / 1000);
   const earliest = existing.reduce((date, row) => !date || row.Date < date ? row.Date : date, "");
-  const needsHistory = !earliest
+  const historyMonth=new Date(now).toISOString().slice(0,7);
+  const needsHistory = forceRefresh || !earliest || historyStart && (!metadata?.history_start || metadata.history_start>requiredStart || metadata.history_month!==historyMonth)
     || existing.length < tailRows && Date.parse(earliest) / 1000 > requiredStart
       && (!metadata?.history_start || metadata.history_start > requiredStart + 86400 || Number(metadata.history_tail_rows || 0) < tailRows);
   const retryAt = Date.parse(metadata?.next_refresh_at || "");
   const sessionSatisfied = latest >= expectedSession;
-  if (!needsHistory && metadata?.expected_session === expectedSession
-      && (sessionSatisfied || Number.isFinite(retryAt) && now < retryAt)) {
+  if (metadata?.expected_session === expectedSession
+      && (!needsHistory && sessionSatisfied || Number.isFinite(retryAt) && now < retryAt)) {
     return {
       rows: existing,
       freshness: {
         market: tickerMarket(ticker), expected_session: expectedSession,
         latest_session: latest, fetched_at: metadata.fetched_at || null,
         next_refresh_at: metadata.next_refresh_at || null,
-        status: sessionSatisfied ? "fresh" : metadata.status || "pending",
+        status: sessionSatisfied && !needsHistory ? "fresh" : metadata.status || "pending",
+        history_ready:!needsHistory,
         last_error: metadata.last_error || null, retry_count: metadata.retry_count || 0,
         upstream_checked: false, rows_changed: false,
       },
@@ -592,7 +682,10 @@ export async function refreshNotificationTicker(env, ticker, {
   let rows = existing, errorMessage = null;
   try {
     const incoming = await loadRows(ticker, start, Math.floor(now / 1000), {bypassCache: true, budget});
-    rows = mergeRows(existing, incoming.filter(row => row.date <= expectedSession).map(row => ({Date: row.date, Open: row.open, High: row.high, Low: row.low, Close: row.close, Volume: row.volume, RawClose: row.raw_close, Dividends: row.dividends}))).slice(-Math.max(tailRows, existing.length));
+    const normalized=incoming.filter(row => row.date <= expectedSession).map(row => ({Date: row.date, Open: row.open, High: row.high, Low: row.low, Close: row.close, Volume: row.volume, RawClose: row.raw_close, Dividends: row.dividends}));
+    const merged=mergeRows(existing,normalized);
+    const retained=preserveAllHistory ? merged : merged.slice(-Math.max(tailRows, existing.length));
+    rows=env.VALUATION_DATA?await env.VALUATION_DATA.getByName(`indicators:${ticker}`).indicators(retained):addIndicators(retained);
   } catch (error) {
     if (!existing.length) throw error;
     errorMessage = error instanceof Error ? error.message : String(error);
@@ -601,13 +694,17 @@ export async function refreshNotificationTicker(env, ticker, {
   const rowsChanged = !samePriceRows(existing, rows);
   const satisfied = latestSession >= expectedSession;
   const retry = refreshDelaySeconds(metadata, expectedSession, latestSession);
-  const nextRefreshAt = satisfied ? null : new Date(now + (errorMessage?.includes("request budget exhausted") ? 5 : retry.delay) * 1000).toISOString();
+  const completed=satisfied&&(!needsHistory||!errorMessage);
+  const nextRefreshAt = completed ? null : new Date(now + (errorMessage?.includes("request budget exhausted") ? 5 : retry.delay) * 1000).toISOString();
   const nextMetadata = {
     market: tickerMarket(ticker), expected_session: expectedSession,
     latest_session: latestSession, fetched_at: new Date(now).toISOString(),
-    next_refresh_at: nextRefreshAt, retry_count: satisfied ? 0 : retry.retryCount,
+    next_refresh_at: nextRefreshAt, retry_count: completed ? 0 : retry.retryCount,
     status: errorMessage ? "stale" : satisfied ? "fresh" : "pending",
+    history_ready:!needsHistory || !errorMessage,
     history_start: needsHistory && !errorMessage ? requiredStart : metadata?.history_start || null,
+    full_history_start:preserveAllHistory&&!errorMessage?requiredStart:metadata?.full_history_start||null,
+    history_month: needsHistory && !errorMessage ? historyMonth : metadata?.history_month || null,
     history_tail_rows: Math.max(metadata?.history_tail_rows || 0, !errorMessage ? tailRows : 0),
     ...(errorMessage ? {last_error: errorMessage} : {}),
   };
@@ -676,14 +773,13 @@ export async function notificationEvaluation(request, env) {
     env, directTickers, ticker => ({...historyOptionsForTicker(ticker, hasCompositeValuation), budget:requestBudget}),
   );
   const data = refreshed.data;
-  if (hasCompositeValuation) addCompositeValuationScore(data);
+  let valuationTable=null,valuationError=null;
+  if (hasCompositeValuation){
+    try {valuationTable=await prepareValuation(env,data);}
+    catch(error){valuationError=String(error.message||error);}
+  }
   if (hasTdfProxy) {
-    data.TDF2050_PROXY = buildTdf2050Proxy(data);
-    const priorProxyClose = selected.map(definition => snapshots.get(definition.strategy.id)?.prices?.TDF2050_PROXY).find(Number.isFinite);
-    if (priorProxyClose && data.TDF2050_PROXY.length) {
-      const factor = priorProxyClose / data.TDF2050_PROXY.at(-1).Close;
-      data.TDF2050_PROXY = data.TDF2050_PROXY.map(row => Object.fromEntries(Object.entries(row).map(([key, value]) => [key, typeof value === "number" && key !== "Volume" ? value * factor : value])));
-    }
+    data.TDF2050_PROXY = await notificationProxy(env,data);
   }
   for (const ticker of [...tickers].filter(krwAdjustedBaseTicker)) {
     const baseTicker = krwAdjustedBaseTicker(ticker);
@@ -693,11 +789,41 @@ export async function notificationEvaluation(request, env) {
   const lastDates = body.last_evaluated_dates || {}, evaluations = [];
   let decisionAdvanced = false;
   for (const definition of selected) {
-    const previousSnapshot = snapshots.get(definition.strategy.id);
+    let previousSnapshot = snapshots.get(definition.strategy.id),recovered=false,basisRecoveryError=null;
+    let evaluationSource=data;
+    const composite=usesCompositeValuation(definitions,definition);
     const required = strategyTickers(definitions, definition);
     const blocking = required.filter(ticker => refreshed.freshness[ticker] && refreshed.freshness[ticker].latest_session < refreshed.freshness[ticker].expected_session);
-    const result = blocking.length ? {history: [], snapshot: previousSnapshot} : runStrategyIncremental(definitions, definition, data, previousSnapshot);
-    const expectedDecision = required.map(ticker => refreshed.freshness[ticker]?.expected_session).filter(Boolean).sort().at(-1);
+    if(composite&&valuationError)blocking.push('valuation-history');
+    if(composite&&valuationTable&&!blocking.length){
+      const basis=await calculationBasis(valuationTable,previousSnapshot.date);
+      if(previousSnapshot.calculation_basis?.version!==basis.version||previousSnapshot.calculation_basis?.history_revision!==basis.history_revision){
+        try{
+          if(env.VALUATION_DATA){
+            const recovery=await env.VALUATION_DATA.getByName(`recovery:${client}:${definition.strategy.id}`).recover(definitions,definition,previousSnapshot,basis);
+            previousSnapshot=recovery.snapshot;evaluationSource=recovery.data;
+          }else{
+          const recoveryTickers=[...new Set([...required.filter(t=>t!=='TDF2050_PROXY'&&!krwAdjustedBaseTicker(t)),...(hasTdfProxy?Object.keys(TDF2050_PROXY_COMPONENT_WEIGHTS):[])])];
+          const recovery=await refreshTickerSet(env,recoveryTickers,()=>({...COMPOSITE_HISTORY_OPTIONS,budget:requestBudget}));
+          if(Object.values(recovery.freshness).some(item=>!item.history_ready))throw Error('recovery history incomplete');
+          Object.assign(data,recovery.data);Object.assign(refreshed.freshness,recovery.freshness);
+          applyValuationTable(data,valuationTable);
+          if(hasTdfProxy)data.TDF2050_PROXY=await notificationProxy(env,data);
+          for(const ticker of [...tickers].filter(krwAdjustedBaseTicker))data[ticker]=buildKrwAdjustedRows(data[krwAdjustedBaseTicker(ticker)]||[],data['KRW=X']||[]);
+          const recoveryData=strategyData(definitions,definition,dataAtSnapshot(data,previousSnapshot)),store=notificationStore(env,definition.strategy.id,client);
+          previousSnapshot=store?.rebuild
+            ? await store.rebuild(definitions,definition,recoveryData,previousSnapshot,basis)
+            : rebuildNotificationBasis(definitions,definition,recoveryData,previousSnapshot,basis);
+          }
+          recovered=true;
+        }catch(error){basisRecoveryError=String(error.message||error);blocking.push('valuation-state-recovery');}
+      }
+    }
+    const store=notificationStore(env,definition.strategy.id,client),evaluationData=strategyData(definitions,definition,dataAtSnapshot(evaluationSource,previousSnapshot),previousSnapshot.date);
+    const result = blocking.length ? {history: [], snapshot: previousSnapshot} : store?.evaluate
+      ? await store.evaluate(definitions,definition,evaluationData,previousSnapshot)
+      : runStrategyIncremental(definitions, definition, evaluationData, previousSnapshot);
+    const expectedDecision = required.map(ticker => refreshed.freshness[ticker]?.expected_session).filter(Boolean).sort()[0];
     if (!blocking.length && expectedDecision && result.snapshot.date < expectedDecision) blocking.push("indicator-history-or-common-session");
     if (result.history.length) decisionAdvanced = true;
     const notification = selectNotificationAlerts(result.history, previousSnapshot.notification || {
@@ -706,6 +832,7 @@ export async function notificationEvaluation(request, env) {
     });
     const latestContext = notification.state.latest_context || result.snapshot.notification_context || previousSnapshot.notification_context || null;
     const nextSnapshot = {...result.snapshot, notification: notification.state, notification_context: latestContext};
+    if(composite&&valuationTable&&!blocking.length)nextSnapshot.calculation_basis=await calculationBasis(valuationTable,nextSnapshot.date);
     const history = result.history, marketDataAt = nextSnapshot.date || previousSnapshot.date, prior = String(lastDates[definition.strategy.id] || "");
     const events = history.filter(row => row.target && Number(row.notificationContext?.target_deviation || 0) > 1e-8 && row.date > prior);
     const event = events.at(-1);
@@ -716,6 +843,9 @@ export async function notificationEvaluation(request, env) {
       product_names: tickerLabels,
     };
     const generated = notification.alerts.map(alert => ({...alertMetadata, ...alert}));
+    if(recovered)generated.unshift({...alertMetadata,type:'UPDATE',market_data_at:nextSnapshot.date,
+      reason_text:'과거 지표 이력을 복구했습니다. 이전 계산에서 남은 미발송 사건은 보관했으며, 아래 현재 상태와 목표 비중을 확인하세요.',
+      state_values:latestContext?.state_values||{},current_weights:latestContext?.current_weights||{},target_weights:latestContext?.target_weights||{},mapped_products:Boolean(latestContext?.mapped_products)});
     const outbox = new Map((previousSnapshot.notification_outbox || []).map(alert => [alert.event_id, alert]));
     for (const alert of generated) {
       const identity = JSON.stringify([alert.strategy_id, alert.strategy_version, alert.type, alert.market_data_at, alert.target_weights, alert.reason_text]);
@@ -723,9 +853,9 @@ export async function notificationEvaluation(request, env) {
       alert.event_id = [...new Uint8Array(hash)].map(value => value.toString(16).padStart(2, "0")).join("");
       outbox.set(alert.event_id, alert);
     }
-    const alerts = [...outbox.values()];
-    nextSnapshot.notification_outbox = alerts;
-    if (!preview) await saveNotificationSnapshot(env, definition.strategy.id, nextSnapshot, client);
+    const alerts = blocking.length?[]:[...outbox.values()];
+    nextSnapshot.notification_outbox = blocking.length?[...outbox.values()]:alerts;
+    if (!preview && !blocking.length) await saveNotificationSnapshot(env, definition.strategy.id, nextSnapshot, client);
     const schedule = latestContext?.notification_display?.schedule
       ?? (latestContext?.notification_display?.weekly === false ? "none" : "weekly");
     const summarySchedule = schedule === "none" && preview ? "daily" : schedule;
@@ -764,6 +894,9 @@ export async function notificationEvaluation(request, env) {
       alerts,
       evaluation_status: blocking.length ? "BLOCKED" : "READY",
       blocking_tickers: blocking,
+      calculation_basis:nextSnapshot.calculation_basis||null,
+      basis_recovered:recovered,
+      ...((valuationError||basisRecoveryError)&&composite?{recovery_error:valuationError||basisRecoveryError}:{}),
       scheduled_summary: scheduledSummary,
       weekly_summary: schedule === "weekly" ? scheduledSummary : null,
     });
@@ -788,15 +921,16 @@ async function refreshTickerSet(env, tickers, optionsForTicker = () => ({}), con
   const queue = [...tickers], data = {}, freshness = {};
   if (queue.includes("BAA10Y") && queue.includes("QQQ")) {
     queue.splice(queue.indexOf("QQQ"), 1);
-    const qqq = await refreshNotificationTicker(env, "QQQ", optionsForTicker("QQQ"));
+    const options=optionsForTicker('QQQ');
+    const qqq = env.VALUATION_DATA?await env.VALUATION_DATA.getByName('prices:QQQ').refresh('QQQ',options):await refreshNotificationTicker(env, "QQQ", options);
     data.QQQ = qqq.rows; freshness.QQQ = qqq.freshness;
   }
   const workers = Array.from({length: Math.min(concurrency, queue.length)}, async () => {
     while (queue.length) {
       const ticker = queue.shift();
       const options = {...optionsForTicker(ticker)};
-      if (ticker === "BAA10Y" && data.QQQ) options.loadRows = (_ticker, start, end, upstreamOptions) => loadLaggedBaaSpread(start, end, {...upstreamOptions, qqqRows: data.QQQ.map(row => ({date: row.Date}))});
-      const refreshed = await refreshNotificationTicker(env, ticker, options);
+      if (ticker === "BAA10Y" && data.QQQ && !env.VALUATION_DATA) options.loadRows = (_ticker, start, end, upstreamOptions) => loadLaggedBaaSpread(start, end, {...upstreamOptions, qqqRows: data.QQQ.map(row => ({date: row.Date}))});
+      const refreshed = env.VALUATION_DATA?await env.VALUATION_DATA.getByName(`prices:${ticker}`).refresh(ticker,options):await refreshNotificationTicker(env, ticker, options);
       data[ticker] = refreshed.rows;
       freshness[ticker] = refreshed.freshness;
     }
@@ -985,21 +1119,26 @@ async function notificationBootstrap(request, env) {
   if (hasTdfProxy) for (const ticker of Object.keys(TDF2050_PROXY_COMPONENT_WEIGHTS)) tickers.add(ticker);
   const directTickers = [...tickers].filter(ticker => ticker !== "TDF2050_PROXY" && !krwAdjustedBaseTicker(ticker));
   const refreshed = await refreshTickerSet(
-    env, directTickers, ticker => historyOptionsForTicker(ticker, hasCompositeValuation),
+    env, directTickers, ticker => hasCompositeValuation?COMPOSITE_HISTORY_OPTIONS:historyOptionsForTicker(ticker, hasCompositeValuation),
   );
   const data = refreshed.data;
-  if (hasCompositeValuation) addCompositeValuationScore(data);
-  if (hasTdfProxy) data.TDF2050_PROXY = buildTdf2050Proxy(data);
+  const valuationTable=hasCompositeValuation?await prepareValuation(env,data):null;
+  if (hasTdfProxy) data.TDF2050_PROXY = await notificationProxy(env,data);
   for (const ticker of [...tickers].filter(krwAdjustedBaseTicker)) {
     const baseTicker = krwAdjustedBaseTicker(ticker);
     data[ticker] = buildKrwAdjustedRows(data[baseTicker] || [], data["KRW=X"] || []);
   }
   const seeded = [];
   for (const definition of selected) {
-    const baseSnapshot = strategySnapshot(definitions, definition, data);
+    const store=notificationStore(env,definition.strategy.id,client);
+    const prepared=strategyData(definitions,definition,data);
+    const baseSnapshot = valuationTable&&env.VALUATION_DATA&&usesCompositeValuation(definitions,definition)
+      ?await env.VALUATION_DATA.getByName(`initialize:${definition.strategy.id}`).initializeModel(definitions,definition)
+      :store?.initialize?await store.initialize(definitions,definition,prepared):strategySnapshot(definitions, definition, prepared);
     const context = baseSnapshot.notification_context || null;
     const snapshot = {
       ...baseSnapshot,
+      ...(valuationTable&&usesCompositeValuation(definitions,definition)?{calculation_basis:await calculationBasis(valuationTable,baseSnapshot.date)}:{}),
       notification: {
         deviation_armed: Number(context?.target_deviation || 0) >= .05,
         latest_context: context,
@@ -1030,6 +1169,10 @@ export default {
   async fetch(request, env, ctx) {
     if (request.method === "OPTIONS") return new Response(null, {headers: CORS_HEADERS});
     const url = new URL(request.url);
+    if(request.method==='GET'&&url.pathname==='/valuation-scores'){
+      try{return await publicValuation(request,env);}
+      catch(error){return response({status:'pending',error:String(error.message||error)},503,{'Cache-Control':'no-store'});}
+    }
     if (request.method === "POST" && url.pathname === "/notification-pause") {
       try {
         requireNotificationAuth(request,env);const body=await request.json();

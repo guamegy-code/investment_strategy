@@ -1,6 +1,33 @@
 import {DurableObject} from "cloudflare:workers";
-import worker, {notificationEvaluation, notificationStore} from "./index.js";
+import worker, {notificationEvaluation, notificationStore,refreshNotificationTicker,loadSharedValuation,recoverValuationState,initializeValuationState} from "./index.js";
 import {NotificationLedger, nextRecoveryTime} from "./notification-ledger.js";
+import {buildValuationTable} from './valuation-basis.js';
+import {rebuildNotificationBasis,strategySnapshot,runStrategyIncremental,addIndicators,buildTdf2050Proxy} from './strategy-runtime.js';
+
+export class ValuationData extends DurableObject {
+  table(refresh=false) {
+    if(!this.tableWork)this.tableWork=loadSharedValuation({...this.env,VALUATION_DATA:null},refresh).finally(()=>{this.tableWork=null;});
+    return this.tableWork;
+  }
+  recover(definitions,definition,previous,basis) {return recoverValuationState({...this.env,VALUATION_DATA:null},definitions,definition,previous,basis);}
+  initializeModel(definitions,definition){return initializeValuationState({...this.env,VALUATION_DATA:null},definitions,definition);}
+  async refresh(ticker,options){
+    if(!this.refreshWork)this.refreshWork=refreshNotificationTicker({...this.env,VALUATION_DATA:null},ticker,options).finally(()=>{this.refreshWork=null;});
+    const result=await this.refreshWork;
+    // Full history remains in shared storage; ordinary evaluations transfer
+    // only recent, already prepared observations across the RPC boundary.
+    return {...result,rows:result.rows.slice(-640)};
+  }
+  indicators(rows) { return addIndicators(rows); }
+  proxy(data) { return buildTdf2050Proxy(data); }
+  async build(input) {
+    const previous=await this.ctx.storage.get('table');
+    if(previous?.revision===input.revision)return previous;
+    const table=buildValuationTable(input);
+    await this.ctx.storage.put('table',table);
+    return table;
+  }
+}
 
 export class NotificationState extends DurableObject {
   constructor(ctx, env) { super(ctx, env); this.ledger = new NotificationLedger(ctx.storage); }
@@ -8,6 +35,9 @@ export class NotificationState extends DurableObject {
   commit(snapshot, revision) { return this.ledger.commit(snapshot, revision); }
   claim(ids, owner) { return this.ledger.claim(ids, owner); }
   ack(ids, owner, messageId) { return this.ledger.ack(ids, owner, messageId); }
+  rebuild(definitions,definition,data,previous,basis) { return rebuildNotificationBasis(definitions,definition,data,previous,basis); }
+  initialize(definitions,definition,data) { return strategySnapshot(definitions,definition,data); }
+  evaluate(definitions,definition,data,previous) { return runStrategyIncremental(definitions,definition,data,previous); }
 }
 
 export class NotificationRecovery extends DurableObject {

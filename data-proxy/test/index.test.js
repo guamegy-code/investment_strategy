@@ -645,7 +645,8 @@ test("mapped strategies inherit composite valuation history from their source", 
   const mapped = {strategy: {id: "mapped"}, source: "source", products: {QQQ: {"379810.KS": "100%"}}};
 
   assert.equal(usesCompositeValuation([source, mapped], mapped), true);
-  assert.equal(historyOptionsForTicker("QQQ", true).lookbackDays, 2200);
+  assert.equal(historyOptionsForTicker("QQQ", true).historyStart, '2004-01-01');
+  assert.equal(historyOptionsForTicker("QQQ", true).preserveAllHistory, true);
   assert.equal(historyOptionsForTicker("379810.KS", true).lookbackDays, undefined);
 });
 

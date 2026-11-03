@@ -367,6 +367,28 @@ export function strategySnapshot(definitions,definition,data){
   }
   return{...last,portfolio:portfolioSnapshot(portfolio),runtime:runtime.snapshot()};
 }
+// Rebuild only strategy memory. Account holdings, cash and delivery history are
+// operational facts and must survive a correction to historical indicators.
+export function rebuildNotificationBasis(definitions,definition,data,previous,basis){
+  const past=Object.fromEntries(Object.entries(data).map(([ticker,rows])=>[ticker,rows.filter(row=>row.Date<=previous.date)]));
+  const rebuilt=strategySnapshot(definitions,definition,past);
+  if(rebuilt.date!==previous.date)throw new Error('basis recovery needs the previous decision session');
+  const all=new Map(definitions.map(def=>[def.strategy.id,def])),calculation=definition.source?all.get(definition.source):definition;
+  const rows=preparedRows(calculation,dependencies(definition,all),past,requiredMarketFields(calculation));
+  const last=rows.at(-1),runtime=resolve(definition,all),portfolio=restorePortfolio(previous.portfolio);
+  runtime.restore(rebuilt.runtime);
+  const signal=runtime.step(last.date,last.market,valuationWeightPortfolio(portfolio,last.valuationMarket));
+  const context=signal.notificationContext;
+  if(!context)throw new Error('basis recovery has no notification context');
+  // A pending virtual order may have been created from the old, invalid basis.
+  // Retain its evidence in the backup, but never execute it after correction.
+  return {...previous,runtime:runtime.snapshot(),portfolio:{...previous.portfolio,pending:null,remaining:0,active:null},
+    notification_context:context,notification:selectNotificationAlerts([],{latest_context:context,deviation_armed:Number(context.target_deviation||0)>=.05}).state,
+    calculation_basis:basis,notification_outbox:[],
+    notification_quarantined_outbox:[...(previous.notification_quarantined_outbox||[]),...(previous.notification_outbox||[])],
+    basis_recovery:{from:previous.calculation_basis?.version||'legacy',revision:basis.history_revision,at_session:previous.date,previous_state:previous.runtime.state,corrected_state:runtime.snapshot().state}};
+}
+
 export function runStrategyIncremental(definitions,definition,data,snapshot){
   const all=new Map(definitions.map(def=>[def.strategy.id,def])),tickers=dependencies(definition,all),calculation=definition.source?all.get(definition.source):definition,fields=requiredMarketFields(calculation),rows=preparedRows(calculation,tickers,data,fields,snapshot.date),runtime=resolve(definition,all),portfolio=restorePortfolio(snapshot.portfolio);
   runtime.restore(snapshot.runtime);const history=[];

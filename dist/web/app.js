@@ -694,7 +694,7 @@ renderIndicators=async function(){
 // validate and cache. It intentionally sits after the dashboard compatibility
 // wrappers above, so existing chart behavior is left unchanged.
 // Invalidate browser histories built before KRW became the comparison default.
-const BROWSER_ENGINE_VERSION = '2026-09-27.1';
+const BROWSER_ENGINE_VERSION = '2026-11-03.valuation-1';
 const NOTIFICATION_CONTEXT_VERSION = 3;
 const FX_TICKER_BY_SUFFIX = {'.KS': 'KRW=X', '.KQ': 'KRW=X'};
 const TDF2050_PROXY_COMPONENT_WEIGHTS = {SPY:.4081,VXUS:.3339,BND:.258};
@@ -815,7 +815,24 @@ function buildTdf2050Proxy(components){const tickers=Object.keys(TDF2050_PROXY_C
 async function ensureTdf2050Proxy(data,tickers){if(!tickers.some(ticker=>ticker==='TDF2050_PROXY'||krwAdjustedBaseTicker(ticker)==='TDF2050_PROXY'))return;const components=Object.keys(TDF2050_PROXY_COMPONENT_WEIGHTS),unavailable=components.filter(ticker=>!data[ticker]);if(unavailable.length)throw Error(`TDF2050_PROXY 구성 데이터를 찾을 수 없습니다: ${unavailable.join(', ')}`);data.TDF2050_PROXY=addStrategyIndicators(buildTdf2050Proxy(data));await saveCachedPrices('TDF2050_PROXY',data.TDF2050_PROXY);}
 function buildKrwAdjustedAsset(base,fx){const fxByDate=new Map(fx.map(row=>[row.Date,Number(row.Close)])),rows=[];let lastFx=NaN;for(const row of [...base].sort((left,right)=>left.Date.localeCompare(right.Date))){const known=fxByDate.get(row.Date);if(Number.isFinite(known))lastFx=known;if(!Number.isFinite(lastFx))continue;rows.push({Date:row.Date,Open:Number(row.Open)*lastFx,High:Number(row.High)*lastFx,Low:Number(row.Low)*lastFx,Close:Number(row.Close)*lastFx,Volume:Number(row.Volume)||0});}return rows;}
 async function ensureKrwAdjustedAssets(data,tickers){for(const ticker of tickers.filter(isKrwAdjustedTicker)){const baseTicker=krwAdjustedBaseTicker(ticker),base=data[baseTicker],fx=data['KRW=X'];if(!base||!fx)throw Error(`${ticker}의 원자산 또는 USD/KRW 데이터를 찾을 수 없습니다.`);data[ticker]=addStrategyIndicators(buildKrwAdjustedAsset(base,fx));await saveCachedPrices(ticker,data[ticker]);}}
-async function downloadMissingData(def){const data=await loadData(),{tickers,fields}=validateStrategy(def),needsTdf=tickers.some(ticker=>ticker==='TDF2050_PROXY'||krwAdjustedBaseTicker(ticker)==='TDF2050_PROXY'),needsComposite=fields.QQQ?.has('valuation_score'),tdfComponents=needsTdf?Object.keys(TDF2050_PROXY_COMPONENT_WEIGHTS):[],refreshTickers=[...new Set([...tickers,...tdfComponents])];await loadCachedTickerData(data,refreshTickers);await fetchProxyTickerData(data,refreshTickers,needsComposite?'2004-01-01':null);if(needsComposite){addCompositeValuationScore(data);await saveCachedPrices('QQQ',data.QQQ);}await ensureTdf2050Proxy(data,tickers);await ensureKrwAdjustedAssets(data,tickers);const unavailable=tickers.filter(ticker=>!data[ticker]&&!isDataProxyTicker(ticker));if(unavailable.length)throw Error(`시장 데이터가 없습니다: ${unavailable.join(', ')}`);const incomplete=tickers.filter(ticker=>!data[ticker]);if(incomplete.length)throw Error(`시세를 찾을 수 없습니다: ${incomplete.join(', ')}`);refreshIndicatorTickerCatalog(data);return data;}
+let sharedValuationRequest=null,sharedValuationCheckedAt=0;
+async function ensureCompositeValuationScores(data){
+  if(!proxyUrl){addCompositeValuationScore(data);return;}
+  if(!sharedValuationRequest||Date.now()-sharedValuationCheckedAt>=PROXY_REFRESH_INTERVAL_MS){
+    sharedValuationCheckedAt=Date.now();
+    sharedValuationRequest=(async()=>{
+      const response=await fetch(new URL('/valuation-scores',proxyUrl),{cache:'no-cache',signal:AbortSignal.timeout(25000)}),table=await response.json();
+      if(!response.ok||table.status!=='ready')throw Error(table.error||'공통 밸류에이션 자료를 준비하고 있습니다.');
+      if(table.version!=='composite-full-history-v1'||!Array.isArray(table.scores))throw Error('밸류에이션 계산 기준을 확인할 수 없습니다.');
+      return table;
+    })().catch(error=>{sharedValuationRequest=null;throw error;});
+  }
+  const table=await sharedValuationRequest,scores=new Map(table.scores.map(row=>[row.month,row.score]));
+  const latest=latestCachedDate(data.QQQ||[]);
+  if(latest&&table.month<latest.slice(0,7))throw Error('공통 밸류에이션 자료 갱신을 기다리고 있습니다.');
+  data.QQQ=(data.QQQ||[]).map(row=>({...row,VALUATION_SCORE:scores.get(row.Date.slice(0,7))??NaN}));
+}
+async function downloadMissingData(def){const data=await loadData(),{tickers,fields}=validateStrategy(def),needsTdf=tickers.some(ticker=>ticker==='TDF2050_PROXY'||krwAdjustedBaseTicker(ticker)==='TDF2050_PROXY'),needsComposite=fields.QQQ?.has('valuation_score'),tdfComponents=needsTdf?Object.keys(TDF2050_PROXY_COMPONENT_WEIGHTS):[],refreshTickers=[...new Set([...tickers,...tdfComponents])];await loadCachedTickerData(data,refreshTickers);await fetchProxyTickerData(data,refreshTickers,needsComposite?'2004-01-01':null);if(needsComposite){await ensureCompositeValuationScores(data);await saveCachedPrices('QQQ',data.QQQ);}await ensureTdf2050Proxy(data,tickers);await ensureKrwAdjustedAssets(data,tickers);const unavailable=tickers.filter(ticker=>!data[ticker]&&!isDataProxyTicker(ticker));if(unavailable.length)throw Error(`시장 데이터가 없습니다: ${unavailable.join(', ')}`);const incomplete=tickers.filter(ticker=>!data[ticker]);if(incomplete.length)throw Error(`시세를 찾을 수 없습니다: ${incomplete.join(', ')}`);refreshIndicatorTickerCatalog(data);return data;}
 function portfolioPrices(market,field='close',removeFx=true,tickers=Object.keys(market)){const prices={};for(const ticker of tickers){const row=market[ticker];if(!row)continue;const fxTicker=tickerFxRate(ticker),fx=removeFx&&fxTicker?Number(market[fxTicker]?.[field]):1,price=Number(row[field])/(Number.isFinite(fx)&&fx>0?fx:1);if(Number.isFinite(price))prices[ticker]=price;}return prices;}
 function strategyHoldingTickers(def,all=definitions){if(!def.source)return [...(def.assets?.required||[])];const source=definitionById(def.source,all);if(!source)throw Error(`Unknown source strategy: ${def.source}`);return [...new Set((source.assets?.required||[]).flatMap(asset=>Object.keys(def.products?.[asset]||{[asset]:1})))];}
 function resolve(def,all,removeFx=true){if(!def.source)return new Declarative(def);const source=all[def.source];if(!source)throw Error(`source 전략을 찾을 수 없습니다: ${def.source}`);const runtime=new Declarative(source);return {step(date,market,portfolio){const actual=portfolio.weights(portfolioPrices(market,'close',removeFx)),virtual={weights:()=>Object.fromEntries((source.assets.required||[]).map(asset=>[asset,Object.keys(def.products?.[asset]||{[asset]:1}).reduce((sum,product)=>sum+(actual[product]||0),0)]))},signal=runtime.step(date,market,virtual),target={};for(const [asset,weight] of Object.entries(signal.target))for(const [product,share] of Object.entries(def.products?.[asset]||{[asset]:1}))target[product]=(target[product]||0)+weight*pct(share);return {...signal,target};}};}
@@ -962,6 +979,7 @@ async function retryWebsite(action,id=''){
     const selected=selectedDefinitions(),badTickers=[...webRecovery.prices].filter(([,item])=>['failed','stale'].includes(item.status)).map(([ticker])=>ticker);
     const tickers=action==='data'?[id]:action==='all'?badTickers:[];
     if(tickers.length){
+      sharedValuationRequest=null;
       for(const ticker of tickers)proxyTickerFreshness.delete(ticker);
       const data=await loadData();await fetchProxyTickerData(data,tickers,null,false,true);
     }
@@ -1657,7 +1675,7 @@ function ensureSelectedIndicatorData(){
     await loadCachedTickerData(data,required);
     await fetchProxyTickerData(data,required,needsCompositeValuation?'2004-01-01':null);
     if(needsCompositeValuation){
-      addCompositeValuationScore(data);
+      await ensureCompositeValuationScores(data);
       await saveCachedPrices('QQQ',data.QQQ);
     }
     await ensureTdf2050Proxy(data,selectedTickers);

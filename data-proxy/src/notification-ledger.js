@@ -9,7 +9,12 @@ export class NotificationLedger {
     return this.storage.transaction(async transaction => {
       const current = await transaction.get("record");
       if ((current?.revision || 0) !== expectedRevision) throw new Error("notification state changed; retry evaluation");
-      const next = {snapshot, revision: expectedRevision + 1, claims: current?.claims || {}};
+      if(current && snapshot.calculation_basis?.version && (current.snapshot.calculation_basis?.version!==snapshot.calculation_basis.version || snapshot.basis_recovery?.revision!==current.snapshot.basis_recovery?.revision)){
+        if(Object.values(current.claims||{}).some(lease=>lease.until>Date.now()))throw new Error('delivery in progress; retry basis recovery after the lease expires');
+        const backupKey=`basis-backup:${snapshot.calculation_basis.version}:${snapshot.basis_recovery?.revision||'initial'}`;
+        if(!await transaction.get(backupKey))await transaction.put(backupKey,current);
+      }
+      const next = {snapshot, revision: expectedRevision + 1, claims: current?.claims || {},receipts:current?.receipts||[]};
       await transaction.put("record", next);
       return next.revision;
     });
