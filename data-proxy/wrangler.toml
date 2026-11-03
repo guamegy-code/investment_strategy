@@ -1,6 +1,24 @@
 name = "investment-strategy-data-proxy"
-main = "src/index.js"
+main = "src/worker.js"
 compatibility_date = "2026-09-13"
+
+[[durable_objects.bindings]]
+name = "NOTIFICATION_STATE"
+class_name = "NotificationState"
+
+[[durable_objects.bindings]]
+name = "NOTIFICATION_JOBS"
+class_name = "NotificationRecovery"
+
+[[migrations]]
+tag = "notification-recovery-v1"
+new_sqlite_classes = ["NotificationState", "NotificationRecovery"]
+
+[observability]
+enabled = true
+
+[triggers]
+crons = ["*/5 * * * *"]
 
 # Create a KV namespace and insert its ID before deployment:
 #   npx wrangler kv namespace create MARKET_DATA

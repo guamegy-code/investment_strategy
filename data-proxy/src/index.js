@@ -75,8 +75,13 @@ function unixSeconds(value, fallback) {
   return Math.floor(parsed / 1000);
 }
 
-export async function loadTicker(ticker, start, end, {bypassCache = false} = {}) {
-  if (ticker === "BAA10Y") return loadLaggedBaaSpread(start, end, {bypassCache});
+async function budgetFetch(url, options, budget) {
+  if (budget && budget.remaining-- <= 0) throw new Error("request budget exhausted; continue on next invocation");
+  return fetch(url, {...options, signal: options?.signal || AbortSignal.timeout(20_000)});
+}
+
+export async function loadTicker(ticker, start, end, {bypassCache = false, budget = null} = {}) {
+  if (ticker === "BAA10Y") return loadLaggedBaaSpread(start, end, {bypassCache, budget});
   const upstreamTicker = ticker === "KRW=X" ? "USDKRW=X" : ticker;
   let upstream = null;
   let lastStatus = null;
@@ -87,18 +92,19 @@ export async function loadTicker(ticker, start, end, {bypassCache = false} = {})
       period1: String(start), period2: String(end), interval: "1d", events: "div,splits",
     });
     try {
-      const candidate = await fetch(source, {
+      const candidate = await budgetFetch(source, {
         headers: YAHOO_HEADERS,
         ...(bypassCache
           ? {cache: "no-store"}
           : {cf: {cacheTtl: CACHE_SECONDS, cacheEverything: true}}),
-      });
+      }, budget);
       if (candidate.ok) {
         upstream = candidate;
         break;
       }
       lastStatus = candidate.status;
     } catch (error) {
+      if (error.message?.includes("request budget exhausted")) throw error;
       lastError = error;
     }
   }
@@ -158,15 +164,15 @@ async function boundedText(response, maxBytes = 2_000_000) {
   return new TextDecoder().decode(bytes);
 }
 
-export async function loadLaggedBaaSpread(start, end, {bypassCache = false} = {}) {
+export async function loadLaggedBaaSpread(start, end, {bypassCache = false, qqqRows = null, budget = null} = {}) {
   // FRED BAA10Y is a daily percentage-point spread, not an investable price.
   // The value labelled with a date is visible to a strategy only on the next
   // QQQ trading session. This mirrors the one-session-lag research convention.
   const [qqq, reply] = await Promise.all([
-    loadTicker("QQQ", start, end, {bypassCache}),
-    fetch("https://fred.stlouisfed.org/graph/fredgraph.csv?id=BAA10Y", {
+    qqqRows || loadTicker("QQQ", start, end, {bypassCache, budget}),
+    budgetFetch("https://fred.stlouisfed.org/graph/fredgraph.csv?id=BAA10Y", {
       ...(bypassCache ? {cache: "no-store"} : {cf: {cacheTtl: CACHE_SECONDS, cacheEverything: true}}),
-    }),
+    }, budget),
   ]);
   if (!reply.ok) throw new Error(`BAA10Y: FRED returned ${reply.status}`);
   const csv = await boundedText(reply);
@@ -391,7 +397,8 @@ export async function loadPriceRange(env, ctx, ticker, start, end, loadFallbackT
       stale = true;
     }
   }
-  const rows = rowsWithinRange(normalized, start, end);
+  const completedSession = expectedCompletedSession(ticker);
+  const rows = rowsWithinRange(normalized, start, end).filter(row => row.date <= completedSession);
   if (!rows.length) throw new Error(`${ticker}: no daily price data available`);
   return {rows, stale};
 }
@@ -403,14 +410,39 @@ function requireNotificationAuth(request, env) {
   }
 }
 
-async function loadDefinitions(env) {
+export async function loadDefinitions(env, requestedIds = null, budget = null) {
   if (!env.STRATEGY_MANIFEST_URL) throw new Error("strategy manifest is not configured");
   const manifestUrl = new URL(env.STRATEGY_MANIFEST_URL);
-  const manifestResponse = await fetch(manifestUrl, {cf: {cacheTtl: 300, cacheEverything: true}});
+  const manifestResponse = await budgetFetch(manifestUrl, {cf: {cacheTtl: 300, cacheEverything: true}}, budget);
   if (!manifestResponse.ok) throw new Error("strategy manifest could not be loaded");
   const manifest = await manifestResponse.json();
   const entries = Array.isArray(manifest) ? manifest : manifest.strategies;
   if (!Array.isArray(entries)) throw new Error("strategy manifest is invalid");
+  const loaded = new Map();
+  if (manifest.enabled_bundle && requestedIds) {
+    const bundled = await budgetFetch(new URL(manifest.enabled_bundle, manifestUrl), {cf: {cacheTtl: 300, cacheEverything: true}}, budget);
+    if (!bundled.ok) throw new Error("strategy bundle could not be loaded");
+    const values = await bundled.json();
+    if (!Array.isArray(values)) throw new Error("strategy bundle is invalid");
+    for (const definition of values) loaded.set(definition.strategy.id, definition);
+  }
+  if (requestedIds && entries.every(entry => typeof entry === "object" && entry.id)) {
+    const byId = new Map(entries.filter(entry => typeof entry === "object").map(entry => [entry.id, entry]));
+    const pending = [...requestedIds], visited = new Set();
+    while (pending.length) {
+      const id = pending.shift();
+      if (visited.has(id)) continue;
+      visited.add(id);
+      if (!loaded.has(id) && byId.has(id)) {
+        const reply = await budgetFetch(new URL(byId.get(id).path, manifestUrl), {cf: {cacheTtl: 300, cacheEverything: true}}, budget);
+        if (!reply.ok) throw new Error(`strategy could not be loaded: ${id}`);
+        loaded.set(id, parseYaml(await reply.text()));
+      }
+      const source = loaded.get(id)?.source;
+      if (source) pending.push(source);
+    }
+    return [...loaded.values()];
+  }
   return Promise.all(entries.map(async entry => {
     const path = typeof entry === "string" ? entry : entry.path;
     const response = await fetch(new URL(path, manifestUrl), {cf: {cacheTtl: 300, cacheEverything: true}});
@@ -520,6 +552,8 @@ export async function refreshNotificationTicker(env, ticker, {
   lookbackDays = NOTIFICATION_LOOKBACK_DAYS,
   tailRows = NOTIFICATION_TAIL_ROWS,
   now = Date.now(),
+  loadRows = loadTicker,
+  budget = null,
 } = {}) {
   if (!env.MARKET_DATA) throw new Error("MARKET_DATA KV binding is not configured");
   const key = `notification-tail:${ticker}`;
@@ -534,7 +568,8 @@ export async function refreshNotificationTicker(env, ticker, {
   const requiredStart = Math.floor((now - lookbackDays * 86400000) / 1000);
   const earliest = existing.reduce((date, row) => !date || row.Date < date ? row.Date : date, "");
   const needsHistory = !earliest
-    || existing.length < tailRows && Date.parse(earliest) / 1000 > requiredStart;
+    || existing.length < tailRows && Date.parse(earliest) / 1000 > requiredStart
+      && (!metadata?.history_start || metadata.history_start > requiredStart + 86400 || Number(metadata.history_tail_rows || 0) < tailRows);
   const retryAt = Date.parse(metadata?.next_refresh_at || "");
   const sessionSatisfied = latest >= expectedSession;
   if (!needsHistory && metadata?.expected_session === expectedSession
@@ -545,18 +580,19 @@ export async function refreshNotificationTicker(env, ticker, {
         market: tickerMarket(ticker), expected_session: expectedSession,
         latest_session: latest, fetched_at: metadata.fetched_at || null,
         next_refresh_at: metadata.next_refresh_at || null,
-        status: sessionSatisfied ? "fresh" : "pending",
+        status: sessionSatisfied ? "fresh" : metadata.status || "pending",
+        last_error: metadata.last_error || null, retry_count: metadata.retry_count || 0,
         upstream_checked: false, rows_changed: false,
       },
     };
   }
-  const start = !earliest || Date.parse(earliest) / 1000 > requiredStart
+  const start = needsHistory
     ? requiredStart
-    : latest ? Math.floor(Date.parse(latest) / 1000) : requiredStart;
+    : latest ? Math.floor(Date.parse(latest) / 1000) - 7 * 86400 : requiredStart;
   let rows = existing, errorMessage = null;
   try {
-    const incoming = await loadTicker(ticker, start, Math.floor(now / 1000), {bypassCache: true});
-    rows = mergeRows(existing, incoming.map(row => ({Date: row.date, Open: row.open, High: row.high, Low: row.low, Close: row.close, Volume: row.volume, RawClose: row.raw_close, Dividends: row.dividends}))).slice(-tailRows);
+    const incoming = await loadRows(ticker, start, Math.floor(now / 1000), {bypassCache: true, budget});
+    rows = mergeRows(existing, incoming.filter(row => row.date <= expectedSession).map(row => ({Date: row.date, Open: row.open, High: row.high, Low: row.low, Close: row.close, Volume: row.volume, RawClose: row.raw_close, Dividends: row.dividends}))).slice(-Math.max(tailRows, existing.length));
   } catch (error) {
     if (!existing.length) throw error;
     errorMessage = error instanceof Error ? error.message : String(error);
@@ -565,12 +601,14 @@ export async function refreshNotificationTicker(env, ticker, {
   const rowsChanged = !samePriceRows(existing, rows);
   const satisfied = latestSession >= expectedSession;
   const retry = refreshDelaySeconds(metadata, expectedSession, latestSession);
-  const nextRefreshAt = satisfied ? null : new Date(now + retry.delay * 1000).toISOString();
+  const nextRefreshAt = satisfied ? null : new Date(now + (errorMessage?.includes("request budget exhausted") ? 5 : retry.delay) * 1000).toISOString();
   const nextMetadata = {
     market: tickerMarket(ticker), expected_session: expectedSession,
     latest_session: latestSession, fetched_at: new Date(now).toISOString(),
     next_refresh_at: nextRefreshAt, retry_count: satisfied ? 0 : retry.retryCount,
     status: errorMessage ? "stale" : satisfied ? "fresh" : "pending",
+    history_start: needsHistory && !errorMessage ? requiredStart : metadata?.history_start || null,
+    history_tail_rows: Math.max(metadata?.history_tail_rows || 0, !errorMessage ? tailRows : 0),
     ...(errorMessage ? {last_error: errorMessage} : {}),
   };
   const writes = [env.MARKET_DATA.put(metadataKey, JSON.stringify(nextMetadata))];
@@ -582,29 +620,51 @@ export async function refreshNotificationTicker(env, ticker, {
   };
 }
 
-async function notificationSnapshot(env, id) {
+export function notificationStore(env, id, client = "legacy") {
+  return env.NOTIFICATION_STATE?.getByName(`${client}:${id}`);
+}
+
+async function notificationSnapshot(env, id, client = "legacy") {
   if (!env.MARKET_DATA) throw new Error("MARKET_DATA KV binding is not configured");
+  const store = notificationStore(env, id, client);
+  if (store) {
+    const current = await store.read();
+    if (current) return current;
+    if (client !== "legacy") {
+      const previous = await notificationStore(env, id, "legacy").read();
+      if (previous) return {...previous, notification_revision:0};
+    }
+  }
   return JSON.parse(await env.MARKET_DATA.get(`notification-state:${id}`) || "null");
 }
 
-async function saveNotificationSnapshot(env, id, snapshot) {
+async function saveNotificationSnapshot(env, id, snapshot, client = "legacy") {
+  const store = notificationStore(env, id, client);
+  if (store) return store.commit(snapshot, snapshot.notification_revision || 0);
   const key = `notification-state:${id}`;
   const existing = await env.MARKET_DATA.get(key);
   if (existing !== JSON.stringify(snapshot)) await env.MARKET_DATA.put(key, JSON.stringify(snapshot));
 }
 
-async function notificationEvaluation(request, env) {
+export async function notificationEvaluation(request, env) {
   requireNotificationAuth(request, env);
   const body = await request.json();
   const preview = body.preview === true;
+  const client = String(body.client_id || "legacy");
+  if (!/^[\w-]{1,160}$/.test(client)) throw new Error("invalid notification client");
   const ids = [...new Set(Array.isArray(body.strategy_ids) ? body.strategy_ids.map(String) : [])];
   if (!ids.length || ids.length > 20) throw new Error("strategy_ids must contain 1-20 values");
-  const publicDefinitions = await loadDefinitions(env);
+  if (!preview && !body.background && env.NOTIFICATION_JOBS && client !== "legacy") {
+    const publicIds = ids.filter(id => !body.private_strategies?.some(item => item.strategy_id === id));
+    if (publicIds.length) await env.NOTIFICATION_JOBS.getByName(client).register({strategy_ids:publicIds, client_id:client, delivery:body.delivery || null, recovery_schedule:body.recovery_schedule || []}, "pending");
+  }
+  const requestBudget = {remaining:40};
+  const publicDefinitions = await loadDefinitions(env, ids, requestBudget);
   const definitions = [...publicDefinitions, ...privateDefinitions(body, publicDefinitions)];
   const byId = new Map(definitions.map(definition => [definition?.strategy?.id, definition]));
   const selected = ids.map(id => byId.get(id)).filter(Boolean);
   if (selected.length !== ids.length) throw new Error("one or more strategy IDs are unknown");
-  const snapshots = new Map(await Promise.all(selected.map(async definition => [definition.strategy.id, await notificationSnapshot(env, definition.strategy.id)])));
+  const snapshots = new Map(await Promise.all(selected.map(async definition => [definition.strategy.id, await notificationSnapshot(env, definition.strategy.id, client)])));
   const unseeded = selected.filter(definition => !snapshots.get(definition.strategy.id)).map(definition => definition.strategy.id);
   if (unseeded.length) throw new Error(`notification seed is required: ${unseeded.join(", ")}`);
   const tickers = new Set(selected.flatMap(definition => strategyTickers(definitions, definition)));
@@ -613,7 +673,7 @@ async function notificationEvaluation(request, env) {
   if (hasTdfProxy) for (const ticker of Object.keys(TDF2050_PROXY_COMPONENT_WEIGHTS)) tickers.add(ticker);
   const directTickers = [...tickers].filter(ticker => ticker !== "TDF2050_PROXY" && !krwAdjustedBaseTicker(ticker));
   const refreshed = await refreshTickerSet(
-    env, directTickers, ticker => historyOptionsForTicker(ticker, hasCompositeValuation),
+    env, directTickers, ticker => ({...historyOptionsForTicker(ticker, hasCompositeValuation), budget:requestBudget}),
   );
   const data = refreshed.data;
   if (hasCompositeValuation) addCompositeValuationScore(data);
@@ -629,12 +689,16 @@ async function notificationEvaluation(request, env) {
     const baseTicker = krwAdjustedBaseTicker(ticker);
     data[ticker] = buildKrwAdjustedRows(data[baseTicker] || [], data["KRW=X"] || []);
   }
-  const tickerLabels = await cachedTickerLabels(env, tickers);
+  const tickerLabels = await cachedTickerLabels(env, tickers, true);
   const lastDates = body.last_evaluated_dates || {}, evaluations = [];
   let decisionAdvanced = false;
   for (const definition of selected) {
     const previousSnapshot = snapshots.get(definition.strategy.id);
-    const result = runStrategyIncremental(definitions, definition, data, previousSnapshot);
+    const required = strategyTickers(definitions, definition);
+    const blocking = required.filter(ticker => refreshed.freshness[ticker] && refreshed.freshness[ticker].latest_session < refreshed.freshness[ticker].expected_session);
+    const result = blocking.length ? {history: [], snapshot: previousSnapshot} : runStrategyIncremental(definitions, definition, data, previousSnapshot);
+    const expectedDecision = required.map(ticker => refreshed.freshness[ticker]?.expected_session).filter(Boolean).sort().at(-1);
+    if (!blocking.length && expectedDecision && result.snapshot.date < expectedDecision) blocking.push("indicator-history-or-common-session");
     if (result.history.length) decisionAdvanced = true;
     const notification = selectNotificationAlerts(result.history, previousSnapshot.notification || {
       deviation_armed: Number(previousSnapshot.notification_context?.target_deviation || 0) >= .05,
@@ -642,7 +706,6 @@ async function notificationEvaluation(request, env) {
     });
     const latestContext = notification.state.latest_context || result.snapshot.notification_context || previousSnapshot.notification_context || null;
     const nextSnapshot = {...result.snapshot, notification: notification.state, notification_context: latestContext};
-    if (!preview) await saveNotificationSnapshot(env, definition.strategy.id, nextSnapshot);
     const history = result.history, marketDataAt = nextSnapshot.date || previousSnapshot.date, prior = String(lastDates[definition.strategy.id] || "");
     const events = history.filter(row => row.target && Number(row.notificationContext?.target_deviation || 0) > 1e-8 && row.date > prior);
     const event = events.at(-1);
@@ -652,7 +715,17 @@ async function notificationEvaluation(request, env) {
       strategy_version: String(definition.strategy.version || ""),
       product_names: tickerLabels,
     };
-    const alerts = notification.alerts.map(alert => ({...alertMetadata, ...alert}));
+    const generated = notification.alerts.map(alert => ({...alertMetadata, ...alert}));
+    const outbox = new Map((previousSnapshot.notification_outbox || []).map(alert => [alert.event_id, alert]));
+    for (const alert of generated) {
+      const identity = JSON.stringify([alert.strategy_id, alert.strategy_version, alert.type, alert.market_data_at, alert.target_weights, alert.reason_text]);
+      const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(identity));
+      alert.event_id = [...new Uint8Array(hash)].map(value => value.toString(16).padStart(2, "0")).join("");
+      outbox.set(alert.event_id, alert);
+    }
+    const alerts = [...outbox.values()];
+    nextSnapshot.notification_outbox = alerts;
+    if (!preview) await saveNotificationSnapshot(env, definition.strategy.id, nextSnapshot, client);
     const schedule = latestContext?.notification_display?.schedule
       ?? (latestContext?.notification_display?.weekly === false ? "none" : "weekly");
     const summarySchedule = schedule === "none" && preview ? "daily" : schedule;
@@ -689,27 +762,41 @@ async function notificationEvaluation(request, env) {
       state_values: latestContext?.state_values || {},
       mapped_products: Boolean(latestContext?.mapped_products),
       alerts,
+      evaluation_status: blocking.length ? "BLOCKED" : "READY",
+      blocking_tickers: blocking,
       scheduled_summary: scheduledSummary,
       weekly_summary: schedule === "weekly" ? scheduledSummary : null,
     });
   }
   const refreshSummary = aggregateRefresh(refreshed.freshness);
-  return response({
+  const payload = {
     market_data_updated: refreshSummary.rows_changed,
     ...refreshSummary,
     decision_advanced: decisionAdvanced,
     price_freshness: refreshed.freshness,
     preview,
     evaluations,
-  }, 200, {"Cache-Control": "no-store"});
+  };
+  if (!preview && !body.background && env.NOTIFICATION_JOBS && client !== "legacy") {
+    const publicIds = selected.filter(def => !body.private_strategies?.some(item => item.strategy_id === def.strategy.id)).map(def => def.strategy.id);
+    if (publicIds.length) await env.NOTIFICATION_JOBS.getByName(client).register({strategy_ids: publicIds, client_id: client, delivery: body.delivery || null, recovery_schedule:body.recovery_schedule || []}, evaluations.some(item => item.alerts.length) ? "pending" : payload.freshness);
+  }
+  return response(payload, 200, {"Cache-Control": "no-store"});
 }
 
 async function refreshTickerSet(env, tickers, optionsForTicker = () => ({}), concurrency = 4) {
   const queue = [...tickers], data = {}, freshness = {};
+  if (queue.includes("BAA10Y") && queue.includes("QQQ")) {
+    queue.splice(queue.indexOf("QQQ"), 1);
+    const qqq = await refreshNotificationTicker(env, "QQQ", optionsForTicker("QQQ"));
+    data.QQQ = qqq.rows; freshness.QQQ = qqq.freshness;
+  }
   const workers = Array.from({length: Math.min(concurrency, queue.length)}, async () => {
     while (queue.length) {
       const ticker = queue.shift();
-      const refreshed = await refreshNotificationTicker(env, ticker, optionsForTicker(ticker));
+      const options = {...optionsForTicker(ticker)};
+      if (ticker === "BAA10Y" && data.QQQ) options.loadRows = (_ticker, start, end, upstreamOptions) => loadLaggedBaaSpread(start, end, {...upstreamOptions, qqqRows: data.QQQ.map(row => ({date: row.Date}))});
+      const refreshed = await refreshNotificationTicker(env, ticker, options);
       data[ticker] = refreshed.rows;
       freshness[ticker] = refreshed.freshness;
     }
@@ -750,7 +837,7 @@ export async function loadTickerLabel(ticker) {
   throw new Error(`${ticker}: label upstream request failed`, {cause: lastError});
 }
 
-async function cachedTickerLabels(env, tickers) {
+async function cachedTickerLabels(env, tickers, cachedOnly = false) {
   if (!env.MARKET_DATA) return {};
   const labels = await Promise.all([...tickers]
     .filter(ticker => ticker !== "TDF2050_PROXY" && !krwAdjustedBaseTicker(ticker))
@@ -758,6 +845,7 @@ async function cachedTickerLabels(env, tickers) {
       const key = `ticker-label:${ticker}`;
       const cached = await env.MARKET_DATA.get(key);
       if (cached) return [ticker, cached];
+      if (cachedOnly) return null;
       try {
         const label = await loadTickerLabel(ticker);
         if (!label) return null;
@@ -837,15 +925,17 @@ async function portfolioValuations(request, env) {
   requireNotificationAuth(request, env);
   const body = await request.json();
   const preview = body.preview === true;
+  const client = String(body.client_id || "legacy");
+  if (!/^[\w-]{1,160}$/.test(client)) throw new Error("invalid notification client");
   const ids = [...new Set(Array.isArray(body.strategy_ids) ? body.strategy_ids.map(String) : [])];
   if (!ids.length || ids.length > 20) throw new Error("strategy_ids must contain 1-20 values");
-  const publicDefinitions = await loadDefinitions(env);
+  const publicDefinitions = await loadDefinitions(env, ids);
   const definitions = [...publicDefinitions, ...privateDefinitions(body, publicDefinitions)];
   const byId = new Map(definitions.map(definition => [definition?.strategy?.id, definition]));
   const selected = ids.map(id => byId.get(id)).filter(Boolean);
   if (selected.length !== ids.length) throw new Error("one or more strategy IDs are unknown");
   const snapshots = new Map(await Promise.all(selected.map(async definition => [
-    definition.strategy.id, await notificationSnapshot(env, definition.strategy.id),
+    definition.strategy.id, await notificationSnapshot(env, definition.strategy.id, client),
   ])));
   const unseeded = selected.filter(definition => !snapshots.get(definition.strategy.id)).map(definition => definition.strategy.id);
   if (unseeded.length) throw new Error(`notification seed is required: ${unseeded.join(", ")}`);
@@ -863,7 +953,7 @@ async function portfolioValuations(request, env) {
       ...valuePortfolioSnapshot(snapshot, refreshed.data),
     };
     if (!preview) await env.MARKET_DATA.put(
-      `portfolio-valuation:${definition.strategy.id}`,
+      `portfolio-valuation:${client === "legacy" ? "" : client+":"}${definition.strategy.id}`,
       JSON.stringify({...valuation, valued_at: new Date().toISOString()}),
     );
     valuations.push(valuation);
@@ -880,9 +970,11 @@ async function portfolioValuations(request, env) {
 async function notificationBootstrap(request, env) {
   requireNotificationAuth(request, env);
   const body = await request.json();
+  const client = String(body.client_id || "legacy");
+  if (!/^[\w-]{1,160}$/.test(client)) throw new Error("invalid notification client");
   const ids = [...new Set(Array.isArray(body.strategy_ids) ? body.strategy_ids.map(String) : [])];
   if (!ids.length || ids.length > 20) throw new Error("strategy_ids must contain 1-20 values");
-  const publicDefinitions = await loadDefinitions(env);
+  const publicDefinitions = await loadDefinitions(env, ids);
   const definitions = [...publicDefinitions, ...privateDefinitions(body, publicDefinitions)];
   const byId = new Map(definitions.map(definition => [definition?.strategy?.id, definition]));
   const selected = ids.map(id => byId.get(id)).filter(Boolean);
@@ -913,16 +1005,55 @@ async function notificationBootstrap(request, env) {
         latest_context: context,
       },
     };
-    await saveNotificationSnapshot(env, definition.strategy.id, snapshot);
+    const previous = await notificationSnapshot(env, definition.strategy.id, client);
+    snapshot.notification_revision = previous?.notification_revision || 0;
+    snapshot.notification_outbox = previous?.notification_outbox || [];
+    await saveNotificationSnapshot(env, definition.strategy.id, snapshot, client);
     seeded.push({strategy_id: definition.strategy.id, seeded_at: snapshot.date});
   }
   return response({seeded});
 }
 
 export default {
+  async scheduled(_event,env,ctx) {
+    if (!env.NOTIFICATION_JOBS || !env.MARKET_DATA) return;
+    const recover=async()=>{
+      let cursor;
+      do {
+        const page=await env.MARKET_DATA.list({prefix:"notification-recovery-client:",limit:100,...(cursor?{cursor}:{})});
+        for(const key of page.keys)await env.NOTIFICATION_JOBS.getByName(key.name.slice("notification-recovery-client:".length)).ensureScheduled();
+        cursor=page.list_complete?null:page.cursor;
+      } while(cursor);
+    };
+    ctx.waitUntil(recover());
+  },
   async fetch(request, env, ctx) {
     if (request.method === "OPTIONS") return new Response(null, {headers: CORS_HEADERS});
     const url = new URL(request.url);
+    if (request.method === "POST" && url.pathname === "/notification-pause") {
+      try {
+        requireNotificationAuth(request,env);const body=await request.json();
+        if (!/^[\w-]{1,160}$/.test(String(body.client_id || ""))) throw new Error("invalid client");
+        if (env.NOTIFICATION_JOBS) await env.NOTIFICATION_JOBS.getByName(body.client_id).pause();
+        return response({paused:true},200,{"Cache-Control":"no-store"});
+      } catch { return response({error:"pause failed"},400); }
+    }
+    if (request.method === "POST" && ["/notification-claims", "/notification-acks"].includes(url.pathname)) {
+      try {
+        requireNotificationAuth(request, env);
+        const body = await request.json();
+        if (!/^[\w-]{1,160}$/.test(String(body.client_id || "legacy")) || !/^[\w-]{1,160}$/.test(String(body.owner || "")) || !Array.isArray(body.events) || body.events.length > 100) throw new Error("invalid delivery request");
+        const claimed = [];
+        for (const item of body.events) {
+          if (typeof item.strategy_id !== "string" || typeof item.event_id !== "string") throw new Error("invalid event");
+          const store = notificationStore(env, item.strategy_id, body.client_id || "legacy");
+          if (!store) throw new Error("durable notification storage is required");
+          if (url.pathname === "/notification-claims") claimed.push(...await store.claim([item.event_id], body.owner));
+          else await store.ack([item.event_id], body.owner, body.message_id || null);
+        }
+        return response({claimed},200,{"Cache-Control":"no-store"});
+      } catch (error) { return response({error:error.message === "unauthorized" ? "unauthorized" : "delivery request failed"},error.message === "unauthorized" ? 401 : 400); }
+    }
     if (request.method === "POST" && url.pathname === "/notification-evaluations") {
       try { return await notificationEvaluation(request, env); }
       catch (error) { return response({error: error instanceof Error ? error.message : "notification evaluation failed"}, error?.message === "unauthorized" ? 401 : 400); }
@@ -944,6 +1075,7 @@ export default {
     }
     const cacheUrl = new URL(url);
     cacheUrl.searchParams.delete("runtime");
+    cacheUrl.searchParams.delete("refresh");
     const cacheTickers = cacheUrl.searchParams.get("tickers");
     if (cacheTickers) cacheUrl.searchParams.set("tickers", cacheTickers.split(",").sort().join(","));
     if (cacheTickers) {
@@ -954,7 +1086,18 @@ export default {
     }
     const cacheRequest = new Request(cacheUrl, request);
     const edgeCache = globalThis.caches?.default;
-    const cached = edgeCache ? await edgeCache.match(cacheRequest) : null;
+    let cached = edgeCache ? await edgeCache.match(cacheRequest) : null;
+    if (cached && url.searchParams.get("refresh") === "1" && env.MARKET_DATA) {
+      const old = await cached.clone().json().catch(() => null);
+      if (old && Object.values(old.price_freshness || {}).some(item => item.status !== "fresh")) {
+        const retryKey = `public-price-retry:${cacheTickers || ""}`;
+        const last = Number(await env.MARKET_DATA.get(retryKey) || 0);
+        if (Date.now() - last >= 60_000) {
+          await env.MARKET_DATA.put(retryKey, String(Date.now()), {expirationTtl:300});
+          cached = null;
+        }
+      }
+    }
     if (cached) {
       const headers = new Headers(cached.headers);
       headers.set("Server-Timing", 'edge-cache;desc="HIT"');

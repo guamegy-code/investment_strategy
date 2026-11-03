@@ -1,4 +1,15 @@
 {
   "version": 1,
-  "hidden_strategy_ids": []
+  "hidden_strategy_ids": [
+    "buy-3dip-bil",
+    "buy-3dip-bil-delayed-recovery",
+    "qqq-valuation-breakdown-balanced",
+    "qqq-valuation-breakdown-balanced-kodex-koact",
+    "band-7030-tdf-valuation-defense-kodex-koact",
+    "buy-3dip-bil-valuation-hybrid-80-98-99-100",
+    "buy-3dip-bil-valuation-hybrid-active",
+    "qqq-valuation-warning-dip-buyer",
+    "qqq-valuation-warning-dip-buyer-kodex-koact",
+    "band-7030-tdf-valuation-warning-dip-buyer-kodex-koact"
+  ]
 }

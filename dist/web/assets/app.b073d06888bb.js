@@ -10,6 +10,7 @@ let hostedResultFiles = {};
 let hostedResultCurrencies = {};
 const hostedResultCache = new Map();
 const proxyUrl = bundle.data_proxy || localStorage.getItem('investment-strategy:data-proxy') || '';
+const webRecovery={prices:new Map(),strategies:new Map(),forceResults:new Set(),timers:new Map(),attempts:new Map(),busy:false};
 
 function bytesFromBase64(text) {
   const binary = atob(text), bytes = new Uint8Array(binary.length);
@@ -412,7 +413,7 @@ runDashboard=async function(requestedRevision){
     const cached=bundle.precomputed_results_currency==='KRW'?await loadPrecomputedResults():{};
     const settled=await Promise.allSettled(selected.map(async def=>{
       const current=dashboardResults.get(def.strategy.id);
-      if(current)return current;
+      if(current&&!webRecovery.forceResults.has(def.strategy.id))return current;
       const saved=cached[def.strategy.id]||await loadHostedPrecomputedResult(def.strategy.id)||[];
       return [def,saved.length?saved:await run(def)];
     }));
@@ -426,7 +427,7 @@ runDashboard=async function(requestedRevision){
     return true;
   }catch(error){
     if(revision!==dashboardRunRevision)return false;
-    clearDashboardVisuals();
+    if(!dashboardResults.size)clearDashboardVisuals();
     $('status').textContent=`오류: ${error.message}`;
     console.error(error);
     return true;
@@ -753,11 +754,11 @@ function earliestCachedDate(rows){return rows.reduce((earliest,row)=>row.Date&&(
 function mergeTickerRows(existing,incoming){const merged=new Map((existing||[]).map(row=>[row.Date,row]));for(const row of incoming)merged.set(row.Date,row);return addStrategyIndicators([...merged.values()].sort((left,right)=>left.Date.localeCompare(right.Date)));}
 const proxyTickerFreshness=new Map(),proxyRequests=new Map();
 const PROXY_REFRESH_INTERVAL_MS=15*60*1000;
-async function fetchProxyTickerData(data,tickers,historyStart=null,includeLabels=false){
+async function fetchProxyTickerData(data,tickers,historyStart=null,includeLabels=false,refresh=false){
   const now=Date.now(),groups=new Map();
   for(const ticker of [...new Set(tickers.filter(isDataProxyTicker))]){
     const rows=data[ticker]||[],earliest=earliestCachedDate(rows),requiredStart=historyStart&&(!earliest||earliest>historyStart)?historyStart:null;
-    if(!includeLabels&&!requiredStart&&rows.length&&now-(proxyTickerFreshness.get(ticker)||0)<PROXY_REFRESH_INTERVAL_MS)continue;
+    if(!refresh&&!includeLabels&&!requiredStart&&rows.length&&now-(proxyTickerFreshness.get(ticker)||0)<PROXY_REFRESH_INTERVAL_MS)continue;
     const start=requiredStart||latestCachedDate(rows)||'2010-01-01';
     (groups.get(start)||groups.set(start,[]).get(start)).push(ticker);
   }
@@ -770,15 +771,24 @@ async function fetchProxyTickerData(data,tickers,historyStart=null,includeLabels
     if(proxyRequests.has(requestKey))return proxyRequests.get(requestKey);
     const request=(async()=>{
       const endpoint=new URL('/prices',proxyUrl);endpoint.searchParams.set('tickers',requested.join(','));endpoint.searchParams.set('start',startDate);if(includeLabels)endpoint.searchParams.set('include_labels','1');
+      if(refresh)endpoint.searchParams.set('refresh','1');
+      for(const ticker of requested)webDataState(ticker,{status:'loading'});
       try{
-        const response=await fetch(endpoint,{cache:'default'}),payload=await response.json();
+        const response=await fetch(endpoint,{cache:'default',signal:AbortSignal.timeout(25000)}),payload=await response.json();
         if(!response.ok)throw Error(payload.error||'시장 데이터 다운로드에 실패했습니다.');
         for(const [ticker,label] of Object.entries(payload.labels||{}))if(typeof label==='string'&&label.trim())indicatorTickerLabels[ticker]=label.trim();
         await Promise.all(Object.entries(payload.data||{}).map(async([ticker,rows])=>{
           const incoming=rows.map(row=>({Date:row.date,Open:row.open,High:row.high,Low:row.low,Close:row.close,Volume:row.volume,RawClose:row.raw_close??row.close,Dividends:row.dividends??0})),merged=mergeTickerRows(data[ticker],incoming);
-          data[ticker]=merged;proxyTickerFreshness.set(ticker,Date.now());await saveCachedPrices(ticker,merged);
+          data[ticker]=merged;
+          const freshness=payload.price_freshness?.[ticker],latest=latestCachedDate(merged);
+          const ready=(!freshness||freshness.status==='fresh')&&(!freshness?.expected_session||latest>=freshness.expected_session);
+          if(ready)proxyTickerFreshness.set(ticker,Date.now());else proxyTickerFreshness.delete(ticker);
+          await saveCachedPrices(ticker,merged);
+          webDataState(ticker,{status:ready?'ready':'stale',latest,expected:freshness?.expected_session||null,error:ready?'':'최신 확정 자료를 기다리고 있습니다.'});
         }));
+        for(const ticker of requested)if(!payload.data?.[ticker])webDataState(ticker,{status:'failed',latest:latestCachedDate(data[ticker]||[]),error:'요청한 종목 자료가 응답에 없습니다.'});
       }catch(error){
+        for(const ticker of requested)webDataState(ticker,{status:'failed',latest:latestCachedDate(data[ticker]||[]),error:'자료 갱신 실패. 저장된 자료가 있으면 이전 결과를 표시합니다.'});
         const unavailable=requested.filter(ticker=>!(data[ticker]||[]).length);
         if(unavailable.length){const message=error instanceof TypeError&&/fetch/i.test(error.message)?`데이터 프록시(${endpoint.origin})에 연결할 수 없습니다. Cloudflare Worker 배포 주소와 상태를 확인하세요.`:error instanceof Error?error.message:'시장 데이터 다운로드에 실패했습니다.';throw Error(message);}
         console.warn('시장 데이터 갱신이 지연되어 저장된 데이터를 사용합니다.',{tickers:requested,error:error instanceof Error?error.message:String(error)});
@@ -900,13 +910,68 @@ function backgroundRun(def,data,all){
   return new Promise((resolve,reject)=>{
     const source=`let latestBrowserNotificationContext=null;\n${runtime}\ninstallRotation(Declarative);\ninstallRotationStability(Declarative);\ninstallRotationSuspension(Declarative);\ninstallFinalTargetRebalance(Declarative);\ninstallBrowserNotificationContext(Declarative);\ninstallBrowserNotificationRecording(Portfolio);\ninstallRotationRiskCap(Declarative);\nself.onmessage=event=>{try{self.postMessage({history:runWithData(event.data.def,event.data.data,event.data.all)});}catch(error){self.postMessage({error:error.message||String(error)});}};`;
     const url=URL.createObjectURL(new Blob([source],{type:'text/javascript'})),worker=new Worker(url);
-    const finish=()=>{worker.terminate();URL.revokeObjectURL(url);};
+    const finish=()=>{clearTimeout(timeout);worker.terminate();URL.revokeObjectURL(url);};
+    const timeout=setTimeout(()=>{finish();const error=Error('전략 계산 시간이 초과됐습니다. 다시 계산해 주세요.');error.code='WORKER_TIMEOUT';reject(error);},30000);
     worker.onmessage=event=>{finish();event.data.error?reject(Error(event.data.error)):resolve(event.data.history);};
     worker.onerror=event=>{finish();reject(event.error||Error(event.message));};
     worker.postMessage({def,data,all});
   });
 }
-async function run(def,{requireNotificationContext=false}={}){const data=await downloadMissingData(def),key=await resultKey(def,data),cached=await cachedResult(key).catch(()=>null),hasRequiredContext=!requireNotificationContext||cached?.notificationContextVersion===NOTIFICATION_CONTEXT_VERSION;if(cached?.history&&hasRequiredContext){try{return validateCalculatedHistory(cached.history);}catch(error){console.warn('유효하지 않은 계산 캐시를 다시 계산합니다.',error);}}let history;try{history=await backgroundRun(def,data,definitions);}catch(error){console.warn(`Worker calculation unavailable for ${def.strategy.id}; using the main thread.`,error);history=runWithData(def,data);}validateCalculatedHistory(history);saveCachedResult(key,{history,notificationContextVersion:NOTIFICATION_CONTEXT_VERSION,savedAt:new Date().toISOString()}).catch(()=>{});return history;}
+async function calculateStrategy(def,{requireNotificationContext=false}={}){const data=await downloadMissingData(def),key=await resultKey(def,data),cached=webRecovery.forceResults.has(def.strategy.id)?null:await cachedResult(key).catch(()=>null),hasRequiredContext=!requireNotificationContext||cached?.notificationContextVersion===NOTIFICATION_CONTEXT_VERSION;if(cached?.history&&hasRequiredContext){try{return validateCalculatedHistory(cached.history);}catch(error){console.warn('유효하지 않은 계산 캐시를 다시 계산합니다.',error);}}let history;try{history=await backgroundRun(def,data,definitions);}catch(error){if(error.code==='WORKER_TIMEOUT')throw error;console.warn(`Worker calculation unavailable for ${def.strategy.id}; using the main thread.`,error);history=runWithData(def,data);}validateCalculatedHistory(history);saveCachedResult(key,{history,notificationContextVersion:NOTIFICATION_CONTEXT_VERSION,savedAt:new Date().toISOString()}).catch(()=>{});return history;}
+async function run(def,options={}){
+  webRecovery.strategies.set(def.strategy.id,{name:def.strategy.name,status:'loading'});renderWebRecovery();
+  try{
+    const history=await calculateStrategy(def,options),end=$('end-date')?.value;
+    const stale=strategyDependencies(def).tickers.some(ticker=>{const item=webRecovery.prices.get(ticker);return item&&['stale','failed'].includes(item.status)&&(!end||!item.latest||item.latest<end);});
+    webRecovery.strategies.set(def.strategy.id,{name:def.strategy.name,status:stale?'previous':'ready',latest:history.at(-1)?.date});
+    webRecovery.forceResults.delete(def.strategy.id);return history;
+  }catch(error){webRecovery.strategies.set(def.strategy.id,{name:def.strategy.name,status:'failed',error:String(error.message||error)});throw error;}
+  finally{renderWebRecovery();}
+}
+
+function webDataState(ticker,update){
+  const prior=webRecovery.prices.get(ticker)||{};
+  webRecovery.prices.set(ticker,{...prior,...update,checkedAt:new Date().toISOString()});renderWebRecovery();
+  if(['failed','stale'].includes(update.status)&&!webRecovery.timers.has(ticker)&&(webRecovery.attempts.get(ticker)||0)<2){
+    const delay=60_000*2**(webRecovery.attempts.get(ticker)||0);
+    webRecovery.attempts.set(ticker,(webRecovery.attempts.get(ticker)||0)+1);
+    webRecovery.timers.set(ticker,setTimeout(()=>{webRecovery.timers.delete(ticker);if(!document.hidden)void retryWebsite('data',ticker);},delay));
+  }
+  if(update.status==='ready'&&webRecovery.timers.has(ticker)){clearTimeout(webRecovery.timers.get(ticker));webRecovery.timers.delete(ticker);webRecovery.attempts.delete(ticker);}
+}
+function renderWebRecovery(){
+  let panel=$('data-recovery');
+  if(!panel){
+    const status=$('status');if(!status)return;
+    panel=document.createElement('details');panel.id='data-recovery';panel.className='card';panel.style.cssText='margin:12px 0;padding:12px;';
+    status.insertAdjacentElement('afterend',panel);
+    panel.addEventListener('click',event=>{const button=event.target.closest('button[data-recovery-action]');if(button)void retryWebsite(button.dataset.recoveryAction,button.dataset.recoveryId||'');});
+  }
+  const labels={loading:'처리 중',ready:'완료',stale:'자료 지연',failed:'실패',previous:'이전 자료로 계산'};
+  const escape=value=>String(value||'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+  const rows=[...webRecovery.prices].map(([id,item])=>({id,item,name:id,action:'data'})).concat([...webRecovery.strategies].map(([id,item])=>({id,item,name:item.name,action:'calculate'})));
+  const failed=rows.filter(({item})=>['stale','failed','previous'].includes(item.status));
+  const loading=rows.some(({item})=>item.status==='loading');
+  if(failed.length)panel.open=true;
+  panel.innerHTML=`<summary>데이터·계산 상태 · ${webRecovery.bootstrapError?'전략 목록 로드 실패':failed.length?`${failed.length}개 확인 필요`:loading?'처리 중':rows.length?'완료':'대기'}${webRecovery.busy?' · 재시도 중':''}</summary>${webRecovery.bootstrapError?`<p>${escape(webRecovery.bootstrapError)}</p>`:''}<div style="margin-top:10px"><button class="btn btn-sm" data-recovery-action="all" ${webRecovery.busy?'disabled':''}>실패 항목 다시 시도</button></div><ul style="margin-top:10px">${rows.map(({id,item,name,action})=>`<li>${escape(name)} · ${labels[item.status]}${item.latest?` · 자료/계산 기준일 ${escape(item.latest)}`:''}${item.expected?` · 기대 자료일 ${escape(item.expected)}`:''}${item.checkedAt?` · 조회 ${escape(item.checkedAt)}`:''}${item.error?`<br>${escape(item.error)}`:''} ${['failed','stale','previous'].includes(item.status)?`<button class="btn btn-sm" data-recovery-action="${action}" data-recovery-id="${escape(id)}" ${webRecovery.busy?'disabled':''}>${action==='data'?'데이터 다시 받기':'전략 다시 계산'}</button>`:''}</li>`).join('')}</ul>`;
+}
+async function retryWebsite(action,id=''){
+  if(webRecovery.busy)return;webRecovery.busy=true;renderWebRecovery();
+  try{
+    if(webRecovery.bootstrapError){await bootstrapDashboard();webRecovery.bootstrapError=null;return;}
+    const selected=selectedDefinitions(),badTickers=[...webRecovery.prices].filter(([,item])=>['failed','stale'].includes(item.status)).map(([ticker])=>ticker);
+    const tickers=action==='data'?[id]:action==='all'?badTickers:[];
+    if(tickers.length){
+      for(const ticker of tickers)proxyTickerFreshness.delete(ticker);
+      const data=await loadData();await fetchProxyTickerData(data,tickers,null,false,true);
+    }
+    const affected=selected.filter(def=>action==='calculate'?def.strategy.id===id:strategyDependencies(def).tickers.some(ticker=>tickers.includes(ticker))||webRecovery.strategies.get(def.strategy.id)?.status==='failed');
+    for(const def of affected)webRecovery.forceResults.add(def.strategy.id);
+    await runDashboard();
+    if(!$('indicators-view')?.classList.contains('offline-hidden'))await renderIndicators();
+  }catch(error){$('status').textContent=`재시도 오류: ${error.message}`;}
+  finally{webRecovery.busy=false;renderWebRecovery();}
+}
 globalThis.OfflineStrategyRuntime={...globalThis.OfflineStrategyRuntime,addStrategyIndicators,validateStrategy,strategyDependencies,runWithData};
 function indicatorTickerData(data){
   const visible=new Set();
@@ -1074,10 +1139,14 @@ async function loadHostedStrategies(){
     }
     return definition;
   }));
+  for(const definition of loaded){
+    if(hiddenStrategyIds.has(definition?.strategy?.id))definition.strategy.enabled=false;
+  }
   const state=loadUiState();
   const imported=(state.importedDefinitions||[])
     .map(migrateStrategyDefinition)
     .filter(definition=>definition?.strategy?.id)
+    .filter(definition=>!hiddenStrategyIds.has(definition.strategy.id))
     .filter(definition=>{
       const hosted=loaded.find(item=>item?.strategy?.id===definition.strategy.id);
       return hosted?.strategy?.enabled!==false;
@@ -1136,7 +1205,7 @@ async function bootstrapDashboard(){
   }
   await setupDashboard();
 }
-bootstrapDashboard().catch(error=>{$('status').textContent=`오류: ${error.message}`;});
+bootstrapDashboard().catch(error=>{$('status').textContent=`오류: ${error.message}`;webRecovery.bootstrapError=String(error.message||error);renderWebRecovery();});
 
 // Keep product-backed instruments readable throughout indicator research while
 // retaining the ticker as the stable value used by selection and calculation.

@@ -63,7 +63,7 @@ class OfflineExportTests(unittest.TestCase):
         self.assertIn(hosted_guard, load_data)
         self.assertIn(archive_fetch, load_data)
         self.assertLess(load_data.index(hosted_guard), load_data.index(archive_fetch))
-        self.assertIn("fetch(endpoint,{cache:'default'})", runtime)
+        self.assertIn("fetch(endpoint,{cache:'default',signal:AbortSignal.timeout(25000)})", runtime)
         self.assertIn("const proxyTickerFreshness=new Map(),proxyRequests=new Map()", runtime)
 
     def test_dashboard_restores_saved_selection_before_the_list_is_visible(self):

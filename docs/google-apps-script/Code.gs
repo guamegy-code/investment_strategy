@@ -50,10 +50,16 @@ function installTriggers() {
 
 function runNotificationCheck() {
   const lock = LockService.getScriptLock();
-  if (!lock.tryLock(1000)) return;
+  if (!lock.tryLock(1000)) { Logger.log('SKIPPED_LOCKED'); return; }
   try {
     const now = new Date();
-    if (!withinNotificationWindow_(now)) {
+    const subscriptions = enabledSubscriptions_();
+    if (!subscriptions.length) {
+      pauseRecovery_();
+      logRun_(0,0,'SKIPPED_NO_SUBSCRIPTIONS','알림 전략 선택이 없어 자동 복구도 중지했습니다.');
+      return;
+    }
+    if (!withinNotificationWindow_(now) && !withinRecoveryWindow_(now)) {
       logRun_(0, 0, 'SKIPPED_OUTSIDE_WINDOW', '설정된 알림 시간대 밖입니다.');
       return;
     }
@@ -61,20 +67,23 @@ function runNotificationCheck() {
       logRun_(0, 0, 'SKIPPED_KRX_CLOSED', '한국거래소 휴장일이므로 시장 평가를 다음 거래일로 미룹니다.');
       return;
     }
-    const subscriptions = enabledSubscriptions_();
-    if (!subscriptions.length) {
-      logRun_(0, 0, 'SKIPPED_NO_SUBSCRIPTIONS', '알림 전략 시트에서 체크된 전략이 없습니다.');
-      return;
-    }
     const evaluations = requestEvaluations_(subscriptions);
     const pendingAlerts = [];
     const decisions = [];
+    const owner = typeof Utilities.getUuid === 'function' ? Utilities.getUuid() : `run-${Date.now()}`;
     evaluations.forEach(evaluation => {
       updateSubscription_(evaluation);
       let alerts = evaluationAlerts_(evaluation);
       const receivedAlerts = alerts.length;
-      alerts = alerts.filter(alert => !eventAlreadySent_(eventKey_(alert)));
-      const summary = scheduledSummaryDue_(evaluation.scheduled_summary, now);
+      alerts = alerts.filter(alert => {
+        if (!eventAlreadySent_(eventKey_(alert))) return true;
+        if (alert.event_id) {
+          const claimed = deliveryRequest_('/notification-claims', [alert], owner).claimed || [];
+          if (claimed.includes(alert.event_id)) deliveryRequest_('/notification-acks', [alert], owner);
+        }
+        return false;
+      });
+      const summary = evaluation.evaluation_status === 'BLOCKED' ? null : scheduledSummaryDue_(evaluation.scheduled_summary, now);
       const summaryDuplicate = Boolean(summary && eventAlreadySent_(eventKey_(summary)));
       const decision = {
         strategy_id: evaluation.strategy_id, market_data_at: evaluation.market_data_at,
@@ -100,15 +109,23 @@ function runNotificationCheck() {
     });
     pendingAlerts.sort((left, right) => String(left.market_data_at).localeCompare(String(right.market_data_at)));
     notificationBatches_(pendingAlerts).forEach(batch => {
-      sendTelegram_(batch.map(event => messageFor_(event)).join('\n\n────────\n\n'));
+      const persistent = batch.filter(event => event.event_id);
+      const claimed = persistent.length ? new Set(deliveryRequest_('/notification-claims', persistent, owner).claimed || []) : new Set();
+      batch = batch.filter(event => !event.event_id || claimed.has(event.event_id));
+      if (!batch.length) return;
+      const messageId = sendTelegram_(batch.map(event => messageFor_(event)).join('\n\n────────\n\n'));
+      if (batch.some(event => event.event_id)) deliveryRequest_('/notification-acks', batch.filter(event => event.event_id), owner, messageId);
       batch.forEach(event => {
         recordEvent_(event, 'SENT');
         if (event.coalesced_summary) recordEvent_(event.coalesced_summary, 'COALESCED');
       });
     });
-    logRun_(subscriptions.length, pendingAlerts.length, 'SUCCESS', JSON.stringify(decisions));
+    const blocked = evaluations.filter(evaluation => evaluation.evaluation_status === 'BLOCKED');
+    if (blocked.length) notifyFailure_(`최신 평가 대기: ${blocked.map(item => `${item.strategy_name || item.strategy_id} (마지막 ${item.market_data_at})`).join(', ')}. 자동 복구를 계속합니다.`);
+    logRun_(subscriptions.length, pendingAlerts.length, blocked.length ? 'RECOVERING' : 'SUCCESS', JSON.stringify(decisions));
   } catch (error) {
-    logRun_(0, 0, 'FAILED', error.message || String(error));
+    try { notifyFailure_('알림 평가 또는 전송을 완료하지 못했습니다. 저장된 작업을 자동 재시도합니다.'); } catch {}
+    logRun_(0, 0, 'FAILED', safeError_(error));
     throw error;
   } finally {
     lock.releaseLock();
@@ -179,13 +196,15 @@ function requestPreviewWithSeed_(subscriptions) {
   } catch (error) {
     const message = String(error?.message || error);
     if (!message.includes('notification seed is required:')) throw error;
-    initializeNotificationStates();
+    const missing = message.match(/notification seed is required:\s*([^"}]+)/);
+    if (!missing) throw error;
+    initializeNotificationStates(missing[1].split(',').map(id=>id.trim()));
     return requestEvaluations_(subscriptions, true);
   }
 }
 
-function initializeNotificationStates() {
-  const subscriptions = enabledSubscriptions_();
+function initializeNotificationStates(onlyIds) {
+  const subscriptions = enabledSubscriptions_().filter(item=>!Array.isArray(onlyIds)||onlyIds.includes(item.strategyId));
   if (!subscriptions.length) throw new Error('알림 전략 시트에서 초기화할 전략을 체크하세요.');
   const settings = PropertiesService.getScriptProperties();
   const url = requiredProperty_(settings, 'EVALUATION_API_URL').replace(/\/notification-evaluations$/, '/notification-bootstrap');
@@ -196,7 +215,7 @@ function initializeNotificationStates() {
     const response = UrlFetchApp.fetch(url, {
       method: 'post', contentType: 'application/json', muteHttpExceptions: true,
       headers: {Authorization: `Bearer ${key}`},
-      payload: JSON.stringify({strategy_ids: [item.strategyId], private_strategies: privateYamlById.has(item.strategyId) ? [{strategy_id: item.strategyId, yaml: privateYamlById.get(item.strategyId)}] : []}),
+      payload: JSON.stringify({strategy_ids: [item.strategyId], client_id:notificationClientId_(), private_strategies: privateYamlById.has(item.strategyId) ? [{strategy_id: item.strategyId, yaml: privateYamlById.get(item.strategyId)}] : []}),
     });
     if (response.getResponseCode() === 200) seeded.push(...(JSON.parse(response.getContentText()).seeded || []));
     else failed.push(`${item.strategyId}: ${response.getContentText()}`);
@@ -210,6 +229,59 @@ function withinNotificationWindow_(date) {
   const parts = Utilities.formatDate(date || new Date(), KST, 'H,m').split(',').map(Number);
   const minute = parts[0] * 60 + parts[1];
   return minute >= NOTIFICATION_WINDOW_START_MINUTE && minute < NOTIFICATION_WINDOW_END_MINUTE;
+}
+
+function withinRecoveryWindow_(date) {
+  const hour = Number(Utilities.formatDate(date, KST, 'H,m').split(',')[0]);
+  return hour >= 9 && hour < 16;
+}
+
+function notificationClientId_() {
+  return typeof ScriptApp !== 'undefined' && typeof ScriptApp.getScriptId === 'function' ? ScriptApp.getScriptId() : 'legacy';
+}
+
+function pauseRecovery_() {
+  const settings=PropertiesService.getScriptProperties();
+  const url=requiredProperty_(settings,'EVALUATION_API_URL').replace(/\/notification-evaluations$/,'/notification-pause');
+  const response=UrlFetchApp.fetch(url,{method:'post',contentType:'application/json',muteHttpExceptions:true,
+    headers:{Authorization:`Bearer ${requiredProperty_(settings,'EVALUATION_API_KEY')}`},payload:JSON.stringify({client_id:notificationClientId_()})});
+  if(response.getResponseCode()!==200)throw Error('자동 복구 중지 요청에 실패했습니다.');
+}
+
+function recoverySchedule_() {
+  const dates=[];
+  for(let key=addKstDays_(new Date(),1),count=0;dates.length<5&&count<20;key=addKstDays_(key,1),count++){
+    if(isKrxTradingDay_(key))dates.push(`${key}T08:15:00+09:00`);
+  }
+  return dates;
+}
+
+function deliveryRequest_(path, events, owner, messageId) {
+  const settings = PropertiesService.getScriptProperties();
+  const url = requiredProperty_(settings, 'EVALUATION_API_URL').replace(/\/notification-evaluations$/, path);
+  const reply = UrlFetchApp.fetch(url, {method:'post', contentType:'application/json', muteHttpExceptions:true,
+    headers:{Authorization:`Bearer ${requiredProperty_(settings, 'EVALUATION_API_KEY')}`},
+    payload:JSON.stringify({client_id:notificationClientId_(), owner, message_id:messageId || null,
+      events:events.map(event=>({strategy_id:event.strategy_id,event_id:event.event_id}))})});
+  if (reply.getResponseCode() !== 200) throw new Error('알림 전달 상태 저장 실패. 자동 재시도합니다.');
+  return JSON.parse(reply.getContentText());
+}
+
+function safeError_(error) {
+  let text = String(error?.message || error);
+  const settings = PropertiesService.getScriptProperties();
+  for (const key of ['TELEGRAM_BOT_TOKEN','EVALUATION_API_KEY']) {
+    const secret = settings.getProperty(key); if (secret) text = text.split(secret).join('[REDACTED]');
+  }
+  return text;
+}
+
+function notifyFailure_(text) {
+  const settings = PropertiesService.getScriptProperties();
+  const last = Number(settings.getProperty('LAST_FAILURE_NOTICE_AT') || 0);
+  if (Date.now() - last < 30*60*1000) return;
+  sendTelegram_(`[투자 전략 오류]\n${text}`);
+  settings.setProperty('LAST_FAILURE_NOTICE_AT',String(Date.now()));
 }
 
 function isWeeklySummaryDay_(date) {
@@ -340,7 +412,8 @@ function requestEvaluations_(subscriptions, preview) {
   const response = UrlFetchApp.fetch(url, {
     method: 'post', contentType: 'application/json', muteHttpExceptions: true,
     headers: {Authorization: `Bearer ${key}`},
-    payload: JSON.stringify({strategy_ids: subscriptions.map(item => item.strategyId), last_evaluated_dates: lastDates, private_strategies: privateStrategies, preview: preview === true}),
+    payload: JSON.stringify({strategy_ids: subscriptions.map(item => item.strategyId), last_evaluated_dates: lastDates, private_strategies: privateStrategies, preview: preview === true,
+      client_id:notificationClientId_(), recovery_schedule:preview ? [] : recoverySchedule_(), delivery:preview ? null : {token:settings.getProperty?.('TELEGRAM_BOT_TOKEN') || '',chat_id:settings.getProperty?.('TELEGRAM_CHAT_ID') || ''}}),
   });
   if (response.getResponseCode() !== 200) throw new Error(`평가 API 오류 (${response.getResponseCode()}): ${response.getContentText()}`);
   const payload = JSON.parse(response.getContentText());
@@ -373,6 +446,7 @@ function refreshPortfolioValuations() {
     headers: {Authorization: `Bearer ${key}`},
     payload: JSON.stringify({
       strategy_ids: subscriptions.map(item => item.strategyId),
+      client_id: notificationClientId_(),
       private_strategies: privateStrategies_(subscriptions),
     }),
   });
@@ -403,15 +477,25 @@ function sendTelegram_(text) {
   const settings = PropertiesService.getScriptProperties();
   const token = requiredProperty_(settings, 'TELEGRAM_BOT_TOKEN');
   const chatId = requiredProperty_(settings, 'TELEGRAM_CHAT_ID');
+  if (Date.now() < Number(settings.getProperty('TELEGRAM_RETRY_AT') || 0)) throw new Error('Telegram 재시도 대기 중입니다.');
+  const plain = String(text).replace(/\[\[\/?[BC]\]\]/g,'');
+  if (plain.length > 3500) {
+    let messageId;
+    const characters = Array.from(plain);
+    for(let start=0;start<characters.length;start+=3400) messageId=sendTelegram_(characters.slice(start,start+3400).join(''));
+    return messageId;
+  }
   const html = telegramHtml_(text);
   const response = UrlFetchApp.fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
     method: 'post', payload: {chat_id: chatId, text: html, parse_mode: 'HTML'}, muteHttpExceptions: true,
   });
   const result = JSON.parse(response.getContentText());
   if (response.getResponseCode() !== 200 || result.ok !== true) {
+    if (result.parameters?.retry_after) settings.setProperty('TELEGRAM_RETRY_AT',String(Date.now()+Number(result.parameters.retry_after)*1000));
     const description = String(result.description || 'Unknown error').split(token).join('[REDACTED]');
     throw new Error(`Telegram 오류 (${result.error_code || response.getResponseCode()}): ${description}`);
   }
+  return result.result?.message_id || null;
 }
 
 function eventKey_(evaluation) {

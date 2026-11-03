@@ -201,3 +201,40 @@ test("a successful evaluation logs why its summary was not sent", () => {
   assert.equal(app.call("JSON.parse(recordedRun[3])[0].summary_status"), 'MISSING');
   assert.equal(app.call("recordedRun[1]"), 0);
 });
+
+test("an oversized event is delivered in bounded chunks",()=>{
+  const app=runtime();
+  app.call(`
+    const sentChunks=[];
+    requiredProperty_=()=> 'test';
+    UrlFetchApp={fetch:(_url,options)=>{sentChunks.push(options.payload.text);return {getResponseCode:()=>200,getContentText:()=>JSON.stringify({ok:true,result:{message_id:sentChunks.length}})};}};
+    sendTelegram_('x'.repeat(5104));
+  `);
+  assert.equal(app.call('sentChunks.length'),2);
+  assert.equal(app.call('sentChunks.every(text=>text.length<=4096)'),true);
+});
+
+test("blocked evaluations log recovery and emit an error notice instead of a normal summary",()=>{
+  const app=runtime();
+  app.call(`
+    let recordedRun,notices=0;
+    LockService={getScriptLock:()=>({tryLock:()=>true,releaseLock:()=>{}})};
+    withinNotificationWindow_=()=>true;isKrxTradingDay_=()=>true;
+    enabledSubscriptions_=()=>[{strategyId:'s'}];
+    requestEvaluations_=()=>[{strategy_id:'s',evaluation_status:'BLOCKED',market_data_at:'2026-10-28',alerts:[]}];
+    updateSubscription_=()=>{};notifyFailure_=()=>{notices++;};logRun_=(...args)=>{recordedRun=args};
+    runNotificationCheck();
+  `);
+  assert.equal(app.call('recordedRun[2]'),'RECOVERING');assert.equal(app.call('notices'),1);
+});
+
+test("preview initializes only the missing IDs from a JSON API error",()=>{
+  const app=runtime();
+  app.call(`
+    let seeded,attempt=0;
+    requestEvaluations_=()=>{if(!attempt++)throw Error('API error: '+JSON.stringify({error:'notification seed is required: new-strategy'}));return [];};
+    initializeNotificationStates=ids=>{seeded=ids;};
+    requestPreviewWithSeed_([{strategyId:'old-strategy'},{strategyId:'new-strategy'}]);
+  `);
+  assert.equal(app.call('JSON.stringify(seeded)'),JSON.stringify(['new-strategy']));
+});

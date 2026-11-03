@@ -47,7 +47,7 @@ class NotificationWorkerContractTests(unittest.TestCase):
         self.assertIn("function eventAlreadySent_(key)", source)
         self.assertIn("SHEETS.PERSONAL", source)
         self.assertIn("function privateStrategies_(subscriptions)", source)
-        self.assertIn("function initializeNotificationStates()", source)
+        self.assertIn("function initializeNotificationStates(onlyIds)", source)
         self.assertIn("function isWeeklySummaryDay_(date)", source)
         self.assertIn("function scheduledSummaryDue_(summary, date)", source)
         self.assertIn("function isKrxTradingDay_(dateOrKey)", source)

@@ -1,16 +1,23 @@
 {
   "version": 1,
-  "hidden_strategy_ids": [],
-  "enabled_bundle": "enabled.d832d0335a0e.json",
+  "hidden_strategy_ids": [
+    "buy-3dip-bil",
+    "buy-3dip-bil-delayed-recovery",
+    "qqq-valuation-breakdown-balanced",
+    "qqq-valuation-breakdown-balanced-kodex-koact",
+    "band-7030-tdf-valuation-defense-kodex-koact",
+    "buy-3dip-bil-valuation-hybrid-80-98-99-100",
+    "buy-3dip-bil-valuation-hybrid-active",
+    "qqq-valuation-warning-dip-buyer",
+    "qqq-valuation-warning-dip-buyer-kodex-koact",
+    "band-7030-tdf-valuation-warning-dip-buyer-kodex-koact"
+  ],
+  "enabled_bundle": "enabled.85dfb00e7ca4.json",
   "results": {
-    "profit-band-tdf2050": "../results/profit-band-tdf2050.260199001a21.json.gz",
-    "buy-3dip-bil": "../results/buy-3dip-bil.c0599d5e2522.json.gz",
-    "buy-3dip-bil-delayed-recovery": "../results/buy-3dip-bil-delayed-recovery.010dd4bb012a.json.gz"
+    "profit-band-tdf2050": "../results/profit-band-tdf2050.260199001a21.json.gz"
   },
   "result_currencies": {
-    "profit-band-tdf2050": "UNVERIFIED",
-    "buy-3dip-bil": "UNVERIFIED",
-    "buy-3dip-bil-delayed-recovery": "UNVERIFIED"
+    "profit-band-tdf2050": "UNVERIFIED"
   },
   "strategies": [
     {

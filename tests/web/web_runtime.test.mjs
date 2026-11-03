@@ -295,13 +295,13 @@ test('background worker includes validator closures and valuation calculations',
 });
 
 test('dashboard selection changes reuse completed strategies',()=>{
-  assert.match(source,/const current=dashboardResults\.get\(def\.strategy\.id\);\s*if\(current\)return current;/);
+  assert.match(source,/const current=dashboardResults\.get\(def\.strategy\.id\);\s*if\(current&&!webRecovery\.forceResults\.has\(def\.strategy\.id\)\)return current;/);
   assert.match(source,/\},80\);/);
 });
 
 test('price refreshes are deduplicated and browser-cacheable',()=>{
   assert.match(source,/const proxyTickerFreshness=new Map\(\),proxyRequests=new Map\(\)/);
-  assert.match(source,/fetch\(endpoint,\{cache:'default'\}\)/);
+  assert.match(source,/fetch\(endpoint,\{cache:'default',signal:AbortSignal\.timeout\(25000\)\}\)/);
   assert.doesNotMatch(source,/fetch\(endpoint,\{cache:'no-store'\}\)/);
 });
 
